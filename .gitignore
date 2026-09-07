@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Build output
+.next/
+out/
+dist/
+
+# Environment & secrets
+.env
+.env.local
+.env*.local
+
+# Databases (local dev artifacts)
+*.db
+*.db-journal
+*.sqlite3
+
+# Logs
+*.log
+
+# Uploads (user content)
+uploads/
+
+# Edge/browser profiles
+.edge-profile/
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# IDE
+.idea/
+.vscode/
+.claude/
+.agents/
+
+# Test artifacts
+cookies.txt
+test-results/
+playwright-report/

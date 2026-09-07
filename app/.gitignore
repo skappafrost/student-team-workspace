@@ -1,0 +1,72 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+.idea/
+# clerk configuration (can include secrets)
+/.clerk/
+
+
+# cursor 
+.cursorrules
+/memory-bank
+
+# Sentry Config File
+.env.sentry-build-plugin
+
+# STW debug/verify artifacts (never commit)
+*.log
+cookiejar.txt
+cookies.txt
+/collision-backup/
+/.collision-backup/
+/worktrees/
+/.worktrees/
+/playwright-report/
+/test-results/
+/e2e-debug*.mjs
+/e2e-debug*.png
+/e2e-debug*.html
+/e2e-*-result.json
+/debug-*.mjs
+/scripts/rm-next.py
+/scripts/verify-*.sh
+/scripts/verify-*.py
+/scripts/run-verify.sh
+.edge-profile/

@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stw-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stw_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stw_password}
+      POSTGRES_DB: ${POSTGRES_DB:-stw_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stw-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-stw_user}
+      DB_PASSWORD: ${DB_PASSWORD:-stw_password}
+      DB_NAME: ${DB_NAME:-stw_db}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-stw_user}:${POSTGRES_PASSWORD:-stw_password}@postgres:5432/${POSTGRES_DB:-stw_db}}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-super-secret-change-me-in-production}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+
+volumes:
+  postgres_data:

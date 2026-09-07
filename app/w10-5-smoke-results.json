@@ -1,0 +1,165 @@
+{
+  "base": "http://127.0.0.1:3001",
+  "api": "http://127.0.0.1:8000",
+  "testedAt": "2026-09-03T10:14:06.079Z",
+  "routes": [
+    {
+      "route": "/auth/sign-in",
+      "url": "http://127.0.0.1:3001/auth/sign-in",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=BqC5Rm_FjqLxjyN3",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        },
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/overview",
+      "url": "http://127.0.0.1:3001/dashboard/overview",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/projects",
+      "url": "http://127.0.0.1:3001/dashboard/projects",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/kanban",
+      "url": "http://127.0.0.1:3001/dashboard/kanban",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/calendar",
+      "url": "http://127.0.0.1:3001/dashboard/calendar",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/chat",
+      "url": "http://127.0.0.1:3001/dashboard/chat",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=BqC5Rm_FjqLxjyN3",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        },
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/wiki",
+      "url": "http://127.0.0.1:3001/dashboard/wiki",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=BqC5Rm_FjqLxjyN3",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        },
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/files",
+      "url": "http://127.0.0.1:3001/dashboard/files",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=BqC5Rm_FjqLxjyN3",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        },
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/notifications",
+      "url": "http://127.0.0.1:3001/dashboard/notifications",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=BqC5Rm_FjqLxjyN3",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        },
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    },
+    {
+      "route": "/dashboard/settings",
+      "url": "http://127.0.0.1:3001/dashboard/settings",
+      "status": "loaded",
+      "consoleErrors": [],
+      "failedRequests": [
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=BqC5Rm_FjqLxjyN3",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        },
+        {
+          "url": "http://127.0.0.1:3001/auth/sign-up?_rsc=Eb1IB9OaIZL7J0Wa",
+          "error": "net::ERR_ABORTED",
+          "canceled": true
+        }
+      ],
+      "nextError": null
+    }
+  ]
+}

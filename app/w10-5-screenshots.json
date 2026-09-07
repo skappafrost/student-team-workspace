@@ -1,0 +1,19 @@
+{
+  "screenshots": [
+    {
+      "route": "/dashboard/overview",
+      "path": "C:/Users/Ha Trung/Documents/Team-workspace/app/w10-5-overview.png",
+      "ok": true
+    },
+    {
+      "route": "/dashboard/chat",
+      "path": "C:/Users/Ha Trung/Documents/Team-workspace/app/w10-5-chat.png",
+      "ok": true
+    },
+    {
+      "route": "/dashboard/settings",
+      "path": "C:/Users/Ha Trung/Documents/Team-workspace/app/w10-5-settings.png",
+      "ok": true
+    }
+  ]
+}
