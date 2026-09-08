@@ -1,6 +1,6 @@
 """Database roundtrip tests for SQLAlchemy models and Alembic migration."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -23,7 +23,7 @@ from models import (
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @pytest.fixture(scope="function")
@@ -54,7 +54,13 @@ def test_models_roundtrip_one_row_per_table(db_session):
         description="Project one",
         status="active",
     )
-    channel = Channel(workspace_id=workspace.id, name="general", is_private=False, created_by=user.id, type="general")
+    channel = Channel(
+        workspace_id=workspace.id,
+        name="general",
+        is_private=False,
+        created_by=user.id,
+        type="general",
+    )
     document = Document(
         workspace_id=workspace.id,
         project_id=None,
@@ -119,8 +125,19 @@ def test_models_roundtrip_one_row_per_table(db_session):
 def test_alembic_migration_creates_all_tables(db_session):
     """Ensure Alembic-style schema contains every expected table."""
     engine = db_session.bind
-    tables = {"users", "workspaces", "workspace_members", "projects", "tasks",
-              "task_comments", "channels", "messages", "documents", "files", "events"}
+    tables = {
+        "users",
+        "workspaces",
+        "workspace_members",
+        "projects",
+        "tasks",
+        "task_comments",
+        "channels",
+        "messages",
+        "documents",
+        "files",
+        "events",
+    }
     with engine.connect() as conn:
         result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         existing = {row[0] for row in result}

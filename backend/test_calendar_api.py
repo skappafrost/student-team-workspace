@@ -5,14 +5,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Role
+from app import Role, app
 from database import Base
 from models import User
-
 
 # ---------------------------------------------------------------------------
 # Test database setup
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def db_session():
@@ -33,6 +33,7 @@ def client(db_session):
         return db_session
 
     from database import get_db
+
     app.dependency_overrides[get_db] = _get_db_override
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -41,6 +42,7 @@ def client(db_session):
 # ---------------------------------------------------------------------------
 # Auth / helper helpers (mirrors test_projects_api)
 # ---------------------------------------------------------------------------
+
 
 def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
     client.headers["X-Test-User-Id"] = user_id
@@ -52,7 +54,9 @@ def clear_auth(client: TestClient):
     client.headers.pop("X-Test-User-Role", None)
 
 
-def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
+def create_workspace(
+    client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"
+):
     as_user(client, user_id)
     resp = client.post("/workspaces", json={"name": name, "slug": slug, "description": "x"})
     assert resp.status_code == 201
@@ -96,6 +100,7 @@ def create_event(client, workspace_id, **overrides):
 # Happy paths
 # ---------------------------------------------------------------------------
 
+
 def test_create_event(client):
     ws = create_workspace(client, "owner")
     as_user(client, "owner")
@@ -126,7 +131,9 @@ def test_update_event_by_creator(client):
     as_user(client, "owner")
     event = create_event(client, ws["id"]).json()
 
-    resp = client.patch(f"/events/{event['id']}", json={"title": "Updated Title", "event_type": "exam"})
+    resp = client.patch(
+        f"/events/{event['id']}", json={"title": "Updated Title", "event_type": "exam"}
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["title"] == "Updated Title"
@@ -148,13 +155,33 @@ def test_list_events_date_range_filter(client):
     as_user(client, "owner")
 
     # Event inside the range
-    create_event(client, ws["id"], title="Inside", start_at="2026-08-28T09:00:00", end_at="2026-08-28T10:00:00")
+    create_event(
+        client,
+        ws["id"],
+        title="Inside",
+        start_at="2026-08-28T09:00:00",
+        end_at="2026-08-28T10:00:00",
+    )
     # Event before the range
-    create_event(client, ws["id"], title="Before", start_at="2026-08-27T09:00:00", end_at="2026-08-27T10:00:00")
+    create_event(
+        client,
+        ws["id"],
+        title="Before",
+        start_at="2026-08-27T09:00:00",
+        end_at="2026-08-27T10:00:00",
+    )
     # Event after the range
-    create_event(client, ws["id"], title="After", start_at="2026-08-29T09:00:00", end_at="2026-08-29T10:00:00")
+    create_event(
+        client,
+        ws["id"],
+        title="After",
+        start_at="2026-08-29T09:00:00",
+        end_at="2026-08-29T10:00:00",
+    )
 
-    resp = client.get(f"/workspaces/{ws['id']}/events?start=2026-08-28T00:00:00&end=2026-08-28T23:59:59")
+    resp = client.get(
+        f"/workspaces/{ws['id']}/events?start=2026-08-28T00:00:00&end=2026-08-28T23:59:59"
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -183,6 +210,7 @@ def test_all_day_event_no_end(client):
 # ---------------------------------------------------------------------------
 # RBAC
 # ---------------------------------------------------------------------------
+
 
 def test_member_can_create_and_view_event(client, db_session):
     ws = create_workspace(client, "owner")

@@ -5,14 +5,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Role
+from app import Role, app
 from database import Base, get_db
 from models import User
-
 
 # ---------------------------------------------------------------------------
 # Test database setup
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def db_session():
@@ -41,12 +41,15 @@ def client(db_session):
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+
 def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
     client.headers["X-Test-User-Id"] = user_id
     client.headers["X-Test-User-Role"] = role
 
 
-def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
+def create_workspace(
+    client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"
+):
     as_user(client, user_id)
     resp = client.post("/workspaces", json={"name": name, "slug": slug, "description": "x"})
     assert resp.status_code == 201
@@ -64,8 +67,9 @@ def create_user(client, db_session, user_id, email):
 # Notification CRUD happy paths
 # ---------------------------------------------------------------------------
 
+
 def test_create_notification(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     resp = client.post(
@@ -89,7 +93,7 @@ def test_create_notification(client, db_session):
 
 
 def test_list_notifications_for_current_user(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
 
@@ -122,7 +126,7 @@ def test_list_notifications_for_current_user(client, db_session):
 
 
 def test_get_notification(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     n = client.post(
@@ -136,9 +140,27 @@ def test_get_notification(client, db_session):
     assert resp.json()["id"] == n["id"]
 
 
-
 def test_mark_notification_read(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
+    create_user(client, db_session, "target-user", "target@example.com")
+    as_user(client, "owner")
+    n = client.post(
+        "/notifications",
+        json={"user_id": "target-user", "type": "mention", "title": "Read me"},
+    ).json()
+
+    as_user(client, "target-user")
+    resp = client.patch(f"/notifications/{n['id']}", json={"read": True})
+    assert resp.status_code == 200
+    assert resp.json()["read"] is True
+
+    resp = client.patch(f"/notifications/{n['id']}", json={"read": False})
+    assert resp.status_code == 200
+    assert resp.json()["read"] is False
+
+
+def test_notification_read_toggle(client, db_session):
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     n = client.post(
@@ -157,26 +179,7 @@ def test_mark_notification_read(client, db_session):
 
 
 def test_list_unread_only(client, db_session):
-    ws = create_workspace(client, "owner")
-    create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
-    n = client.post(
-        "/notifications",
-        json={"user_id": "target-user", "type": "mention", "title": "Read me"},
-    ).json()
-
-    as_user(client, "target-user")
-    resp = client.patch(f"/notifications/{n['id']}", json={"read": True})
-    assert resp.status_code == 200
-    assert resp.json()["read"] is True
-
-    resp = client.patch(f"/notifications/{n['id']}", json={"read": False})
-    assert resp.status_code == 200
-    assert resp.json()["read"] is False
-
-
-def test_list_unread_only(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
 
@@ -200,7 +203,7 @@ def test_list_unread_only(client, db_session):
 
 
 def test_delete_notification(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     n = client.post(
@@ -218,8 +221,9 @@ def test_delete_notification(client, db_session):
 # RBAC / security
 # ---------------------------------------------------------------------------
 
+
 def test_user_cannot_access_others_notifications(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "user-a", "a@example.com")
     create_user(client, db_session, "user-b", "b@example.com")
 
@@ -238,7 +242,7 @@ def test_user_cannot_access_others_notifications(client, db_session):
 
 
 def test_cannot_create_notification_for_missing_user(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.post(
         "/notifications",
@@ -248,7 +252,7 @@ def test_cannot_create_notification_for_missing_user(client):
 
 
 def test_invalid_notification_type_rejected(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     resp = client.post(

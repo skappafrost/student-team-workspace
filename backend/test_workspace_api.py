@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Base
+from app import Base, app
 
 
 @pytest.fixture(scope="function")

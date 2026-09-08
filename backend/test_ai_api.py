@@ -5,13 +5,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Role
+from app import Role, app
 from database import Base, get_db
-
 
 # ---------------------------------------------------------------------------
 # Test database setup
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def db_session():
@@ -40,12 +40,15 @@ def client(db_session):
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+
 def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
     client.headers["X-Test-User-Id"] = user_id
     client.headers["X-Test-User-Role"] = role
 
 
-def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
+def create_workspace(
+    client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"
+):
     as_user(client, user_id)
     resp = client.post("/workspaces", json={"name": name, "slug": slug, "description": "x"})
     assert resp.status_code == 201
@@ -54,7 +57,9 @@ def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS
 
 def create_project(client: TestClient, workspace_id: str, name: str = "Project"):
     as_user(client, "owner")
-    resp = client.post(f"/workspaces/{workspace_id}/projects", json={"name": name, "description": "x"})
+    resp = client.post(
+        f"/workspaces/{workspace_id}/projects", json={"name": name, "description": "x"}
+    )
     assert resp.status_code == 201
     return resp.json()
 
@@ -99,6 +104,7 @@ def create_message(client: TestClient, channel_id: str, content: str):
 # ---------------------------------------------------------------------------
 # Summarize tests
 # ---------------------------------------------------------------------------
+
 
 def test_summarize_task(client):
     ws = create_workspace(client, "owner")
@@ -159,7 +165,7 @@ def test_summarize_requires_auth(client):
 
 
 def test_summarize_unknown_kind(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.post("/ai/summarize", json={"kind": "unknown", "ref_id": "x"})
     assert resp.status_code == 422
@@ -169,11 +175,12 @@ def test_summarize_unknown_kind(client):
 # Search tests
 # ---------------------------------------------------------------------------
 
+
 def test_search_tasks_pages_messages_ranked(client):
     ws = create_workspace(client, "owner")
     project = create_project(client, ws["id"])
-    task = create_task(client, project["id"], "Alpha task", "Contains the keyword uniquely alphaone.")
-    page = create_page(client, ws["id"], "Alpha page", "Alphaone is described here in the page body.")
+    create_task(client, project["id"], "Alpha task", "Contains the keyword uniquely alphaone.")
+    create_page(client, ws["id"], "Alpha page", "Alphaone is described here in the page body.")
     channel = create_channel(client, ws["id"], "alpha-channel")
     create_message(client, channel["id"], "Message about alphaone in this channel.")
 
@@ -203,6 +210,7 @@ def test_search_respects_workspace_membership(client):
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
+
 
 def test_search_requires_auth(client):
     resp = client.get("/ai/search", params={"q": "anything"})

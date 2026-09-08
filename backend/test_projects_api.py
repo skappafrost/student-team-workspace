@@ -5,14 +5,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Role
+from app import Role, app
 from database import Base
-from models import WorkspaceMember
-
 
 # ---------------------------------------------------------------------------
 # Test database setup
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def db_session():
@@ -33,6 +32,7 @@ def client(db_session):
         return db_session
 
     from database import get_db
+
     app.dependency_overrides[get_db] = _get_db_override
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -41,6 +41,7 @@ def client(db_session):
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
+
 
 def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
     client.headers["X-Test-User-Id"] = user_id
@@ -52,7 +53,9 @@ def clear_auth(client: TestClient):
     client.headers.pop("X-Test-User-Role", None)
 
 
-def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
+def create_workspace(
+    client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"
+):
     as_user(client, user_id)
     resp = client.post("/workspaces", json={"name": name, "slug": slug, "description": "x"})
     assert resp.status_code == 201
@@ -70,6 +73,7 @@ def add_member(client, db_session, workspace_id, email, role, user_id):
 
     # Create a real user row for the invitee so membership.user_id resolves
     from models import User
+
     new_user = User(id=user_id, email=email, display_name=user_id)
     db_session.add(new_user)
     db_session.commit()
@@ -84,6 +88,7 @@ def add_member(client, db_session, workspace_id, email, role, user_id):
 # ---------------------------------------------------------------------------
 # Project CRUD happy paths
 # ---------------------------------------------------------------------------
+
 
 def test_create_project(client):
     ws = create_workspace(client, "owner")
@@ -147,6 +152,7 @@ def test_delete_project_by_owner(client):
 # Task CRUD happy paths
 # ---------------------------------------------------------------------------
 
+
 def test_create_task(client):
     ws = create_workspace(client, "owner")
     as_user(client, "owner")
@@ -154,7 +160,13 @@ def test_create_task(client):
 
     resp = client.post(
         f"/projects/{proj['id']}/tasks",
-        json={"title": "Task 1", "description": "desc", "priority": "high", "status": "todo", "position": 1.0},
+        json={
+            "title": "Task 1",
+            "description": "desc",
+            "priority": "high",
+            "status": "todo",
+            "position": 1.0,
+        },
     )
     assert resp.status_code == 201
     data = resp.json()
@@ -221,6 +233,7 @@ def test_task_position_ordering(client):
 # ---------------------------------------------------------------------------
 # RBAC denials
 # ---------------------------------------------------------------------------
+
 
 def test_create_project_forbidden_for_guest(client, db_session):
     ws = create_workspace(client, "owner")

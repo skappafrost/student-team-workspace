@@ -70,6 +70,7 @@ def _extractive_summary(text: str, max_sentences: int = 3) -> str:
 # Domain summarizers
 # ---------------------------------------------------------------------------
 
+
 def summarize_task(db: Session, task_id: str, user_id: str) -> dict:
     task = db.query(models.Task).filter(models.Task.id == task_id).first()
     if not task:
@@ -79,10 +80,14 @@ def summarize_task(db: Session, task_id: str, user_id: str) -> dict:
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    membership = db.query(models.WorkspaceMember).filter(
-        models.WorkspaceMember.workspace_id == project.workspace_id,
-        models.WorkspaceMember.user_id == user_id,
-    ).first()
+    membership = (
+        db.query(models.WorkspaceMember)
+        .filter(
+            models.WorkspaceMember.workspace_id == project.workspace_id,
+            models.WorkspaceMember.user_id == user_id,
+        )
+        .first()
+    )
     if not membership:
         raise HTTPException(status_code=403, detail="Not allowed to access this task")
 
@@ -100,10 +105,14 @@ def summarize_page(db: Session, page_id: str, user_id: str) -> dict:
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    membership = db.query(models.WorkspaceMember).filter(
-        models.WorkspaceMember.workspace_id == page.workspace_id,
-        models.WorkspaceMember.user_id == user_id,
-    ).first()
+    membership = (
+        db.query(models.WorkspaceMember)
+        .filter(
+            models.WorkspaceMember.workspace_id == page.workspace_id,
+            models.WorkspaceMember.user_id == user_id,
+        )
+        .first()
+    )
     if not membership:
         raise HTTPException(status_code=403, detail="Not allowed to access this page")
 
@@ -121,10 +130,14 @@ def summarize_channel(db: Session, channel_id: str, user_id: str) -> dict:
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    membership = db.query(models.WorkspaceMember).filter(
-        models.WorkspaceMember.workspace_id == channel.workspace_id,
-        models.WorkspaceMember.user_id == user_id,
-    ).first()
+    membership = (
+        db.query(models.WorkspaceMember)
+        .filter(
+            models.WorkspaceMember.workspace_id == channel.workspace_id,
+            models.WorkspaceMember.user_id == user_id,
+        )
+        .first()
+    )
     if not membership:
         raise HTTPException(status_code=403, detail="Not allowed to access this channel")
 
@@ -149,6 +162,7 @@ def summarize_channel(db: Session, channel_id: str, user_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SearchResult:
@@ -198,9 +212,7 @@ def search_workspace(
 
     # Build a set of workspace IDs the user belongs to.
     memberships = (
-        db.query(models.WorkspaceMember)
-        .filter(models.WorkspaceMember.user_id == user_id)
-        .all()
+        db.query(models.WorkspaceMember).filter(models.WorkspaceMember.user_id == user_id).all()
     )
     workspace_ids = {m.workspace_id for m in memberships}
 
@@ -226,11 +238,7 @@ def search_workspace(
                 )
 
     if "pages" in scope:
-        pages = (
-            db.query(models.Page)
-            .filter(models.Page.workspace_id.in_(workspace_ids))
-            .all()
-        )
+        pages = db.query(models.Page).filter(models.Page.workspace_id.in_(workspace_ids)).all()
         for page in pages:
             score = _score(q, page.title, page.content)
             if score > 0:

@@ -5,14 +5,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Role
+from app import Role, app
 from database import Base
 from models import User
-
 
 # ---------------------------------------------------------------------------
 # Test database setup
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def db_session():
@@ -33,6 +33,7 @@ def client(db_session):
         return db_session
 
     from database import get_db
+
     app.dependency_overrides[get_db] = _get_db_override
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -41,6 +42,7 @@ def client(db_session):
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
+
 
 def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
     client.headers["X-Test-User-Id"] = user_id
@@ -52,7 +54,9 @@ def clear_auth(client: TestClient):
     client.headers.pop("X-Test-User-Role", None)
 
 
-def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
+def create_workspace(
+    client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"
+):
     as_user(client, user_id)
     resp = client.post("/workspaces", json={"name": name, "slug": slug, "description": "x"})
     assert resp.status_code == 201
@@ -83,6 +87,7 @@ def add_member(client, db_session, workspace_id, email, role, user_id):
 # Page CRUD happy paths
 # ---------------------------------------------------------------------------
 
+
 def test_create_page(client):
     ws = create_workspace(client, "owner")
     as_user(client, "owner")
@@ -109,7 +114,12 @@ def test_list_pages_tree(client):
     ).json()
     child = client.post(
         f"/workspaces/{ws['id']}/pages",
-        json={"title": "Child", "slug": "child", "parent_id": parent["id"], "content": "child content"},
+        json={
+            "title": "Child",
+            "slug": "child",
+            "parent_id": parent["id"],
+            "content": "child content",
+        },
     ).json()
 
     resp = client.get(f"/workspaces/{ws['id']}/pages")
@@ -168,6 +178,7 @@ def test_delete_page_by_owner(client):
 # ---------------------------------------------------------------------------
 # RBAC
 # ---------------------------------------------------------------------------
+
 
 def test_member_can_create_and_update_own_page(client, db_session):
     ws = create_workspace(client, "owner")

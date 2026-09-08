@@ -6,12 +6,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.websockets import WebSocketDisconnect
 
-from app import app, Role, Base
+from app import Base, app
 from database import get_db, set_db_url
 
 
 def _token_for(user_id: str) -> str:
     from app import create_access_token
+
     return create_access_token(user_id)
 
 
@@ -43,7 +44,9 @@ def as_user(client: TestClient, user_id: str, role: str = "owner"):
     client.headers["X-Test-User-Role"] = role
 
 
-def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
+def create_workspace(
+    client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"
+):
     as_user(client, user_id)
     resp = client.post("/workspaces", json={"name": name, "slug": slug, "description": "x"})
     assert resp.status_code == 201
@@ -71,8 +74,7 @@ def test_ws_broadcast_new_message(client):
     ws = create_workspace(client, ws_owner)
     as_user(client, ws_owner)
     channel = client.post(
-        f"/workspaces/{ws['id']}/channels",
-        json={"name": "general", "type": "general"}
+        f"/workspaces/{ws['id']}/channels", json={"name": "general", "type": "general"}
     ).json()
     channel_id = channel["id"]
 
@@ -94,11 +96,12 @@ def test_ws_rejects_non_member(client):
     ws = create_workspace(client, ws_owner)
     as_user(client, ws_owner)
     channel = client.post(
-        f"/workspaces/{ws['id']}/channels",
-        json={"name": "general", "type": "general"}
+        f"/workspaces/{ws['id']}/channels", json={"name": "general", "type": "general"}
     ).json()
 
     stranger_token = _token_for("stranger")
     with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect(f"/ws/channels/{channel['id']}?session_token={stranger_token}") as wsock:
+        with client.websocket_connect(
+            f"/ws/channels/{channel['id']}?session_token={stranger_token}"
+        ) as wsock:
             wsock.receive_text()

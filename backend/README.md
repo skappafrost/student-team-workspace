@@ -122,6 +122,28 @@ pytest test_invites_api.py test_workspace_api.py
 
 ---
 
+## 7. Lint and format (ruff)
+
+The backend uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting.
+Config lives in `backend/ruff.toml`; CI enforces both checks (`.github/workflows/ci.yml`).
+
+```bash
+ruff check            # lint
+ruff check --fix      # lint + autofix
+ruff format           # format
+```
+
+**Pre-commit hook (recommended):** add this to your local `.git/hooks/pre-commit`
+(or use the [pre-commit](https://pre-commit.com) framework with the same commands):
+
+```bash
+#!/bin/sh
+# Lint staged backend changes
+cd backend && .venv/Scripts/ruff check --fix && .venv/Scripts/ruff format
+```
+
+---
+
 ## Common commands
 
 | Command | Purpose |

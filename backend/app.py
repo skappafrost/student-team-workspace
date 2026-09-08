@@ -1,12 +1,25 @@
 """FastAPI application with workspace CRUD and invite endpoints."""
 
-from datetime import datetime, timedelta, timezone
-from enum import Enum
-from typing import Optional
+import mimetypes
 import os
 import uuid
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, File as FileParam, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+import bcrypt
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi import File as FileParam
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
@@ -14,17 +27,11 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
-import mimetypes
-from pathlib import Path
-
-import bcrypt
-
-from database import Base, SessionLocal, engine, get_db
-from email_sender import send_invite_email
+import ai_assist
 import models
 import schemas
-import ai_assist
-
+from database import Base, engine, get_db
+from email_sender import send_invite_email
 
 # ---------------------------------------------------------------------------
 # Auth configuration
@@ -41,7 +48,7 @@ def _utcnow() -> datetime:
     Naive on purpose: SQLite's DateTime(timezone=True) round-trips values
     without tzinfo, so every stored/compared timestamp stays consistent.
     """
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _get_secret() -> str:
@@ -52,17 +59,17 @@ def _get_secret() -> str:
     return secret
 
 
-def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": subject, "exp": expire, "type": "access"}
     return jwt.encode(payload, _get_secret(), algorithm=ALGORITHM)
 
 
 def create_refresh_token(subject: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": subject, "exp": expire, "type": "refresh"}
     return jwt.encode(payload, _get_secret(), algorithm=ALGORITHM)
 
@@ -76,7 +83,7 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password[:72].encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     OWNER = "owner"
     ADMIN = "admin"
     MEMBER = "member"
@@ -95,6 +102,7 @@ ROLE_HIERARCHY = {
 # Auth dependency (JWT via httpOnly cookie)
 # ---------------------------------------------------------------------------
 
+
 class AuthUser(BaseModel):
     id: str
     name: str
@@ -102,7 +110,7 @@ class AuthUser(BaseModel):
     role: str
 
 
-def _token_from_request(request: Request) -> Optional[str]:
+def _token_from_request(request: Request) -> str | None:
     # Production path: session_token httpOnly cookie set by /auth/login.
     token = request.cookies.get("session_token")
     if token:
@@ -114,15 +122,15 @@ def _token_from_request(request: Request) -> Optional[str]:
     return None
 
 
-def _token_from_cookies(cookies: dict[str, str]) -> Optional[str]:
+def _token_from_cookies(cookies: dict[str, str]) -> str | None:
     return cookies.get("session_token")
 
 
-def _token_from_query(query: dict[str, str]) -> Optional[str]:
+def _token_from_query(query: dict[str, str]) -> str | None:
     return query.get("session_token") or None
 
 
-def _decode_token(token: str) -> Optional[dict]:
+def _decode_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(token, _get_secret(), algorithms=[ALGORITHM])
         if payload.get("type") != "access":
@@ -191,6 +199,7 @@ def _ws_room_leave(channel_id: str, websocket) -> None:
 
 async def _ws_broadcast(channel_id: str, payload: dict) -> None:
     import json
+
     room = _ws_rooms.get(channel_id)
     if not room:
         return
@@ -236,12 +245,16 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _file_type(mime_type: Optional[str]) -> str:
+def _file_type(mime_type: str | None) -> str:
     if not mime_type:
         return "other"
     if mime_type.startswith("image/"):
         return "image"
-    if mime_type in ("application/pdf",) or mime_type.startswith("text/") or "document" in mime_type:
+    if (
+        mime_type in ("application/pdf",)
+        or mime_type.startswith("text/")
+        or "document" in mime_type
+    ):
         return "document"
     return "other"
 
@@ -286,6 +299,7 @@ async def health():
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
 
+
 @app.websocket("/ws/channels/{channel_id}")
 async def channel_websocket(websocket: WebSocket, channel_id: str):
     await websocket.accept()
@@ -307,7 +321,9 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
     try:
         channel = _get_channel_or_404(db, channel_id)
         membership = _require_member(channel.workspace_id, user["id"], db)
-        user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
+        user_role = (
+            Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
+        )
         if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
             await websocket.close(code=1008, reason="Guests cannot join channel")
             return
@@ -320,7 +336,7 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
     try:
         while True:
             # Keep connection open; clients can send heartbeats if desired.
-            data = await websocket.receive_text()
+            await websocket.receive_text()
             # Echo back a heartbeat acknowledgement.
             await websocket.send_json({"type": "pong", "channel_id": channel_id})
     except WebSocketDisconnect:
@@ -332,6 +348,7 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
 # ---------------------------------------------------------------------------
 # Auth endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.post("/auth/register", response_model=TokenOut, status_code=201)
 async def register(payload: RegisterIn, response: Response, db: Session = Depends(get_db)):
@@ -409,6 +426,7 @@ async def logout(response: Response):
 # Workspace CRUD
 # ---------------------------------------------------------------------------
 
+
 def _set_session_cookie(response: Response, token: str) -> None:
     secure = os.getenv("COOKIE_SECURE", "false").lower() == "true"
     response.set_cookie(
@@ -430,6 +448,7 @@ def _clear_session_cookie(response: Response) -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_min_role(current_user: dict, required_role: Role) -> None:
     user_role_value = current_user.get("role", Role.GUEST.value)
     try:
@@ -441,7 +460,7 @@ def _require_min_role(current_user: dict, required_role: Role) -> None:
     if user_level < required_level:
         raise HTTPException(
             status_code=403,
-            detail=f"Role '{user_role.value}' is insufficient. Requires '{required_role.value}'."
+            detail=f"Role '{user_role.value}' is insufficient. Requires '{required_role.value}'.",
         )
 
 
@@ -449,8 +468,10 @@ def _require_min_role(current_user: dict, required_role: Role) -> None:
 # RBAC Dependencies
 # ---------------------------------------------------------------------------
 
+
 def require_role(required_role: Role):
     """Dependency factory that requires a minimum workspace role."""
+
     def _check_role(
         current_user: dict = Depends(get_current_user),
         workspace_id: str = None,
@@ -460,12 +481,12 @@ def require_role(required_role: Role):
         if workspace_id is None:
             _require_min_role(current_user, required_role)
             return current_user
-        
+
         # First check if workspace exists
         workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
         if not workspace:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        
+
         # Check role within the specific workspace
         membership = _require_member(workspace_id, current_user["id"], db)
         user_role_value = membership.role
@@ -478,9 +499,10 @@ def require_role(required_role: Role):
         if user_level < required_level:
             raise HTTPException(
                 status_code=403,
-                detail=f"Role '{user_role.value}' is insufficient in this workspace. Requires '{required_role.value}'."
+                detail=f"Role '{user_role.value}' is insufficient in this workspace. Requires '{required_role.value}'.",
             )
         return current_user
+
     return _check_role
 
 
@@ -504,7 +526,7 @@ def require_permission(permission: str):
         "project.delete": Role.ADMIN,
         "project.manage_members": Role.ADMIN,
     }
-    
+
     required_role = PERMISSION_ROLES.get(permission, Role.OWNER)
     return require_role(required_role)
 
@@ -524,6 +546,7 @@ def _parse_cors_origins() -> list[str]:
 # ---------------------------------------------------------------------------
 # Workspace CRUD
 # ---------------------------------------------------------------------------
+
 
 @app.post("/workspaces", response_model=schemas.WorkspaceDetailOut, status_code=201)
 async def create_workspace(
@@ -563,9 +586,11 @@ async def list_workspaces(
     db: Session = Depends(get_db),
 ):
     """List workspaces the current user is a member of."""
-    memberships = db.query(models.WorkspaceMembership).filter(
-        models.WorkspaceMembership.user_id == current_user["id"]
-    ).all()
+    memberships = (
+        db.query(models.WorkspaceMembership)
+        .filter(models.WorkspaceMembership.user_id == current_user["id"])
+        .all()
+    )
     workspace_ids = [m.workspace_id for m in memberships]
     if not workspace_ids:
         return []
@@ -574,9 +599,12 @@ async def list_workspaces(
 
 
 def _get_workspace_or_404(db: Session, workspace_id: str) -> models.Workspace:
-    workspace = db.query(models.Workspace).options(
-        selectinload(models.Workspace.members)
-    ).filter(models.Workspace.id == workspace_id).first()
+    workspace = (
+        db.query(models.Workspace)
+        .options(selectinload(models.Workspace.members))
+        .filter(models.Workspace.id == workspace_id)
+        .first()
+    )
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return workspace
@@ -608,9 +636,10 @@ async def update_workspace(
     if payload.name is not None:
         workspace.name = payload.name
     if payload.slug is not None:
-        if payload.slug != workspace.slug and db.query(models.Workspace).filter(
-            models.Workspace.slug == payload.slug
-        ).first():
+        if (
+            payload.slug != workspace.slug
+            and db.query(models.Workspace).filter(models.Workspace.slug == payload.slug).first()
+        ):
             raise HTTPException(status_code=409, detail="Workspace slug already exists")
         workspace.slug = payload.slug
     if payload.description is not None:
@@ -639,6 +668,7 @@ async def delete_workspace(
 # Invitations
 # ---------------------------------------------------------------------------
 
+
 @app.post("/workspaces/{workspace_id}/invites", response_model=schemas.InviteOut, status_code=201)
 async def create_invite(
     workspace_id: str,
@@ -653,12 +683,16 @@ async def create_invite(
         raise HTTPException(status_code=404, detail="Workspace not found")
 
     # Prevent duplicate active invite for same email/workspace.
-    existing = db.query(models.WorkspaceInvite).filter(
-        models.WorkspaceInvite.workspace_id == workspace_id,
-        models.WorkspaceInvite.email == payload.email,
-        models.WorkspaceInvite.accepted_at.is_(None),
-        models.WorkspaceInvite.expires_at > _utcnow(),
-    ).first()
+    existing = (
+        db.query(models.WorkspaceInvite)
+        .filter(
+            models.WorkspaceInvite.workspace_id == workspace_id,
+            models.WorkspaceInvite.email == payload.email,
+            models.WorkspaceInvite.accepted_at.is_(None),
+            models.WorkspaceInvite.expires_at > _utcnow(),
+        )
+        .first()
+    )
     if existing:
         raise HTTPException(status_code=409, detail="Active invite already exists for this email")
 
@@ -686,9 +720,11 @@ async def accept_invite(
     db: Session = Depends(get_db),
 ):
     """Accept an invitation by token and become a workspace member."""
-    invite = db.query(models.WorkspaceInvite).filter(
-        models.WorkspaceInvite.token == payload.token
-    ).first()
+    invite = (
+        db.query(models.WorkspaceInvite)
+        .filter(models.WorkspaceInvite.token == payload.token)
+        .first()
+    )
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
     if invite.accepted_at is not None:
@@ -718,12 +754,16 @@ async def list_workspace_invites(
     db: Session = Depends(get_db),
 ):
     """List all pending invitations for a workspace. Requires admin or higher role."""
-    workspace = _get_workspace_or_404(db, workspace_id)
-    invites = db.query(models.WorkspaceInvite).filter(
-        models.WorkspaceInvite.workspace_id == workspace_id,
-        models.WorkspaceInvite.accepted_at.is_(None),
-        models.WorkspaceInvite.expires_at > _utcnow(),
-    ).all()
+    _get_workspace_or_404(db, workspace_id)
+    invites = (
+        db.query(models.WorkspaceInvite)
+        .filter(
+            models.WorkspaceInvite.workspace_id == workspace_id,
+            models.WorkspaceInvite.accepted_at.is_(None),
+            models.WorkspaceInvite.expires_at > _utcnow(),
+        )
+        .all()
+    )
     return invites
 
 
@@ -736,11 +776,15 @@ async def update_invite_role(
     db: Session = Depends(get_db),
 ):
     """Update the role of a pending invitation. Requires admin or higher role."""
-    workspace = _get_workspace_or_404(db, workspace_id)
-    invite = db.query(models.WorkspaceInvite).filter(
-        models.WorkspaceInvite.id == invite_id,
-        models.WorkspaceInvite.workspace_id == workspace_id,
-    ).first()
+    _get_workspace_or_404(db, workspace_id)
+    invite = (
+        db.query(models.WorkspaceInvite)
+        .filter(
+            models.WorkspaceInvite.id == invite_id,
+            models.WorkspaceInvite.workspace_id == workspace_id,
+        )
+        .first()
+    )
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
     if invite.accepted_at is not None:
@@ -749,7 +793,7 @@ async def update_invite_role(
     try:
         new_role = Role(payload.role)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid role")
+        raise HTTPException(status_code=400, detail="Invalid role") from None
 
     invite.role = new_role.value
     db.commit()
@@ -765,17 +809,22 @@ async def cancel_invite(
     db: Session = Depends(get_db),
 ):
     """Cancel a pending invitation. Requires admin or higher role."""
-    workspace = _get_workspace_or_404(db, workspace_id)
-    invite = db.query(models.WorkspaceInvite).filter(
-        models.WorkspaceInvite.id == invite_id,
-        models.WorkspaceInvite.workspace_id == workspace_id,
-    ).first()
+    _get_workspace_or_404(db, workspace_id)
+    invite = (
+        db.query(models.WorkspaceInvite)
+        .filter(
+            models.WorkspaceInvite.id == invite_id,
+            models.WorkspaceInvite.workspace_id == workspace_id,
+        )
+        .first()
+    )
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
 
     db.delete(invite)
     db.commit()
     return None
+
 
 @app.get("/workspaces/{workspace_id}/members", response_model=list[schemas.WorkspaceMemberOut])
 async def list_workspace_members(
@@ -785,16 +834,19 @@ async def list_workspace_members(
 ):
     """List all members of a workspace. Requires admin or higher role."""
     # RBAC enforced by require_permission dependency
-    workspace = _get_workspace_or_404(db, workspace_id)
-    members = db.query(models.WorkspaceMembership).options(
-        selectinload(models.WorkspaceMembership.user)
-    ).filter(
-        models.WorkspaceMembership.workspace_id == workspace_id
-    ).all()
+    _get_workspace_or_404(db, workspace_id)
+    members = (
+        db.query(models.WorkspaceMembership)
+        .options(selectinload(models.WorkspaceMembership.user))
+        .filter(models.WorkspaceMembership.workspace_id == workspace_id)
+        .all()
+    )
     return members
 
 
-@app.patch("/workspaces/{workspace_id}/members/{user_id}", response_model=schemas.WorkspaceMemberOut)
+@app.patch(
+    "/workspaces/{workspace_id}/members/{user_id}", response_model=schemas.WorkspaceMemberOut
+)
 async def update_member_role(
     workspace_id: str,
     user_id: str,
@@ -804,29 +856,33 @@ async def update_member_role(
 ):
     """Update a member's role. Requires admin or higher role. Cannot change owner role."""
     # RBAC enforced by require_permission dependency
-    workspace = _get_workspace_or_404(db, workspace_id)
-    
-    membership = db.query(models.WorkspaceMembership).filter(
-        models.WorkspaceMembership.workspace_id == workspace_id,
-        models.WorkspaceMembership.user_id == user_id
-    ).first()
+    _get_workspace_or_404(db, workspace_id)
+
+    membership = (
+        db.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == user_id,
+        )
+        .first()
+    )
     if not membership:
         raise HTTPException(status_code=404, detail="Member not found")
-    
+
     # Prevent changing owner's role
     if membership.role == Role.OWNER.value:
         raise HTTPException(status_code=403, detail="Cannot change owner's role")
-    
+
     # Prevent self-demotion from owner
     if membership.user_id == current_user["id"] and membership.role == Role.OWNER.value:
         raise HTTPException(status_code=403, detail="Cannot change your own role as owner")
-    
+
     # Validate role
     try:
         new_role = Role(payload.role)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid role")
-    
+        raise HTTPException(status_code=400, detail="Invalid role") from None
+
     membership.role = new_role.value
     db.commit()
     db.refresh(membership)
@@ -842,23 +898,27 @@ async def remove_member(
 ):
     """Remove a member from the workspace. Requires admin or higher role. Cannot remove owner."""
     # RBAC enforced by require_permission dependency
-    workspace = _get_workspace_or_404(db, workspace_id)
-    
-    membership = db.query(models.WorkspaceMembership).filter(
-        models.WorkspaceMembership.workspace_id == workspace_id,
-        models.WorkspaceMembership.user_id == user_id
-    ).first()
+    _get_workspace_or_404(db, workspace_id)
+
+    membership = (
+        db.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == user_id,
+        )
+        .first()
+    )
     if not membership:
         raise HTTPException(status_code=404, detail="Member not found")
-    
+
     # Prevent removing owner
     if membership.role == Role.OWNER.value:
         raise HTTPException(status_code=403, detail="Cannot remove workspace owner")
-    
+
     # Prevent self-removal if owner
     if membership.user_id == current_user["id"] and membership.role == Role.OWNER.value:
         raise HTTPException(status_code=403, detail="Cannot remove yourself as owner")
-    
+
     db.delete(membership)
     db.commit()
     return None
@@ -873,43 +933,59 @@ async def transfer_ownership(
 ):
     """Transfer workspace ownership to another member. Requires owner role."""
     # RBAC enforced by require_permission dependency
-    workspace = _get_workspace_or_404(db, workspace_id)
-    
+    _get_workspace_or_404(db, workspace_id)
+
     # Get current owner's membership
-    current_membership = db.query(models.WorkspaceMembership).filter(
-        models.WorkspaceMembership.workspace_id == workspace_id,
-        models.WorkspaceMembership.user_id == current_user["id"]
-    ).first()
+    current_membership = (
+        db.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == current_user["id"],
+        )
+        .first()
+    )
     if not current_membership or current_membership.role != Role.OWNER.value:
         raise HTTPException(status_code=403, detail="Only the current owner can transfer ownership")
-    
+
     # Get target member
-    target_membership = db.query(models.WorkspaceMembership).filter(
-        models.WorkspaceMembership.workspace_id == workspace_id,
-        models.WorkspaceMembership.user_id == payload.user_id
-    ).first()
+    target_membership = (
+        db.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == payload.user_id,
+        )
+        .first()
+    )
     if not target_membership:
         raise HTTPException(status_code=404, detail="Target member not found")
-    
+
     # Perform transfer
     current_membership.role = Role.ADMIN.value
     target_membership.role = Role.OWNER.value
     db.commit()
     db.refresh(current_membership)
     db.refresh(target_membership)
-    
-    return {"message": "Ownership transferred successfully", "new_owner_id": target_membership.user_id}
+
+    return {
+        "message": "Ownership transferred successfully",
+        "new_owner_id": target_membership.user_id,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Membership helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_member(workspace_id: str, user_id: str, db: Session) -> models.WorkspaceMembership:
-    membership = db.query(models.WorkspaceMembership).filter(
-        models.WorkspaceMembership.workspace_id == workspace_id,
-        models.WorkspaceMembership.user_id == user_id,
-    ).first()
+    membership = (
+        db.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == user_id,
+        )
+        .first()
+    )
     if not membership:
         raise HTTPException(status_code=403, detail="Not a workspace member")
     return membership
@@ -929,7 +1005,7 @@ def _require_min_role_in_workspace(
     if user_level < required_level:
         raise HTTPException(
             status_code=403,
-            detail=f"Role '{user_role.value}' is insufficient. Requires '{required_role.value}'."
+            detail=f"Role '{user_role.value}' is insufficient. Requires '{required_role.value}'.",
         )
     return membership
 
@@ -937,6 +1013,7 @@ def _require_min_role_in_workspace(
 # ---------------------------------------------------------------------------
 # Channel / Message CRUD
 # ---------------------------------------------------------------------------
+
 
 def _get_channel_or_404(db: Session, channel_id: str) -> models.Channel:
     channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
@@ -968,10 +1045,14 @@ def _get_message_or_404(db: Session, message_id: str) -> models.Message:
 def _is_private_channel_member(channel: models.Channel, user_id: str, db: Session) -> bool:
     if not channel.is_private:
         return True
-    membership = db.query(models.WorkspaceMember).filter(
-        models.WorkspaceMember.workspace_id == channel.workspace_id,
-        models.WorkspaceMember.user_id == user_id,
-    ).first()
+    membership = (
+        db.query(models.WorkspaceMember)
+        .filter(
+            models.WorkspaceMember.workspace_id == channel.workspace_id,
+            models.WorkspaceMember.user_id == user_id,
+        )
+        .first()
+    )
     return membership is not None
 
 
@@ -983,7 +1064,7 @@ async def create_channel(
     db: Session = Depends(get_db),
 ):
     """Create a new channel in a workspace. Requires member role or higher."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
@@ -1155,6 +1236,7 @@ async def delete_message(
 # Project and Task CRUD
 # ---------------------------------------------------------------------------
 
+
 def _get_event_or_404(db: Session, event_id: str) -> models.Event:
     event = db.query(models.Event).filter(models.Event.id == event_id).first()
     if not event:
@@ -1162,7 +1244,9 @@ def _get_event_or_404(db: Session, event_id: str) -> models.Event:
     return event
 
 
-def _can_modify_event(event: models.Event, membership: models.WorkspaceMembership, current_user: dict) -> bool:
+def _can_modify_event(
+    event: models.Event, membership: models.WorkspaceMembership, current_user: dict
+) -> bool:
     if event.created_by == current_user["id"]:
         return True
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
@@ -1177,7 +1261,7 @@ async def create_event(
     db: Session = Depends(get_db),
 ):
     """Create a new event in a workspace. Any member can create."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
@@ -1208,8 +1292,8 @@ async def create_event(
 @app.get("/workspaces/{workspace_id}/events", response_model=list[schemas.EventOut])
 async def list_workspace_events(
     workspace_id: str,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
+    start: str | None = None,
+    end: str | None = None,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1231,13 +1315,13 @@ async def list_workspace_events(
                 )
             )
         except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid start date format")
+            raise HTTPException(status_code=422, detail="Invalid start date format") from None
     if end:
         try:
             end_dt = datetime.fromisoformat(end)
             query = query.filter(models.Event.start_at <= end_dt)
         except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid end date format")
+            raise HTTPException(status_code=422, detail="Invalid end date format") from None
 
     events = query.order_by(models.Event.start_at.asc()).all()
     return events
@@ -1318,6 +1402,7 @@ async def delete_event(
 # Project and Task CRUD
 # ---------------------------------------------------------------------------
 
+
 def _get_project_or_404(db: Session, project_id: str) -> models.Project:
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
@@ -1338,6 +1423,7 @@ def _require_project_access(project: models.Project, user_id: str, db: Session) 
 
 # Projects
 
+
 @app.post("/workspaces/{workspace_id}/projects", response_model=schemas.ProjectOut, status_code=201)
 async def create_project(
     workspace_id: str,
@@ -1346,7 +1432,7 @@ async def create_project(
     db: Session = Depends(get_db),
 ):
     """Create a new project inside a workspace. Any member can create."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     project = models.Project(
         workspace_id=workspace_id,
         owner_id=current_user["id"],
@@ -1367,7 +1453,7 @@ async def list_workspace_projects(
     db: Session = Depends(get_db),
 ):
     """List all projects in a workspace."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     _require_member(workspace_id, current_user["id"], db)
     projects = db.query(models.Project).filter(models.Project.workspace_id == workspace_id).all()
     return projects
@@ -1436,6 +1522,7 @@ async def delete_project(
 
 # Tasks
 
+
 @app.post("/projects/{project_id}/tasks", response_model=schemas.TaskOut, status_code=201)
 async def create_task(
     project_id: str,
@@ -1465,7 +1552,7 @@ async def create_task(
 @app.get("/projects/{project_id}/tasks", response_model=list[schemas.TaskOut])
 async def list_project_tasks(
     project_id: str,
-    status: Optional[str] = None,
+    status: str | None = None,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1523,7 +1610,9 @@ async def delete_task(
 
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
     is_admin_plus = ROLE_HIERARCHY[user_role] >= ROLE_HIERARCHY[Role.ADMIN]
-    is_creator = task.assignee_id == current_user["id"] or task.project.owner_id == current_user["id"]
+    is_creator = (
+        task.assignee_id == current_user["id"] or task.project.owner_id == current_user["id"]
+    )
 
     if not (is_admin_plus or is_creator):
         raise HTTPException(status_code=403, detail="Not allowed to delete this task")
@@ -1537,6 +1626,7 @@ async def delete_task(
 # Page (Knowledge Base) CRUD
 # ---------------------------------------------------------------------------
 
+
 def _get_page_or_404(db: Session, page_id: str) -> models.Page:
     page = db.query(models.Page).filter(models.Page.id == page_id).first()
     if not page:
@@ -1544,7 +1634,9 @@ def _get_page_or_404(db: Session, page_id: str) -> models.Page:
     return page
 
 
-def _validate_parent_id(db: Session, workspace_id: str, parent_id: str, page_id: Optional[str] = None) -> None:
+def _validate_parent_id(
+    db: Session, workspace_id: str, parent_id: str, page_id: str | None = None
+) -> None:
     parent = _get_page_or_404(db, parent_id)
     if parent.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Parent page not found in workspace")
@@ -1552,7 +1644,9 @@ def _validate_parent_id(db: Session, workspace_id: str, parent_id: str, page_id:
         raise HTTPException(status_code=400, detail="Page cannot be its own parent")
 
 
-def _check_page_write_permission(page: models.Page, membership: models.WorkspaceMembership, current_user: dict) -> bool:
+def _check_page_write_permission(
+    page: models.Page, membership: models.WorkspaceMembership, current_user: dict
+) -> bool:
     user_role_value = membership.role
     user_role = Role(user_role_value) if user_role_value in [r.value for r in Role] else Role.GUEST
     if ROLE_HIERARCHY[user_role] >= ROLE_HIERARCHY[Role.ADMIN]:
@@ -1568,7 +1662,7 @@ async def create_page(
     db: Session = Depends(get_db),
 ):
     """Create a new page in a workspace. Requires member role or higher."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
@@ -1579,10 +1673,14 @@ async def create_page(
         _validate_parent_id(db, workspace_id, payload.parent_id)
 
     # Slug uniqueness within workspace
-    existing = db.query(models.Page).filter(
-        models.Page.workspace_id == workspace_id,
-        models.Page.slug == payload.slug,
-    ).first()
+    existing = (
+        db.query(models.Page)
+        .filter(
+            models.Page.workspace_id == workspace_id,
+            models.Page.slug == payload.slug,
+        )
+        .first()
+    )
     if existing:
         raise HTTPException(status_code=409, detail="Page slug already exists in this workspace")
 
@@ -1618,7 +1716,7 @@ async def list_workspace_pages(
       - recent: order by updated_at desc and return up to ``limit`` pages (flat).
       - limit: maximum number of recent/search results to return (default 10, max 100).
     """
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
@@ -1658,7 +1756,7 @@ async def get_page(
     db: Session = Depends(get_db),
 ):
     """Get a single page. Must be a workspace member."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
@@ -1680,7 +1778,7 @@ async def update_page(
     db: Session = Depends(get_db),
 ):
     """Update a page. Requires creator or admin/owner."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     page = _get_page_or_404(db, page_id)
@@ -1699,12 +1797,18 @@ async def update_page(
         page.title = payload.title
     if payload.slug is not None:
         # Slug uniqueness within workspace
-        existing = db.query(models.Page).filter(
-            models.Page.workspace_id == workspace_id,
-            models.Page.slug == payload.slug,
-        ).first()
+        existing = (
+            db.query(models.Page)
+            .filter(
+                models.Page.workspace_id == workspace_id,
+                models.Page.slug == payload.slug,
+            )
+            .first()
+        )
         if existing and existing.id != page.id:
-            raise HTTPException(status_code=409, detail="Page slug already exists in this workspace")
+            raise HTTPException(
+                status_code=409, detail="Page slug already exists in this workspace"
+            )
         page.slug = payload.slug
     if payload.content is not None:
         page.content = payload.content
@@ -1723,7 +1827,7 @@ async def delete_page(
     db: Session = Depends(get_db),
 ):
     """Delete a page. Requires admin/owner."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     page = _get_page_or_404(db, page_id)
@@ -1742,6 +1846,7 @@ async def delete_page(
 # ---------------------------------------------------------------------------
 # AI Assist endpoints
 # ---------------------------------------------------------------------------
+
 
 class SummarizeRequest(BaseModel):
     kind: str
@@ -1809,8 +1914,13 @@ async def ai_search(
 # Notification CRUD
 # ---------------------------------------------------------------------------
 
-def _get_notification_or_404(db: Session, notification_id: str, user_id: str) -> models.Notification:
-    notification = db.query(models.Notification).filter(models.Notification.id == notification_id).first()
+
+def _get_notification_or_404(
+    db: Session, notification_id: str, user_id: str
+) -> models.Notification:
+    notification = (
+        db.query(models.Notification).filter(models.Notification.id == notification_id).first()
+    )
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
     if notification.user_id != user_id:
@@ -1849,11 +1959,9 @@ async def list_notifications(
     db: Session = Depends(get_db),
 ):
     """List notifications for the current user."""
-    query = db.query(models.Notification).filter(
-        models.Notification.user_id == current_user["id"]
-    )
+    query = db.query(models.Notification).filter(models.Notification.user_id == current_user["id"])
     if unread_only:
-        query = query.filter(models.Notification.read == False)
+        query = query.filter(models.Notification.read.is_(False))
     notifications = query.order_by(models.Notification.created_at.desc()).all()
     return notifications
 
@@ -1912,7 +2020,9 @@ def _get_file_or_404(db: Session, file_id: str) -> models.File:
     return file
 
 
-def _can_modify_file(file: models.File, membership: models.WorkspaceMembership, current_user: dict) -> bool:
+def _can_modify_file(
+    file: models.File, membership: models.WorkspaceMembership, current_user: dict
+) -> bool:
     user_role_value = membership.role
     user_role = Role(user_role_value) if user_role_value in [r.value for r in Role] else Role.GUEST
     if ROLE_HIERARCHY[user_role] >= ROLE_HIERARCHY[Role.ADMIN]:
@@ -1931,7 +2041,7 @@ async def upload_file(
     db: Session = Depends(get_db),
 ):
     """Upload a file to a workspace. Requires member role or higher."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
@@ -1946,7 +2056,9 @@ async def upload_file(
     if size == 0:
         raise HTTPException(status_code=422, detail="File is empty")
 
-    mime_type = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+    mime_type = (
+        file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+    )
     storage_key = f"{uuid.uuid4()}_{file.filename}"
     file_path = UPLOAD_DIR / storage_key
     file_path.write_bytes(content)
@@ -1983,16 +2095,19 @@ async def list_workspace_files(
     db: Session = Depends(get_db),
 ):
     """List files in a workspace. Members can view."""
-    workspace = _get_workspace_or_404(db, workspace_id)
+    _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
         raise HTTPException(status_code=403, detail="Guests cannot view files")
 
-    files = db.query(models.File).filter(models.File.workspace_id == workspace_id).order_by(
-        models.File.created_at.desc()
-    ).all()
+    files = (
+        db.query(models.File)
+        .filter(models.File.workspace_id == workspace_id)
+        .order_by(models.File.created_at.desc())
+        .all()
+    )
     return [_file_out(f) for f in files]
 
 

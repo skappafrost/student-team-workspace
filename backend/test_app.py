@@ -5,13 +5,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Role, get_current_user, Base
-from models import Workspace, WorkspaceInvite, WorkspaceMembership
-
+from app import Base, Role, app
+from models import WorkspaceInvite
 
 # ---------------------------------------------------------------------------
 # Test database setup
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def db_session():
@@ -32,6 +32,7 @@ def client(db_session):
         return db_session
 
     from database import get_db
+
     app.dependency_overrides[get_db] = _get_db_override
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -40,6 +41,7 @@ def client(db_session):
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
+
 
 def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
     client.headers["X-Test-User-Id"] = user_id
@@ -54,6 +56,7 @@ def clear_auth(client: TestClient):
 # ---------------------------------------------------------------------------
 # Workspace CRUD tests
 # ---------------------------------------------------------------------------
+
 
 def test_create_workspace(client):
     as_user(client, "alice")
@@ -177,6 +180,7 @@ def test_delete_nonexistent_workspace_returns_404(client):
 # Invite tests
 # ---------------------------------------------------------------------------
 
+
 def test_create_invite_logs_and_returns_token(client, caplog):
     as_user(client, "alice")
     ws = client.post("/workspaces", json={"name": "Invite", "slug": "invite"})
@@ -287,6 +291,7 @@ def test_accept_invite_invalid_token_fails(client):
 # Legacy health/role tests kept for compatibility
 # ---------------------------------------------------------------------------
 
+
 def test_health_returns_ok(client):
     response = client.get("/health")
     assert response.status_code == 200
@@ -301,6 +306,7 @@ def test_require_role_factory_rejects_unknown_role():
 # ---------------------------------------------------------------------------
 # Member Management tests
 # ---------------------------------------------------------------------------
+
 
 def test_list_workspace_members_requires_admin(client):
     """Admin can list members, member cannot."""

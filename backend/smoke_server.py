@@ -1,7 +1,9 @@
 import os
+
 os.environ["DATABASE_URL"] = "sqlite:///./stw_smoke.db"
 
 import uvicorn
+
 from app import app
 
 if __name__ == "__main__":

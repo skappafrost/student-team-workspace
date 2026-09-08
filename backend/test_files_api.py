@@ -1,19 +1,20 @@
 """Tests for File CRUD endpoints with RBAC."""
 
 import io
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import app, Role
+from app import Role, app
 from database import Base
 from models import User
-
 
 # ---------------------------------------------------------------------------
 # Test database setup
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def db_session():
@@ -34,6 +35,7 @@ def client(db_session):
         return db_session
 
     from database import get_db
+
     app.dependency_overrides[get_db] = _get_db_override
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -42,6 +44,7 @@ def client(db_session):
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
+
 
 def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
     client.headers["X-Test-User-Id"] = user_id
@@ -53,7 +56,9 @@ def clear_auth(client: TestClient):
     client.headers.pop("X-Test-User-Role", None)
 
 
-def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
+def create_workspace(
+    client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"
+):
     as_user(client, user_id)
     resp = client.post("/workspaces", json={"name": name, "slug": slug, "description": "x"})
     assert resp.status_code == 201
@@ -80,7 +85,13 @@ def add_member(client, db_session, workspace_id, email, role, user_id):
     return accept_resp.json()
 
 
-def upload_file(client, workspace_id, filename="report.pdf", content=b"file content", file_type="application/pdf"):
+def upload_file(
+    client,
+    workspace_id,
+    filename="report.pdf",
+    content=b"file content",
+    file_type="application/pdf",
+):
     return client.post(
         f"/workspaces/{workspace_id}/files",
         files={"file": (filename, io.BytesIO(content), file_type)},
@@ -90,6 +101,7 @@ def upload_file(client, workspace_id, filename="report.pdf", content=b"file cont
 # ---------------------------------------------------------------------------
 # File CRUD happy paths
 # ---------------------------------------------------------------------------
+
 
 def test_upload_file(client):
     ws = create_workspace(client, "owner")
@@ -168,6 +180,7 @@ def test_delete_file(client):
 # RBAC
 # ---------------------------------------------------------------------------
 
+
 def test_member_can_upload_and_update_own_file(client, db_session):
     ws = create_workspace(client, "owner")
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
@@ -241,22 +254,23 @@ def test_non_member_cannot_access_files(client):
 # Validation / error cases
 # ---------------------------------------------------------------------------
 
+
 def test_get_file_not_found(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.get("/files/nonexistent-uuid")
     assert resp.status_code == 404
 
 
 def test_update_file_not_found(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.patch("/files/nonexistent-uuid", json={"name": "x.pdf"})
     assert resp.status_code == 404
 
 
 def test_delete_file_not_found(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.delete("/files/nonexistent-uuid")
     assert resp.status_code == 404

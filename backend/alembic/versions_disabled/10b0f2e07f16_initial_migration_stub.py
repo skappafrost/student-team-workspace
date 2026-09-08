@@ -9,16 +9,17 @@ database already has this revision applied. This module only exists so
 alembic can resolve the recorded version id. It must never be run against
 a database that has NOT already applied 10b0f2e07f16 (use schema_v1 instead).
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
+from typing import Union
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision: str = "10b0f2e07f16"
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
