@@ -346,6 +346,9 @@ class FileUpload(BaseModel):
 
 class FileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=500)
+    project_id: str | None = None
+    task_id: str | None = None
+    message_id: str | None = None
 
 
 class FileOut(BaseModel):

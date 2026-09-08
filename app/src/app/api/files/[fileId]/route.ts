@@ -23,6 +23,36 @@ async function backendRequest(
   });
 }
 
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ fileId: string }> }
+) {
+  const sessionCookie = await getSessionCookie();
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  const { fileId } = await params;
+  const body = await request.text();
+  const res = await backendRequest(
+    `/files/${encodeURIComponent(fileId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body
+    },
+    sessionCookie
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Failed to update file');
+    return NextResponse.json({ error: text }, { status: res.status });
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  return NextResponse.json(data);
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ fileId: string }> }

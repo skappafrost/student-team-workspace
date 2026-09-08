@@ -14,6 +14,7 @@ import { Icons } from '@/components/icons';
 import { FileRecord } from '../api/types';
 import { formatSize, downloadFile } from '../api/service';
 import { filesQueryOptions, useDeleteFile } from '../api/queries';
+import { ShareFileDialog } from './share-file-dialog';
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString();
@@ -48,6 +49,7 @@ export function FileList() {
             <TableCell>{formatDate(file.created_at)}</TableCell>
             <TableCell className='text-right'>
               <div className='flex justify-end gap-2'>
+                <ShareFileDialog file={file} />
                 <Button variant='outline' size='sm' onClick={() => downloadFile(file)}>
                   <Icons.download className='mr-1.5 h-4 w-4' />
                   Download

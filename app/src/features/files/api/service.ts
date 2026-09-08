@@ -18,14 +18,33 @@ async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T
   return res.json() as Promise<T>;
 }
 
-export async function getFiles(): Promise<FileRecord[]> {
-  const data = await apiRequest<{ files: FileRecord[] }>('');
+export interface FileLinkFilter {
+  project_id?: string;
+  task_id?: string;
+  message_id?: string;
+}
+
+export async function getFiles(filter?: FileLinkFilter): Promise<FileRecord[]> {
+  const params = new URLSearchParams();
+  if (filter?.project_id) params.set('project_id', filter.project_id);
+  if (filter?.task_id) params.set('task_id', filter.task_id);
+  if (filter?.message_id) params.set('message_id', filter.message_id);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const data = await apiRequest<{ files: FileRecord[] }>(suffix);
   return data.files || [];
 }
 
-export async function uploadFile(payload: { file: File }): Promise<FileRecord> {
+export async function uploadFile(payload: {
+  file: File;
+  project_id?: string;
+  task_id?: string;
+  message_id?: string;
+}): Promise<FileRecord> {
   const formData = new FormData();
   formData.append('file', payload.file);
+  if (payload.project_id) formData.append('project_id', payload.project_id);
+  if (payload.task_id) formData.append('task_id', payload.task_id);
+  if (payload.message_id) formData.append('message_id', payload.message_id);
 
   const res = await fetch(API_BASE, {
     method: 'POST',
@@ -39,6 +58,22 @@ export async function uploadFile(payload: { file: File }): Promise<FileRecord> {
   }
 
   return res.json() as Promise<FileRecord>;
+}
+
+export async function updateFile(
+  id: string,
+  payload: {
+    name?: string;
+    project_id?: string | null;
+    task_id?: string | null;
+    message_id?: string | null;
+  }
+): Promise<FileRecord> {
+  return apiRequest<FileRecord>(`/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function deleteFile(id: string): Promise<void> {

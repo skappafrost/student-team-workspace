@@ -5,7 +5,7 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi import File as FileParam
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,15 @@ import models
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
-from dependencies import _get_file_or_404, _get_workspace_or_404, get_current_user
+from dependencies import (
+    _get_channel_or_404,
+    _get_file_or_404,
+    _get_message_or_404,
+    _get_project_or_404,
+    _get_task_or_404,
+    _get_workspace_or_404,
+    get_current_user,
+)
 
 router = APIRouter()
 
@@ -61,14 +69,41 @@ def _can_modify_file(
     return file.uploader_id == current_user["id"]
 
 
+def _validate_link_targets(
+    db: Session,
+    workspace_id: str,
+    project_id: str | None,
+    task_id: str | None,
+    message_id: str | None,
+) -> None:
+    """Ensure linked resources exist and belong to the same workspace."""
+    if project_id is not None:
+        project = _get_project_or_404(db, project_id)
+        if project.workspace_id != workspace_id:
+            raise HTTPException(status_code=422, detail="Project is not in this workspace")
+    if task_id is not None:
+        task = _get_task_or_404(db, task_id)
+        task_project = _get_project_or_404(db, task.project_id)
+        if task_project.workspace_id != workspace_id:
+            raise HTTPException(status_code=422, detail="Task is not in this workspace")
+    if message_id is not None:
+        message = _get_message_or_404(db, message_id)
+        channel = _get_channel_or_404(db, message.channel_id)
+        if channel.workspace_id != workspace_id:
+            raise HTTPException(status_code=422, detail="Message is not in this workspace")
+
+
 @router.post("/workspaces/{workspace_id}/files", status_code=201)
 async def upload_file(
     workspace_id: str,
     file: UploadFile = FileParam(...),
+    project_id: str | None = Form(None),
+    task_id: str | None = Form(None),
+    message_id: str | None = Form(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Upload a file to a workspace. Requires member role or higher."""
+    """Upload a file to a workspace, optionally linked to a project/task/message."""
     _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
@@ -78,6 +113,8 @@ async def upload_file(
 
     if not file.filename:
         raise HTTPException(status_code=422, detail="File name is required")
+
+    _validate_link_targets(db, workspace_id, project_id, task_id, message_id)
 
     content = await file.read()
     size = len(content)
@@ -93,6 +130,9 @@ async def upload_file(
 
     db_file = models.File(
         workspace_id=workspace_id,
+        project_id=project_id,
+        task_id=task_id,
+        message_id=message_id,
         uploader_id=current_user["id"],
         original_name=file.filename,
         storage_key=storage_key,
@@ -119,10 +159,13 @@ async def upload_file(
 @router.get("/workspaces/{workspace_id}/files")
 async def list_workspace_files(
     workspace_id: str,
+    project_id: str | None = None,
+    task_id: str | None = None,
+    message_id: str | None = None,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List files in a workspace. Members can view."""
+    """List files in a workspace, optionally filtered by linked resource."""
     _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
@@ -130,12 +173,14 @@ async def list_workspace_files(
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
         raise HTTPException(status_code=403, detail="Guests cannot view files")
 
-    files = (
-        db.query(models.File)
-        .filter(models.File.workspace_id == workspace_id)
-        .order_by(models.File.created_at.desc())
-        .all()
-    )
+    query = db.query(models.File).filter(models.File.workspace_id == workspace_id)
+    if project_id is not None:
+        query = query.filter(models.File.project_id == project_id)
+    if task_id is not None:
+        query = query.filter(models.File.task_id == task_id)
+    if message_id is not None:
+        query = query.filter(models.File.message_id == message_id)
+    files = query.order_by(models.File.created_at.desc()).all()
     return [_file_out(f) for f in files]
 
 
@@ -172,6 +217,20 @@ async def update_file(
 
     if payload.name is not None:
         file.original_name = payload.name
+    if (
+        payload.project_id is not None
+        or payload.task_id is not None
+        or payload.message_id is not None
+    ):
+        _validate_link_targets(
+            db, file.workspace_id, payload.project_id, payload.task_id, payload.message_id
+        )
+        if payload.project_id is not None:
+            file.project_id = payload.project_id
+        if payload.task_id is not None:
+            file.task_id = payload.task_id
+        if payload.message_id is not None:
+            file.message_id = payload.message_id
 
     db.commit()
     db.refresh(file)

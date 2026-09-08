@@ -25,6 +25,7 @@ import { useWorkspaceMembers } from '@/features/workspace/hooks/use-workspace-me
 import { Task, TaskPriority, TaskStatus } from '../api/types';
 import { useUpdateTask } from '../hooks/use-kanban-tasks';
 import { AISummaryCard } from '@/features/ai/components/ai-summary-card';
+import { TaskAttachments } from '@/features/files/components/task-attachments';
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: 'Low',
@@ -238,6 +239,8 @@ function TaskDetailBody({ task }: { task: Task }) {
         <Button className='mt-2 w-full' disabled={update.isPending} onClick={handleSave} size='sm'>
           {update.isPending ? 'Saving...' : 'Save changes'}
         </Button>
+
+        <TaskAttachments taskId={task.id} />
 
         <AISummaryCard kind='task' refId={task.id} title='Summarize task' />
       </div>

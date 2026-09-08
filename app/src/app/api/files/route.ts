@@ -34,7 +34,7 @@ async function backendRequest(
   });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const sessionCookie = await getSessionCookie();
   if (!sessionCookie) {
     return NextResponse.json({ files: [] });
@@ -45,8 +45,16 @@ export async function GET() {
     return NextResponse.json({ files: [] });
   }
 
+  const { searchParams } = new URL(request.url);
+  const filters = new URLSearchParams();
+  for (const key of ['project_id', 'task_id', 'message_id']) {
+    const value = searchParams.get(key);
+    if (value) filters.set(key, value);
+  }
+  const suffix = filters.size > 0 ? `?${filters.toString()}` : '';
+
   const res = await backendRequest(
-    `/workspaces/${encodeURIComponent(workspaceId)}/files`,
+    `/workspaces/${encodeURIComponent(workspaceId)}/files${suffix}`,
     { method: 'GET' },
     sessionCookie
   );
@@ -79,6 +87,12 @@ export async function POST(request: Request) {
 
   const backendForm = new FormData();
   backendForm.append('file', file, (file as File).name || 'upload');
+  for (const key of ['project_id', 'task_id', 'message_id']) {
+    const value = formData.get(key);
+    if (typeof value === 'string' && value) {
+      backendForm.append(key, value);
+    }
+  }
 
   const res = await backendRequest(
     `/workspaces/${encodeURIComponent(workspaceId)}/files`,

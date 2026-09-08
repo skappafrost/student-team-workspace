@@ -281,3 +281,90 @@ def test_upload_without_file_returns_422(client):
     as_user(client, "owner")
     resp = client.post(f"/workspaces/{ws['id']}/files")
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# F01: Resource-linked uploads
+# ---------------------------------------------------------------------------
+
+
+def _make_project(client, ws_id, name="Proj"):
+    resp = client.post(f"/workspaces/{ws_id}/projects", json={"name": name})
+    assert resp.status_code == 201
+    return resp.json()
+
+
+def _make_task(client, project_id, title="T"):
+    resp = client.post(f"/projects/{project_id}/tasks", json={"title": title})
+    assert resp.status_code == 201
+    return resp.json()
+
+
+def _make_channel_message(client, ws_id, content="hi"):
+    ch = client.post(f"/workspaces/{ws_id}/channels", json={"name": "c1", "type": "general"})
+    assert ch.status_code == 201
+    msg = client.post(f"/channels/{ch.json()['id']}/messages", json={"content": content})
+    assert msg.status_code == 201
+    return msg.json()
+
+
+def test_upload_linked_to_project(client):
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    proj = _make_project(client, ws["id"])
+    resp = client.post(
+        f"/workspaces/{ws['id']}/files",
+        files={"file": ("spec.pdf", io.BytesIO(b"x"), "application/pdf")},
+        data={"project_id": proj["id"]},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["project_id"] == proj["id"]
+
+    lst = client.get(f"/workspaces/{ws['id']}/files", params={"project_id": proj["id"]})
+    assert len(lst.json()) == 1
+
+
+def test_upload_linked_to_task_and_message(client):
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    proj = _make_project(client, ws["id"])
+    task = _make_task(client, proj["id"])
+    msg = _make_channel_message(client, ws["id"])
+
+    resp = client.post(
+        f"/workspaces/{ws['id']}/files",
+        files={"file": ("a.txt", io.BytesIO(b"a"), "text/plain")},
+        data={"task_id": task["id"], "message_id": msg["id"]},
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["task_id"] == task["id"]
+    assert data["message_id"] == msg["id"]
+
+    by_task = client.get(f"/workspaces/{ws['id']}/files", params={"task_id": task["id"]}).json()
+    assert len(by_task) == 1
+
+
+def test_upload_link_rejects_cross_workspace(client):
+    ws1 = create_workspace(client, "owner", "WS1", "ws1")
+    ws2 = create_workspace(client, "owner", "WS2", "ws2")
+    as_user(client, "owner")
+    proj2 = _make_project(client, ws2["id"])
+
+    resp = client.post(
+        f"/workspaces/{ws1['id']}/files",
+        files={"file": ("a.txt", io.BytesIO(b"a"), "text/plain")},
+        data={"project_id": proj2["id"]},
+    )
+    assert resp.status_code == 422
+
+
+def test_upload_link_unknown_target_404(client):
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    resp = client.post(
+        f"/workspaces/{ws['id']}/files",
+        files={"file": ("a.txt", io.BytesIO(b"a"), "text/plain")},
+        data={"task_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert resp.status_code == 404
