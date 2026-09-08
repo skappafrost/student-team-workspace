@@ -390,6 +390,7 @@ class TestRoleMatrix:
             user_id = _create_test_member(owner.client, ws_id, target_role)
             # For transfer-ownership payload, fill in the real user_id
             if method == "POST" and "transfer-ownership" in path:
+
                 def payload_factory(uid=user_id):
                     return {"user_id": uid}
 
@@ -408,6 +409,7 @@ class TestRoleMatrix:
                 )
                 current_user_id = _create_test_member(owner.client, ws_id, target_role)
                 if method == "POST" and "transfer-ownership" in path:
+
                     def payload_factory(uid=current_user_id):
                         return {"user_id": uid}
 
