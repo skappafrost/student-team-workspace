@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
+import channel_access
 
 
 class ProviderNotConfiguredError(Exception):
@@ -126,6 +127,9 @@ def summarize_channel(db: Session, channel_id: str, user_id: str) -> dict:
         models.WorkspaceMember.user_id == user_id,
     ).first()
     if not membership:
+        raise HTTPException(status_code=403, detail="Not allowed to access this channel")
+
+    if not channel_access.is_private_channel_member(db, channel, user_id):
         raise HTTPException(status_code=403, detail="Not allowed to access this channel")
 
     # Build a transcript from recent messages (chronological).
@@ -252,7 +256,12 @@ def search_workspace(
             .filter(models.Channel.workspace_id.in_(workspace_ids))
             .all()
         )
+        # Private channels must not leak into search results for non-members.
+        member_channel_ids = channel_access.private_channel_ids_for_user(db, user_id)
         for message in messages:
+            ch = message.channel
+            if ch.is_private and ch.created_by != user_id and ch.id not in member_channel_ids:
+                continue
             score = _score(q, "", message.content)
             if score > 0:
                 results.append(

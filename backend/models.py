@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -99,6 +100,9 @@ class User(Base):
     files: Mapped[List["File"]] = relationship("File", back_populates="uploader")
     notifications: Mapped[List["Notification"]] = relationship(
         "Notification", back_populates="user", cascade="all, delete-orphan"
+    )
+    channel_memberships: Mapped[List["ChannelMember"]] = relationship(
+        "ChannelMember", back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -319,6 +323,35 @@ class Channel(Base):
     messages: Mapped[List["Message"]] = relationship(
         "Message", back_populates="channel", cascade="all, delete-orphan"
     )
+    members: Mapped[List["ChannelMember"]] = relationship(
+        "ChannelMember", back_populates="channel", cascade="all, delete-orphan"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ChannelMember (join table channels <-> users for private channels)
+# ---------------------------------------------------------------------------
+class ChannelMember(Base):
+    __tablename__ = "channel_members"
+    __table_args__ = (
+        UniqueConstraint("channel_id", "user_id", name="uq_channel_members_channel_user"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=_new_uuid
+    )
+    channel_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("channels.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    joined_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    channel: Mapped["Channel"] = relationship("Channel", back_populates="members")
+    user: Mapped["User"] = relationship("User", back_populates="channel_memberships")
 
 
 # ---------------------------------------------------------------------------
