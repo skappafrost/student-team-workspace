@@ -298,6 +298,8 @@ class TokenOut(BaseModel):
 
 app = FastAPI(title="Student Team Workspace API")
 
+logger = logging.getLogger("stw")
+
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2098,10 +2100,21 @@ async def delete_file(
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.ADMIN]:
         raise HTTPException(status_code=403, detail="Only admins can delete files")
 
-    storage_path = UPLOAD_DIR / file.storage_key
-    if storage_path.exists():
-        storage_path.unlink()
-
+    # Commit the row deletion BEFORE unlinking the bytes: if the commit fails
+    # the bytes must stay on disk (a row pointing at a missing file breaks
+    # downloads with a 500). Worst case we leave an orphaned upload, which
+    # `python -m maintenance purge-orphans` reclaims.
     db.delete(file)
     db.commit()
+
+    storage_path = UPLOAD_DIR / file.storage_key
+    try:
+        if storage_path.exists():
+            storage_path.unlink()
+    except OSError as exc:
+        # Windows: a browser may still hold the file open. The row is already
+        # deleted; the next sweeper run removes the leftover bytes.
+        logger.warning(
+            "Could not unlink %s after deleting row %s: %s", storage_path, file.id, exc
+        )
     return None
