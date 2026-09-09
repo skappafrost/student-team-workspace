@@ -16,13 +16,17 @@ import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { CreateChannelDialog } from './create-channel-dialog';
 
-function buildOptimisticMessage(content: string, channelId: string): Message {
+function buildOptimisticMessage(
+  content: string,
+  channelId: string,
+  parentId: string | null = null
+): Message {
   return {
     id: `pending-${Date.now()}`,
     channel_id: channelId,
     author_id: 'you',
     content,
-    parent_id: null,
+    parent_id: parentId,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
@@ -32,6 +36,7 @@ export default function ChatPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
   const channelsQuery = useQuery<Channel[]>({
     queryKey: channelKeys.list(),
@@ -71,14 +76,17 @@ export default function ChatPage() {
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
       if (!selectedChannel) throw new Error('No channel selected');
-      return sendMessage(selectedChannel.id, { content });
+      return sendMessage(selectedChannel.id, {
+        content,
+        parent_id: replyingTo?.id ?? null
+      });
     },
     onMutate: async (content) => {
       if (!selectedChannel) return;
       const key = channelKeys.messages(selectedChannel.id);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<Message[]>(key);
-      const optimistic = buildOptimisticMessage(content, selectedChannel.id);
+      const optimistic = buildOptimisticMessage(content, selectedChannel.id, replyingTo?.id ?? null);
       queryClient.setQueryData<Message[]>(key, (old) => [...(old ?? []), optimistic]);
       return { previous, key };
     },
@@ -93,6 +101,7 @@ export default function ChatPage() {
         void queryClient.invalidateQueries({ queryKey: context.key });
       }
       setDraft('');
+      setReplyingTo(null);
     }
   });
 
@@ -156,15 +165,27 @@ export default function ChatPage() {
                   <Skeleton className='h-16 w-2/3' />
                 </div>
               ) : (
-                <MessageList messages={messagesQuery.data ?? []} currentUserId='you' />
+                <MessageList
+                  messages={messagesQuery.data ?? []}
+                  currentUserId='you'
+                  onReply={setReplyingTo}
+                />
               )}
 
               <MessageInput
                 value={draft}
                 onChange={setDraft}
                 onSubmit={handleSend}
-                placeholder={`Message #${selectedChannel.name}`}
+                placeholder={
+                  replyingTo
+                    ? `Reply to ${replyingTo.author_name || replyingTo.author_id}...`
+                    : `Message #${selectedChannel.name}`
+                }
                 disabled={sendMessageMutation.isPending}
+                replyingTo={
+                  replyingTo ? replyingTo.author_name || replyingTo.author_id : null
+                }
+                onCancelReply={() => setReplyingTo(null)}
               />
             </>
           ) : (

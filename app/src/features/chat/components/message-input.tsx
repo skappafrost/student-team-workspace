@@ -11,6 +11,8 @@ interface MessageInputProps {
   onSubmit: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  replyingTo?: string | null;
+  onCancelReply?: () => void;
 }
 
 export function MessageInput({
@@ -18,7 +20,9 @@ export function MessageInput({
   onChange,
   onSubmit,
   placeholder = 'Write a message...',
-  disabled = false
+  disabled = false,
+  replyingTo,
+  onCancelReply
 }: MessageInputProps) {
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -28,6 +32,21 @@ export function MessageInput({
 
   return (
     <form onSubmit={handleSubmit} className='shrink-0' aria-label='Message composer'>
+      {replyingTo && (
+        <div className='mb-2 flex items-center justify-between rounded-lg border border-border/40 bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground'>
+          <span>
+            Replying to <span className='font-medium text-foreground'>{replyingTo}</span>
+          </span>
+          <button
+            type='button'
+            onClick={onCancelReply}
+            className='text-muted-foreground hover:text-foreground'
+            aria-label='Cancel reply'
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className='border-border/40 bg-background/80 flex items-end gap-2 rounded-2xl border p-3 backdrop-blur sm:gap-3 sm:rounded-3xl sm:p-4'>
         <Textarea
           value={value}
