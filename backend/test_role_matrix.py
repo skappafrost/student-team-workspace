@@ -288,6 +288,39 @@ class TestPublicAuthEndpoints:
         response = client.post("/auth/login", json={"email": _unique_email("nonexist"), "password": "x"})
         assert response.status_code == 401
 
+    @pytest.mark.parametrize("length", [8, 72])
+    def test_register_ascii_password_within_bcrypt_limit_returns_201(self, client, length):
+        """ASCII passwords from 8 up to 72 chars register fine (72 bytes is bcrypt's cap)."""
+        payload = {"email": _unique_email(f"ascii{length}"), "password": "a" * length}
+        response = client.post("/auth/register", json=payload)
+        assert response.status_code == 201, response.text
+
+    def test_register_multibyte_over_72_bytes_returns_422(self, client):
+        """é×40 is 80 UTF-8 bytes > bcrypt's 72-byte cap: clean 422, never a raw ValueError."""
+        payload = {"email": _unique_email("multibyte"), "password": "é" * 40}
+        response = client.post("/auth/register", json=payload)
+        assert response.status_code == 422, response.text
+        assert "Password exceeds 72 bytes" in response.text
+
+    def test_register_ascii_over_72_bytes_returns_422(self, client):
+        """73 ASCII chars pass the 128-char cap but exceed 72 bytes: still rejected."""
+        payload = {"email": _unique_email("ascii73"), "password": "a" * 73}
+        response = client.post("/auth/register", json=payload)
+        assert response.status_code == 422, response.text
+
+    def test_register_over_128_chars_returns_422(self, client):
+        """Schema max_length=128 enforced independently of the byte check."""
+        payload = {"email": _unique_email("toolong"), "password": "a" * 129}
+        response = client.post("/auth/register", json=payload)
+        assert response.status_code == 422, response.text
+
+    def test_login_with_over_72_byte_password_returns_401_not_500(self, client):
+        """Login with a >72-byte password must read as bad credentials (401), never crash."""
+        email = _unique_email("over72login")
+        client.post("/auth/register", json={"email": email, "password": "password123"})
+        response = client.post("/auth/login", json={"email": email, "password": "é" * 40})
+        assert response.status_code == 401, response.text
+
 
 # ---------------------------------------------------------------------------
 # Role-matrix tests (guarded endpoints)
