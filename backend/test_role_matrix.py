@@ -14,12 +14,9 @@ import uuid
 from datetime import timedelta
 from typing import Optional
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from app import app, Role, get_current_user, create_access_token, Base
+from app import app, Role, create_access_token
+from conftest import make_user
 import models  # noqa: F401  -- ensures all model tables are registered on Base.metadata
-from models import Workspace, WorkspaceInvite, WorkspaceMembership
 
 
 # ---------------------------------------------------------------------------
@@ -34,32 +31,7 @@ def _jwt_auth_client(user_id: str, expires_delta: Optional[timedelta] = None) ->
     return client
 
 
-# ---------------------------------------------------------------------------
-# Test database setup
-# ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw.db")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    def _get_db_override():
-        return db_session
-
-    from database import get_db
-    app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +49,7 @@ class RoleUser:
 
     @property
     def client(self) -> TestClient:
-        """Return the client with this user's auth headers set."""
+        """Return the client with this user's real JWT auth set."""
         # For unauthenticated users, return a completely fresh client
         if self.role is None:
             from fastapi.testclient import TestClient
@@ -85,14 +57,12 @@ class RoleUser:
             fresh_client = TestClient(app)
             return fresh_client
 
-        self._client.headers["X-Test-User-Id"] = self.user_id
-        self._client.headers["X-Test-User-Role"] = self.role.value
+        self._client.headers["Authorization"] = f"Bearer {create_access_token(self.user_id)}"
         return self._client
 
     def clear_auth(self):
         """Clear auth headers."""
-        self._client.headers.pop("X-Test-User-Id", None)
-        self._client.headers.pop("X-Test-User-Role", None)
+        self._client.headers.pop("Authorization", None)
         # Also clear cookies to avoid JWT cookie interference
         self._client.cookies.clear()
 
@@ -119,6 +89,7 @@ def role_users(client, db_session):
     assert invite_resp.status_code == 201
     token = invite_resp.json()["token"]
     owner.clear_auth()
+    make_user(db_session, "admin-user")
     admin.client.post("/invites/accept", json={"token": token})
     admin.clear_auth()
 
@@ -131,6 +102,7 @@ def role_users(client, db_session):
     assert invite_resp.status_code == 201
     token = invite_resp.json()["token"]
     owner.clear_auth()
+    make_user(db_session, "member-user")
     member.client.post("/invites/accept", json={"token": token})
     member.clear_auth()
 
@@ -143,6 +115,7 @@ def role_users(client, db_session):
     assert invite_resp.status_code == 201
     token = invite_resp.json()["token"]
     owner.clear_auth()
+    make_user(db_session, "guest-user")
     guest.client.post("/invites/accept", json={"token": token})
     guest.clear_auth()
 
@@ -170,7 +143,10 @@ def unauthenticated_user(client):
 # Only endpoints using get_current_user dependency (support test headers)
 EXPECTED_ACCESS = {
     # Workspace endpoints
-    ("POST", "/workspaces"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER], "public": False},
+    # POST /workspaces is a GLOBAL action (workspace.create = MEMBER role from
+    # the token, which real JWTs always satisfy). A user who is a "guest" in one
+    # workspace is still a platform member and may create their own workspace.
+    ("POST", "/workspaces"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
     ("GET", "/workspaces"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
     ("GET", "/workspaces/{ws_id}"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
     ("PATCH", "/workspaces/{ws_id}"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
@@ -220,8 +196,7 @@ def _create_test_member(client: TestClient, ws_id: str, role: Role = Role.MEMBER
     token = invite_resp.json()["token"]
 
     accept_client = TestClient(app)
-    accept_client.headers["X-Test-User-Id"] = user_id
-    accept_client.headers["X-Test-User-Role"] = role.value
+    accept_client.headers["Authorization"] = f"Bearer {create_access_token(user_id)}"
     accept_resp = accept_client.post("/invites/accept", json={"token": token})
     assert accept_resp.status_code == 201, f"Failed to accept invite: {accept_resp.text}"
     return user_id
@@ -500,8 +475,7 @@ class TestRoleMatrix:
         # For workspace-specific endpoints, we need a valid workspace_id
         # Create one first using a temporary authenticated user
         temp_client = TestClient(app)
-        temp_client.headers["X-Test-User-Id"] = "temp-owner"
-        temp_client.headers["X-Test-User-Role"] = Role.OWNER.value
+        temp_client.headers["Authorization"] = f"Bearer {create_access_token('temp-owner')}"
         ws_resp = temp_client.post("/workspaces", json={"name": "Temp", "slug": "temp"})
         assert ws_resp.status_code == 201
         ws_id = ws_resp.json()["id"]
@@ -582,8 +556,6 @@ class TestRoleMatrix:
 
         # Admin can update and invite but NOT delete
         admin = RoleUser(client, "admin-h", Role.ADMIN)
-        owner.client.headers["X-Test-User-Id"] = "owner-h"
-        owner.client.headers["X-Test-User-Role"] = Role.OWNER.value
         ws_resp2 = owner.client.post("/workspaces", json={"name": "WS2", "slug": "ws2-h"})
         ws_id2 = ws_resp2.json()["id"]
         invite_resp = owner.client.post(f"/workspaces/{ws_id2}/invites", json={"email": "admin@example.com", "role": Role.ADMIN.value})
@@ -598,8 +570,6 @@ class TestRoleMatrix:
 
         # Member can view but NOT update/invite/delete
         member = RoleUser(client, "member-h", Role.MEMBER)
-        owner.client.headers["X-Test-User-Id"] = "owner-h"
-        owner.client.headers["X-Test-User-Role"] = Role.OWNER.value
         ws_resp3 = owner.client.post("/workspaces", json={"name": "WS3", "slug": "ws3-h"})
         ws_id3 = ws_resp3.json()["id"]
         invite_resp = owner.client.post(f"/workspaces/{ws_id3}/invites", json={"email": "member@example.com", "role": Role.MEMBER.value})
@@ -615,8 +585,6 @@ class TestRoleMatrix:
 
         # Guest can view but NOT update/invite/delete
         guest = RoleUser(client, "guest-h", Role.GUEST)
-        owner.client.headers["X-Test-User-Id"] = "owner-h"
-        owner.client.headers["X-Test-User-Role"] = Role.OWNER.value
         ws_resp4 = owner.client.post("/workspaces", json={"name": "WS4", "slug": "ws4-h"})
         ws_id4 = ws_resp4.json()["id"]
         invite_resp = owner.client.post(f"/workspaces/{ws_id4}/invites", json={"email": "guest@example.com", "role": Role.GUEST.value})
@@ -638,28 +606,22 @@ class TestRoleMatrix:
 class TestEdgeCases:
     """Edge case tests for RBAC."""
 
-    def test_invalid_role_in_token_defaults_to_guest(self, client):
-        """Test that invalid role in token defaults to guest (lowest privilege).
+    def test_invalid_role_in_token_defaults_to_member(self, client):
+        """A real JWT has no role claim; /auth/me resolves identity from the DB.
 
-        Note: In the current implementation, workspace endpoints check the
-        membership role from the database, not the header. This test verifies
-        the /auth/me endpoint behavior where header role is used directly.
+        The old header-based bypass trusted a client-supplied role header; real
+        auth derives role from workspace membership, never from the token.
         """
-        # Register a user first
+        # Register a user first (real auth flow)
         client.post("/auth/register", json={"email": "test-role@example.com", "password": "password123"})
         # Login to get cookie
-        client.post("/auth/login", json={"email": "test-role@example.com", "password": "password123"})
+        login = client.post("/auth/login", json={"email": "test-role@example.com", "password": "password123"})
+        assert login.status_code == 200
 
-        # Now test /auth/me with invalid role header
-        client.headers["X-Test-User-Id"] = "test-user"
-        client.headers["X-Test-User-Role"] = "superuser"  # Invalid role
-
+        # /auth/me resolves the user from the DB via the real session cookie
         response = client.get("/auth/me")
-        # The get_current_user function falls back to Role.MEMBER for invalid roles
-        # but this endpoint doesn't enforce role checks
-
-        client.headers.pop("X-Test-User-Id", None)
-        client.headers.pop("X-Test-User-Role", None)
+        assert response.status_code == 200
+        assert response.json()["email"] == "test-role@example.com"
 
     def test_expired_token_returns_401(self, client):
         """Test that expired JWT returns 401."""

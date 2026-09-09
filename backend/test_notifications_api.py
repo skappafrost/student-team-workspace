@@ -2,49 +2,17 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from app import app, Role
-from database import Base, get_db
-from models import User
+from conftest import as_user, make_user
 
 
-# ---------------------------------------------------------------------------
-# Test database setup
-# ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw_notifications.db", echo=False)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    def _get_db_override():
-        return db_session
-
-    app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
-
-def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
-    client.headers["X-Test-User-Id"] = user_id
-    client.headers["X-Test-User-Role"] = role
-
 
 def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
     as_user(client, user_id)
@@ -54,10 +22,7 @@ def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS
 
 
 def create_user(client, db_session, user_id, email):
-    user = User(id=user_id, email=email, display_name=user_id)
-    db_session.add(user)
-    db_session.commit()
-    return user
+    return make_user(db_session, user_id, email=email)
 
 
 # ---------------------------------------------------------------------------

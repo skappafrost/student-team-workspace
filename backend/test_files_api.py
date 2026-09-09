@@ -3,55 +3,17 @@
 import io
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from app import app, Role
-from database import Base
-from models import User
+from conftest import as_user, clear_auth, make_user
 
 
-# ---------------------------------------------------------------------------
-# Test database setup
-# ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw_files.db", echo=False)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    def _get_db_override():
-        return db_session
-
-    from database import get_db
-    app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
-
-def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
-    client.headers["X-Test-User-Id"] = user_id
-    client.headers["X-Test-User-Role"] = role
-
-
-def clear_auth(client: TestClient):
-    client.headers.pop("X-Test-User-Id", None)
-    client.headers.pop("X-Test-User-Role", None)
-
 
 def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
     as_user(client, user_id)
@@ -69,12 +31,9 @@ def add_member(client, db_session, workspace_id, email, role, user_id):
     assert owner_resp.status_code == 201, owner_resp.text
     token = owner_resp.json()["token"]
 
-    new_user = User(id=user_id, email=email, display_name=user_id)
-    db_session.add(new_user)
-    db_session.commit()
-
+    make_user(db_session, user_id, email=email)
     clear_auth(client)
-    as_user(client, user_id, role)
+    as_user(client, user_id)
     accept_resp = client.post("/invites/accept", json={"token": token})
     assert accept_resp.status_code == 201, accept_resp.text
     return accept_resp.json()
@@ -172,7 +131,7 @@ def test_member_can_upload_and_update_own_file(client, db_session):
     ws = create_workspace(client, "owner")
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
 
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     file_id = upload_file(client, ws["id"], "member.pdf", b"x").json()["id"]
 
     update_resp = client.patch(f"/files/{file_id}", json={"name": "updated.pdf"})
@@ -186,7 +145,7 @@ def test_member_cannot_update_others_file(client, db_session):
     file_id = upload_file(client, ws["id"], "owner.pdf", b"x").json()["id"]
 
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     resp = client.patch(f"/files/{file_id}", json={"name": "hacked.pdf"})
     assert resp.status_code == 403
 
@@ -197,7 +156,7 @@ def test_admin_can_update_and_delete_any_file(client, db_session):
     file_id = upload_file(client, ws["id"], "target.pdf", b"x").json()["id"]
 
     add_member(client, db_session, ws["id"], "admin@example.com", Role.ADMIN.value, "admin-user")
-    as_user(client, "admin-user", Role.ADMIN.value)
+    as_user(client, "admin-user")
     update_resp = client.patch(f"/files/{file_id}", json={"name": "admin.pdf"})
     assert update_resp.status_code == 200
     assert update_resp.json()["name"] == "admin.pdf"
@@ -208,7 +167,7 @@ def test_guest_cannot_upload_file(client, db_session):
     ws = create_workspace(client, "owner")
     add_member(client, db_session, ws["id"], "guest@example.com", Role.GUEST.value, "guest-user")
 
-    as_user(client, "guest-user", Role.GUEST.value)
+    as_user(client, "guest-user")
     resp = upload_file(client, ws["id"], "guest.pdf", b"x")
     assert resp.status_code == 403
 
@@ -219,7 +178,7 @@ def test_guest_cannot_list_files(client, db_session):
     upload_file(client, ws["id"], "public.pdf", b"x")
 
     add_member(client, db_session, ws["id"], "guest@example.com", Role.GUEST.value, "guest-user")
-    as_user(client, "guest-user", Role.GUEST.value)
+    as_user(client, "guest-user")
     resp = client.get(f"/workspaces/{ws['id']}/files")
     assert resp.status_code == 403
 
@@ -229,7 +188,7 @@ def test_non_member_cannot_access_files(client):
     as_user(client, "owner")
     file_id = upload_file(client, ws["id"], "secret.pdf", b"x").json()["id"]
 
-    as_user(client, "stranger", Role.OWNER.value)
+    as_user(client, "stranger")
     resp_get = client.get(f"/files/{file_id}")
     assert resp_get.status_code == 403
 
