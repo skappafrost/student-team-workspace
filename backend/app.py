@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
+import logging
 import os
 import uuid
 
@@ -132,18 +133,42 @@ def _decode_token(token: str) -> Optional[dict]:
         return None
 
 
+def _test_auth_bypass_enabled() -> bool:
+    """Spec (T003): bypass header is honored ONLY when BOTH hold, evaluated at
+    request time so monkeypatching works in tests:
+      1. STW_TEST_AUTH=1 is explicitly set, AND
+      2. ENVIRONMENT is 'test' or 'dev' (belt & suspenders)."""
+    if os.getenv("STW_TEST_AUTH", "") != "1":
+        return False
+    return os.environ.get("ENVIRONMENT", "") in {"test", "dev"}
+
+def _warn_test_auth_once() -> None:
+    """Startup-visible warning when the bypass flag is ON (logged once per process)."""
+    global _test_auth_warned
+    if _test_auth_warned:
+        return
+    _test_auth_warned = True
+    logging.getLogger("uvicorn.error").warning(
+        "STW_TEST_AUTH=1: X-Test-User-* header auth bypass is ACTIVE (environment=%r). "
+        "Never enable outside test/dev.", os.environ.get("ENVIRONMENT", ""),
+    )
+
+_test_auth_warned = False
+
 def get_current_user(request: Request) -> dict:
     """Return the currently authenticated user from JWT session cookie.
 
-    Falls back to the legacy X-Test-User-* headers for existing tests.
-    """
-    override = request.headers.get("X-Test-User-Id")
-    if override:
-        return {
-            "id": override,
-            "name": "Test User",
-            "role": request.headers.get("X-Test-User-Role", Role.OWNER.value),
-        }
+    Falls back to the legacy X-Test-User-* headers only when the explicit test
+    flag STW_TEST_AUTH=1 is set AND ENVIRONMENT is test/dev (T003)."""
+    if _test_auth_bypass_enabled():
+        _warn_test_auth_once()
+        override = request.headers.get("X-Test-User-Id")
+        if override:
+            return {
+                "id": override,
+                "name": "Test User",
+                "role": request.headers.get("X-Test-User-Role", Role.OWNER.value),
+            }
 
     token = _token_from_request(request)
     if not token:
