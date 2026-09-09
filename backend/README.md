@@ -132,6 +132,7 @@ pytest test_invites_api.py test_workspace_api.py
 | `alembic downgrade -1` | Roll back one migration |
 | `alembic revision --autogenerate -m "description"` | Generate a new migration |
 | `uvicorn app:app --reload` | Start dev server with hot reload |
+| `python -m maintenance purge-orphans` | Dry-run sweep: report File rows with missing bytes and orphaned uploads older than 24h. Add `--apply` to drop rows / unlink files (refuses Postgres without `--apply`). |
 
 ---
 
@@ -145,6 +146,7 @@ backend/
 ├── schemas.py             # Pydantic request/response schemas
 ├── ai_assist.py           # AI assistant helpers
 ├── email_sender.py        # Email invite stub
+├── maintenance.py         # Ops CLI: python -m maintenance purge-orphans
 ├── alembic/               # Alembic migrations
 │   ├── env.py
 │   └── versions/
