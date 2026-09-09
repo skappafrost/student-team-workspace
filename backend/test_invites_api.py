@@ -118,3 +118,17 @@ def test_duplicate_membership_prevention(client):
     r = client.post("/invites/accept", json={"token": token2})
     assert r.status_code == 409
     assert r.json()["detail"] == "User is already a member of this workspace"
+
+    # The duplicate invite was consumed anyway (marked accepted) so it does not
+    # linger as pending, and no second membership row was created.
+    _as_user(client, owner_id)
+    r = client.get(f"/workspaces/{ws_id}/invites")
+    assert r.status_code == 200
+    assert r.json() == []
+
+    r = client.get(f"/workspaces/{ws_id}/members")
+    assert r.status_code == 200
+    members = r.json()
+    # owner + user1 exactly once each — no duplicate row for user1
+    assert [m["user_id"] for m in members].count(user1_id) == 1
+    assert [m["user_id"] for m in members].count(owner_id) == 1

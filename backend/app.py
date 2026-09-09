@@ -702,6 +702,11 @@ async def accept_invite(
         models.WorkspaceMember.user_id == current_user["id"]
     ).first()
     if existing_member:
+        # Consume the invite so it doesn't linger as pending, but do not
+        # create a duplicate membership row (enforced by the
+        # uq_workspace_members_workspace_user unique constraint).
+        invite.accepted_at = _utcnow()
+        db.commit()
         raise HTTPException(status_code=409, detail="User is already a member of this workspace")
 
     # Mark accepted
