@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, File as FileParam, HTTPException, Query, R
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -67,13 +67,38 @@ def create_refresh_token(subject: str) -> str:
     return jwt.encode(payload, _get_secret(), algorithm=ALGORITHM)
 
 
+def _password_bytes(password: str) -> bytes:
+    """UTF-8 encode a password and enforce bcrypt's 72-byte input limit.
+
+    bcrypt only consumes the first 72 bytes of input; anything longer is
+    silently truncated by the algorithm, creating equivalence classes (two
+    different passwords hashing identically) and login mismatch. Encode FIRST,
+    then reject over-limit input with a clean 422 instead of truncating.
+    Shared by register/login now and reset (T047) later.
+    """
+    raw = password.encode("utf-8")
+    if len(raw) > 72:
+        raise HTTPException(status_code=422, detail="Password exceeds 72 bytes")
+    return raw
+
+
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    # Guard before checkpw: an over-72-byte password (e.g. multibyte chars)
+    # must read as invalid credentials (401), never crash (500).
+    try:
+        raw = _password_bytes(plain)
+    except HTTPException:
+        return False
+    try:
+        return bcrypt.checkpw(raw, hashed.encode("utf-8"))
+    except ValueError:
+        # Corrupt/malformed hash (or hashed >72 bytes): fail closed.
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    # bcrypt only hashes the first 72 bytes; enforce a sane max length.
-    return bcrypt.hashpw(password[:72].encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    raw = _password_bytes(password)
+    return bcrypt.hashpw(raw, bcrypt.gensalt()).decode("utf-8")
 
 
 class Role(str, Enum):
@@ -211,7 +236,18 @@ async def _ws_broadcast(channel_id: str, payload: dict) -> None:
 # ---------------------------------------------------------------------------
 class RegisterIn(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def _password_within_bcrypt_limit(cls, v: str) -> str:
+        # Byte limit (72) is stricter than the 128-char cap; checked here so
+        # register returns a clean 422 before any bcrypt call.
+        try:
+            _password_bytes(v)
+        except HTTPException as exc:
+            raise ValueError(exc.detail) from exc
+        return v
 
 
 class LoginIn(BaseModel):
