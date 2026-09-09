@@ -132,18 +132,22 @@ def _decode_token(token: str) -> Optional[dict]:
         return None
 
 
+def _test_auth_bypass_enabled() -> bool:
+    return os.getenv("TEST_AUTH_BYPASS", "false").lower() == "true"
+
 def get_current_user(request: Request) -> dict:
     """Return the currently authenticated user from JWT session cookie.
 
-    Falls back to the legacy X-Test-User-* headers for existing tests.
+    Falls back to the legacy X-Test-User-* headers only when TEST_AUTH_BYPASS is enabled.
     """
-    override = request.headers.get("X-Test-User-Id")
-    if override:
-        return {
-            "id": override,
-            "name": "Test User",
-            "role": request.headers.get("X-Test-User-Role", Role.OWNER.value),
-        }
+    if _test_auth_bypass_enabled():
+        override = request.headers.get("X-Test-User-Id")
+        if override:
+            return {
+                "id": override,
+                "name": "Test User",
+                "role": request.headers.get("X-Test-User-Role", Role.OWNER.value),
+            }
 
     token = _token_from_request(request)
     if not token:
