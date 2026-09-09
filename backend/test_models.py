@@ -3,10 +3,7 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-
-from database import Base
+from sqlalchemy import text
 from models import (
     Channel,
     Document,
@@ -24,19 +21,6 @@ from models import (
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw_alembic.db")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
 
 
 def test_models_roundtrip_one_row_per_table(db_session):

@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
+import logging
 import os
 import uuid
 
@@ -132,18 +133,33 @@ def _decode_token(token: str) -> Optional[dict]:
         return None
 
 
+def _test_auth_bypass_enabled() -> bool:
+    """The X-Test-User-* bypass is active only in explicit test mode.
+
+    Reads the environment at request time (not import time) so tests can
+    monkeypatch it. The bypass requires BOTH ``STW_TEST_AUTH=1`` and
+    ``ENVIRONMENT`` in {"test", "dev"} (belt and suspenders).
+    """
+    if os.getenv("STW_TEST_AUTH", "").strip() != "1":
+        return False
+    return os.getenv("ENVIRONMENT", "").strip() in {"test", "dev"}
+
+
 def get_current_user(request: Request) -> dict:
     """Return the currently authenticated user from JWT session cookie.
 
-    Falls back to the legacy X-Test-User-* headers for existing tests.
+    Falls back to the legacy X-Test-User-* headers ONLY when the test-only
+    bypass is explicitly enabled (see _test_auth_bypass_enabled). The bypass
+    is never active in normal/CI runs; the suite authenticates with real JWTs.
     """
-    override = request.headers.get("X-Test-User-Id")
-    if override:
-        return {
-            "id": override,
-            "name": "Test User",
-            "role": request.headers.get("X-Test-User-Role", Role.OWNER.value),
-        }
+    if _test_auth_bypass_enabled():
+        override = request.headers.get("X-Test-User-Id")
+        if override:
+            return {
+                "id": override,
+                "name": "Test User",
+                "role": request.headers.get("X-Test-User-Role", Role.OWNER.value),
+            }
 
     token = _token_from_request(request)
     if not token:
@@ -266,6 +282,11 @@ def _file_out(file: models.File, request: Request = None) -> dict:
 @app.on_event("startup")
 def _create_tables():
     Base.metadata.create_all(bind=engine)
+    if _test_auth_bypass_enabled():
+        logging.getLogger(__name__).warning(
+            "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
+            "auth bypass is ENABLED. Never run with this combination outside tests."
+        )
 
 
 app.add_middleware(

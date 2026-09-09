@@ -2,53 +2,15 @@ import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from app import app, Role, get_current_user, Base
+from app import app, Role, _utcnow
+from conftest import as_user, clear_auth
 from models import Workspace, WorkspaceInvite, WorkspaceMembership
 
 
 # ---------------------------------------------------------------------------
-# Test database setup
+# Auth helpers (shared, real-JWT based — see conftest.py)
 # ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw.db")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    def _get_db_override():
-        return db_session
-
-    from database import get_db
-    app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
-
-
-# ---------------------------------------------------------------------------
-# Auth helpers
-# ---------------------------------------------------------------------------
-
-def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
-    client.headers["X-Test-User-Id"] = user_id
-    client.headers["X-Test-User-Role"] = role
-
-
-def clear_auth(client: TestClient):
-    client.headers.pop("X-Test-User-Id", None)
-    client.headers.pop("X-Test-User-Role", None)
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +95,7 @@ def test_update_workspace_forbidden_for_member_role(client):
     )
     token = invite_resp.json()["token"]
 
-    as_user(client, "bob", role=Role.MEMBER.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Bob (member) should not update
@@ -154,7 +116,7 @@ def test_delete_workspace_requires_owner(client):
     )
     token = invite_resp.json()["token"]
 
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Admin cannot delete
@@ -206,7 +168,7 @@ def test_invite_create_forbidden_for_member(client):
     )
     token = invite_resp.json()["token"]
 
-    as_user(client, "bob", role=Role.MEMBER.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Bob as member should not create invite
@@ -269,7 +231,7 @@ def test_accept_invite_expired_fails(client, db_session):
 
     # Manually expire invite in the same DB session used by the test client
     invite = db_session.query(WorkspaceInvite).filter(WorkspaceInvite.id == invite_id).first()
-    invite.expires_at = datetime.datetime.utcnow() - datetime.timedelta(days=1)
+    invite.expires_at = _utcnow() - datetime.timedelta(days=1)
     db_session.commit()
 
     as_user(client, "bob")
@@ -315,7 +277,7 @@ def test_list_workspace_members_requires_admin(client):
         json={"email": "bob@example.com", "role": Role.MEMBER.value},
     )
     token = invite.json()["token"]
-    as_user(client, "bob", role=Role.MEMBER.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Alice (owner) can list members
@@ -329,7 +291,7 @@ def test_list_workspace_members_requires_admin(client):
     assert roles["bob"] == Role.MEMBER.value
 
     # Bob (member) cannot list members
-    as_user(client, "bob", role=Role.MEMBER.value)
+    as_user(client, "bob")
     resp = client.get(f"/workspaces/{ws_id}/members")
     assert resp.status_code == 403
 
@@ -346,7 +308,7 @@ def test_update_member_role_admin_can_promote(client):
         json={"email": "bob@example.com", "role": Role.MEMBER.value},
     )
     token = invite.json()["token"]
-    as_user(client, "bob", role=Role.MEMBER.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Alice promotes Bob to admin
@@ -371,7 +333,7 @@ def test_update_member_role_member_cannot_promote(client):
         json={"email": "bob@example.com", "role": Role.ADMIN.value},
     )
     token_admin = invite_admin.json()["token"]
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token_admin})
 
     invite_member = client.post(
@@ -379,11 +341,11 @@ def test_update_member_role_member_cannot_promote(client):
         json={"email": "charlie@example.com", "role": Role.MEMBER.value},
     )
     token_member = invite_member.json()["token"]
-    as_user(client, "charlie", role=Role.MEMBER.value)
+    as_user(client, "charlie")
     client.post("/invites/accept", json={"token": token_member})
 
     # Charlie (member) cannot promote Bob
-    as_user(client, "charlie", role=Role.MEMBER.value)
+    as_user(client, "charlie")
     resp = client.patch(
         f"/workspaces/{ws_id}/members/bob",
         json={"role": Role.ADMIN.value},
@@ -402,11 +364,11 @@ def test_update_member_role_cannot_change_owner(client):
         json={"email": "bob@example.com", "role": Role.ADMIN.value},
     )
     token = invite.json()["token"]
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Bob (admin) tries to change Alice's (owner) role
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     resp = client.patch(
         f"/workspaces/{ws_id}/members/alice",
         json={"role": Role.MEMBER.value},
@@ -425,7 +387,7 @@ def test_remove_member_admin_can_remove(client):
         json={"email": "bob@example.com", "role": Role.MEMBER.value},
     )
     token = invite.json()["token"]
-    as_user(client, "bob", role=Role.MEMBER.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Alice removes Bob
@@ -451,11 +413,11 @@ def test_remove_member_cannot_remove_owner(client):
         json={"email": "bob@example.com", "role": Role.ADMIN.value},
     )
     token = invite.json()["token"]
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Bob (admin) tries to remove Alice (owner)
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     resp = client.delete(f"/workspaces/{ws_id}/members/alice")
     assert resp.status_code == 403
 
@@ -471,7 +433,7 @@ def test_transfer_ownership_owner_can_transfer(client):
         json={"email": "bob@example.com", "role": Role.MEMBER.value},
     )
     token = invite.json()["token"]
-    as_user(client, "bob", role=Role.MEMBER.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Alice transfers ownership to Bob
@@ -503,11 +465,11 @@ def test_transfer_ownership_admin_cannot_transfer(client):
         json={"email": "bob@example.com", "role": Role.ADMIN.value},
     )
     token = invite.json()["token"]
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     client.post("/invites/accept", json={"token": token})
 
     # Bob (admin) tries to transfer ownership
-    as_user(client, "bob", role=Role.ADMIN.value)
+    as_user(client, "bob")
     resp = client.post(
         f"/workspaces/{ws_id}/transfer-ownership",
         json={"user_id": "alice"},
