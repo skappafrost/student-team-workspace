@@ -696,6 +696,14 @@ async def accept_invite(
     if invite.expires_at < _utcnow():
         raise HTTPException(status_code=410, detail="Invite expired")
 
+    # Check if user is already a member
+    existing_member = db.query(models.WorkspaceMember).filter(
+        models.WorkspaceMember.workspace_id == invite.workspace_id,
+        models.WorkspaceMember.user_id == current_user["id"]
+    ).first()
+    if existing_member:
+        raise HTTPException(status_code=409, detail="User is already a member of this workspace")
+
     # Mark accepted
     invite.accepted_at = _utcnow()
 

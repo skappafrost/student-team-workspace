@@ -86,3 +86,35 @@ def test_invite_lifecycle(client):
     r = client.get(f"/workspaces/{ws_id}/invites")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_duplicate_membership_prevention(client):
+    owner_id = f"dup-owner-{uuid.uuid4().hex[:8]}"
+    _as_user(client, owner_id)
+    slug = f"test-ws-{uuid.uuid4().hex[:8]}"
+    r = client.post("/workspaces", json={"name": "Test WS", "slug": slug})
+    assert r.status_code == 201
+    ws_id = r.json()["id"]
+
+    email = f"dup-{uuid.uuid4().hex[:8]}@example.com"
+    r = client.post(f"/workspaces/{ws_id}/invites", json={"email": email, "role": "member"})
+    assert r.status_code == 201
+    token1 = r.json()["token"]
+
+    # Accept as user1
+    user1_id = f"user1-{uuid.uuid4().hex[:8]}"
+    _as_user(client, user1_id)
+    r = client.post("/invites/accept", json={"token": token1})
+    assert r.status_code == 201
+
+    # Second invite as owner
+    _as_user(client, owner_id)
+    r = client.post(f"/workspaces/{ws_id}/invites", json={"email": email, "role": "member"})
+    assert r.status_code == 201
+    token2 = r.json()["token"]
+
+    # Accept again as user1
+    _as_user(client, user1_id)
+    r = client.post("/invites/accept", json={"token": token2})
+    assert r.status_code == 409
+    assert r.json()["detail"] == "User is already a member of this workspace"
