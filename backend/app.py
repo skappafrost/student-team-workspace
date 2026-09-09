@@ -6,7 +6,7 @@ from typing import Optional
 import os
 import uuid
 
-from fastapi import Depends, FastAPI, File as FileParam, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File as FileParam, HTTPException, Path, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
@@ -450,36 +450,11 @@ def _require_min_role(current_user: dict, required_role: Role) -> None:
 # ---------------------------------------------------------------------------
 
 def require_role(required_role: Role):
-    """Dependency factory that requires a minimum workspace role."""
+    """Dependency factory that requires a minimum role globally (from token)."""
     def _check_role(
         current_user: dict = Depends(get_current_user),
-        workspace_id: str = None,
-        db: Session = Depends(get_db),
     ) -> dict:
-        # If workspace_id is not provided, check global role (from token)
-        if workspace_id is None:
-            _require_min_role(current_user, required_role)
-            return current_user
-        
-        # First check if workspace exists
-        workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
-        if not workspace:
-            raise HTTPException(status_code=404, detail="Workspace not found")
-        
-        # Check role within the specific workspace
-        membership = _require_member(workspace_id, current_user["id"], db)
-        user_role_value = membership.role
-        try:
-            user_role = Role(user_role_value)
-        except ValueError:
-            user_role = Role.GUEST
-        user_level = ROLE_HIERARCHY[user_role]
-        required_level = ROLE_HIERARCHY[required_role]
-        if user_level < required_level:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Role '{user_role.value}' is insufficient in this workspace. Requires '{required_role.value}'."
-            )
+        _require_min_role(current_user, required_role)
         return current_user
     return _check_role
 
@@ -598,12 +573,13 @@ async def get_workspace(
 async def update_workspace(
     workspace_id: str,
     payload: schemas.WorkspaceUpdate,
-    current_user: dict = Depends(require_permission("workspace.update")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update a workspace. Requires admin or higher role."""
     workspace = _get_workspace_or_404(db, workspace_id)
-    # RBAC enforced by require_permission dependency
+    # Check user has admin role in this workspace
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
 
     if payload.name is not None:
         workspace.name = payload.name
@@ -624,12 +600,12 @@ async def update_workspace(
 @app.delete("/workspaces/{workspace_id}", status_code=204)
 async def delete_workspace(
     workspace_id: str,
-    current_user: dict = Depends(require_permission("workspace.delete")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Delete a workspace. Requires owner role."""
     workspace = _get_workspace_or_404(db, workspace_id)
-    # RBAC enforced by require_permission dependency
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.OWNER, db)
     db.delete(workspace)
     db.commit()
     return None
@@ -643,14 +619,14 @@ async def delete_workspace(
 async def create_invite(
     workspace_id: str,
     payload: schemas.InviteCreate,
-    current_user: dict = Depends(require_permission("workspace.invite")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Invite a user by email to a workspace. Requires admin or higher role."""
-    # RBAC enforced by require_permission dependency
     workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
 
     # Prevent duplicate active invite for same email/workspace.
     existing = db.query(models.WorkspaceInvite).filter(
@@ -714,11 +690,12 @@ async def accept_invite(
 @app.get("/workspaces/{workspace_id}/invites", response_model=list[schemas.InviteOut])
 async def list_workspace_invites(
     workspace_id: str,
-    current_user: dict = Depends(require_permission("workspace.invite")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """List all pending invitations for a workspace. Requires admin or higher role."""
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
     invites = db.query(models.WorkspaceInvite).filter(
         models.WorkspaceInvite.workspace_id == workspace_id,
         models.WorkspaceInvite.accepted_at.is_(None),
@@ -732,11 +709,12 @@ async def update_invite_role(
     workspace_id: str,
     invite_id: str,
     payload: schemas.InviteRoleUpdate,
-    current_user: dict = Depends(require_permission("workspace.invite")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update the role of a pending invitation. Requires admin or higher role."""
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
     invite = db.query(models.WorkspaceInvite).filter(
         models.WorkspaceInvite.id == invite_id,
         models.WorkspaceInvite.workspace_id == workspace_id,
@@ -761,11 +739,12 @@ async def update_invite_role(
 async def cancel_invite(
     workspace_id: str,
     invite_id: str,
-    current_user: dict = Depends(require_permission("workspace.invite")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Cancel a pending invitation. Requires admin or higher role."""
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
     invite = db.query(models.WorkspaceInvite).filter(
         models.WorkspaceInvite.id == invite_id,
         models.WorkspaceInvite.workspace_id == workspace_id,
@@ -780,12 +759,12 @@ async def cancel_invite(
 @app.get("/workspaces/{workspace_id}/members", response_model=list[schemas.WorkspaceMemberOut])
 async def list_workspace_members(
     workspace_id: str,
-    current_user: dict = Depends(require_permission("workspace.manage_members")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """List all members of a workspace. Requires admin or higher role."""
-    # RBAC enforced by require_permission dependency
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
     members = db.query(models.WorkspaceMembership).options(
         selectinload(models.WorkspaceMembership.user)
     ).filter(
@@ -799,12 +778,12 @@ async def update_member_role(
     workspace_id: str,
     user_id: str,
     payload: schemas.MemberRoleUpdate,
-    current_user: dict = Depends(require_permission("member.update_role")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update a member's role. Requires admin or higher role. Cannot change owner role."""
-    # RBAC enforced by require_permission dependency
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
     
     membership = db.query(models.WorkspaceMembership).filter(
         models.WorkspaceMembership.workspace_id == workspace_id,
@@ -837,12 +816,12 @@ async def update_member_role(
 async def remove_member(
     workspace_id: str,
     user_id: str,
-    current_user: dict = Depends(require_permission("member.remove")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Remove a member from the workspace. Requires admin or higher role. Cannot remove owner."""
-    # RBAC enforced by require_permission dependency
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.ADMIN, db)
     
     membership = db.query(models.WorkspaceMembership).filter(
         models.WorkspaceMembership.workspace_id == workspace_id,
@@ -868,12 +847,12 @@ async def remove_member(
 async def transfer_ownership(
     workspace_id: str,
     payload: schemas.TransferOwnershipIn,
-    current_user: dict = Depends(require_permission("workspace.transfer_ownership")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Transfer workspace ownership to another member. Requires owner role."""
-    # RBAC enforced by require_permission dependency
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.OWNER, db)
     
     # Get current owner's membership
     current_membership = db.query(models.WorkspaceMembership).filter(
@@ -1342,11 +1321,12 @@ def _require_project_access(project: models.Project, user_id: str, db: Session) 
 async def create_project(
     workspace_id: str,
     payload: schemas.ProjectCreate,
-    current_user: dict = Depends(require_permission("project.create")),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a new project inside a workspace. Any member can create."""
     workspace = _get_workspace_or_404(db, workspace_id)
+    _require_min_role_in_workspace(workspace_id, current_user["id"], Role.MEMBER, db)
     project = models.Project(
         workspace_id=workspace_id,
         owner_id=current_user["id"],
