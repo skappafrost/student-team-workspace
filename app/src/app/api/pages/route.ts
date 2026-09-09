@@ -167,3 +167,30 @@ export async function GET(request: Request) {
   const pages = (await res.json()) as WikiPageSummary[];
   return NextResponse.json({ pages });
 }
+
+export async function POST(request: Request) {
+  const sessionCookie = await getSessionCookie();
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  const workspaceId = await getCurrentWorkspaceId(sessionCookie);
+  if (!workspaceId) {
+    return NextResponse.json({ error: 'No workspace found' }, { status: 404 });
+  }
+
+  const body = await request.text();
+  const res = await backendRequest(
+    `/workspaces/${encodeURIComponent(workspaceId)}/pages`,
+    { method: 'POST', body },
+    sessionCookie
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Failed to create page');
+    return NextResponse.json({ error: text }, { status: res.status });
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  return NextResponse.json(data, { status: 201 });
+}
