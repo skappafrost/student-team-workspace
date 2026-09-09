@@ -2,55 +2,17 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from app import app, Role
-from database import Base
-from models import WorkspaceMember
+from conftest import as_user, clear_auth, make_user
 
 
-# ---------------------------------------------------------------------------
-# Test database setup
-# ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw_projects.db")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    def _get_db_override():
-        return db_session
-
-    from database import get_db
-    app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
-
-def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
-    client.headers["X-Test-User-Id"] = user_id
-    client.headers["X-Test-User-Role"] = role
-
-
-def clear_auth(client: TestClient):
-    client.headers.pop("X-Test-User-Id", None)
-    client.headers.pop("X-Test-User-Role", None)
-
 
 def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
     as_user(client, user_id)
@@ -69,13 +31,10 @@ def add_member(client, db_session, workspace_id, email, role, user_id):
     token = owner_resp.json()["token"]
 
     # Create a real user row for the invitee so membership.user_id resolves
-    from models import User
-    new_user = User(id=user_id, email=email, display_name=user_id)
-    db_session.add(new_user)
-    db_session.commit()
+    make_user(db_session, user_id, email=email)
 
     clear_auth(client)
-    as_user(client, user_id, role)
+    as_user(client, user_id)
     accept_resp = client.post("/invites/accept", json={"token": token})
     assert accept_resp.status_code == 201, accept_resp.text
     return accept_resp.json()
@@ -226,7 +185,7 @@ def test_create_project_forbidden_for_guest(client, db_session):
     ws = create_workspace(client, "owner")
     add_member(client, db_session, ws["id"], "guest@example.com", Role.GUEST.value, "guest-user")
 
-    as_user(client, "guest-user", Role.GUEST.value)
+    as_user(client, "guest-user")
     resp = client.post(f"/workspaces/{ws['id']}/projects", json={"name": "Bad"})
     assert resp.status_code == 403
 
@@ -238,7 +197,7 @@ def test_update_project_forbidden_for_member(client, db_session):
 
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
 
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     resp = client.patch(f"/projects/{proj['id']}", json={"name": "Hacked"})
     assert resp.status_code == 403
 
@@ -250,7 +209,7 @@ def test_delete_project_forbidden_for_member(client, db_session):
 
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
 
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     resp = client.delete(f"/projects/{proj['id']}")
     assert resp.status_code == 403
 
@@ -262,7 +221,7 @@ def test_admin_can_update_and_delete_any_project(client, db_session):
 
     add_member(client, db_session, ws["id"], "admin@example.com", Role.ADMIN.value, "admin-user")
 
-    as_user(client, "admin-user", Role.ADMIN.value)
+    as_user(client, "admin-user")
     resp = client.patch(f"/projects/{proj['id']}", json={"name": "Admin updated"})
     assert resp.status_code == 200
     assert client.delete(f"/projects/{proj['id']}").status_code == 204
@@ -273,7 +232,7 @@ def test_non_member_cannot_access_project(client):
     as_user(client, "owner")
     proj = client.post(f"/workspaces/{ws['id']}/projects", json={"name": "P1"}).json()
 
-    as_user(client, "stranger", Role.OWNER.value)
+    as_user(client, "stranger")
     resp = client.get(f"/projects/{proj['id']}")
     assert resp.status_code == 403
 
@@ -286,7 +245,7 @@ def test_task_rbac_member_can_update_any_task(client, db_session):
 
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
 
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     resp = client.patch(f"/tasks/{task['id']}", json={"status": "doing"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "doing"
@@ -300,6 +259,6 @@ def test_task_delete_rbac_denied_for_member(client, db_session):
 
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
 
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     resp = client.delete(f"/tasks/{task['id']}")
     assert resp.status_code == 403

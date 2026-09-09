@@ -2,55 +2,17 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from app import app, Role
-from database import Base
-from models import User
+from conftest import as_user, clear_auth, make_user
 
 
-# ---------------------------------------------------------------------------
-# Test database setup
-# ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw_kb.db", echo=False)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    def _get_db_override():
-        return db_session
-
-    from database import get_db
-    app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
-
-def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
-    client.headers["X-Test-User-Id"] = user_id
-    client.headers["X-Test-User-Role"] = role
-
-
-def clear_auth(client: TestClient):
-    client.headers.pop("X-Test-User-Id", None)
-    client.headers.pop("X-Test-User-Role", None)
-
 
 def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
     as_user(client, user_id)
@@ -68,12 +30,9 @@ def add_member(client, db_session, workspace_id, email, role, user_id):
     assert owner_resp.status_code == 201, owner_resp.text
     token = owner_resp.json()["token"]
 
-    new_user = User(id=user_id, email=email, display_name=user_id)
-    db_session.add(new_user)
-    db_session.commit()
-
+    make_user(db_session, user_id, email=email)
     clear_auth(client)
-    as_user(client, user_id, role)
+    as_user(client, user_id)
     accept_resp = client.post("/invites/accept", json={"token": token})
     assert accept_resp.status_code == 201, accept_resp.text
     return accept_resp.json()
@@ -173,7 +132,7 @@ def test_member_can_create_and_update_own_page(client, db_session):
     ws = create_workspace(client, "owner")
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
 
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     resp = client.post(
         f"/workspaces/{ws['id']}/pages",
         json={"title": "Member Page", "slug": "member-page", "content": "hi"},
@@ -198,7 +157,7 @@ def test_member_cannot_update_others_page(client, db_session):
     ).json()
 
     add_member(client, db_session, ws["id"], "member@example.com", Role.MEMBER.value, "member-user")
-    as_user(client, "member-user", Role.MEMBER.value)
+    as_user(client, "member-user")
     resp = client.patch(
         f"/workspaces/{ws['id']}/pages/{page['id']}",
         json={"content": "hacked"},
@@ -215,7 +174,7 @@ def test_admin_can_update_and_delete_any_page(client, db_session):
     ).json()
 
     add_member(client, db_session, ws["id"], "admin@example.com", Role.ADMIN.value, "admin-user")
-    as_user(client, "admin-user", Role.ADMIN.value)
+    as_user(client, "admin-user")
     update_resp = client.patch(
         f"/workspaces/{ws['id']}/pages/{page['id']}",
         json={"content": "admin updated"},
@@ -228,7 +187,7 @@ def test_guest_cannot_create_page(client, db_session):
     ws = create_workspace(client, "owner")
     add_member(client, db_session, ws["id"], "guest@example.com", Role.GUEST.value, "guest-user")
 
-    as_user(client, "guest-user", Role.GUEST.value)
+    as_user(client, "guest-user")
     resp = client.post(
         f"/workspaces/{ws['id']}/pages",
         json={"title": "Bad", "slug": "bad", "content": "x"},
@@ -245,7 +204,7 @@ def test_guest_cannot_view_pages(client, db_session):
     )
     add_member(client, db_session, ws["id"], "guest@example.com", Role.GUEST.value, "guest-user")
 
-    as_user(client, "guest-user", Role.GUEST.value)
+    as_user(client, "guest-user")
     resp = client.get(f"/workspaces/{ws['id']}/pages")
     assert resp.status_code == 403
 
@@ -258,7 +217,7 @@ def test_non_member_cannot_access_pages(client):
         json={"title": "Secret", "slug": "secret", "content": "x"},
     ).json()
 
-    as_user(client, "stranger", Role.OWNER.value)
+    as_user(client, "stranger")
     resp = client.get(f"/workspaces/{ws['id']}/pages/{page['id']}")
     assert resp.status_code == 403
 

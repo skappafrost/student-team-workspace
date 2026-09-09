@@ -2,47 +2,14 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from app import app, Role
-from database import Base, get_db
+from conftest import as_user, clear_auth
 
 
 # ---------------------------------------------------------------------------
-# Test database setup
+# Auth helpers (shared, real-JWT based — see conftest.py)
 # ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="function")
-def db_session():
-    engine = create_engine("sqlite:///./test_stw_ai.db", echo=False)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    def _get_db_override():
-        return db_session
-
-    app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
-
-
-# ---------------------------------------------------------------------------
-# Auth helpers
-# ---------------------------------------------------------------------------
-
-def as_user(client: TestClient, user_id: str, role: str = Role.OWNER.value):
-    client.headers["X-Test-User-Id"] = user_id
-    client.headers["X-Test-User-Role"] = role
 
 
 def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
@@ -152,8 +119,7 @@ def test_summarize_requires_auth(client):
     task = create_task(client, project["id"], "X", "Y")
     as_user(client, "owner")
     # clear auth
-    client.headers.pop("X-Test-User-Id", None)
-    client.headers.pop("X-Test-User-Role", None)
+    clear_auth(client)
     resp = client.post("/ai/summarize", json={"kind": "task", "ref_id": task["id"]})
     assert resp.status_code == 401
 

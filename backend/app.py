@@ -134,13 +134,15 @@ def _decode_token(token: str) -> Optional[dict]:
 
 
 def _test_auth_bypass_enabled() -> bool:
-    """Spec (T003): bypass header is honored ONLY when BOTH hold, evaluated at
-    request time so monkeypatching works in tests:
-      1. STW_TEST_AUTH=1 is explicitly set, AND
-      2. ENVIRONMENT is 'test' or 'dev' (belt & suspenders)."""
-    if os.getenv("STW_TEST_AUTH", "") != "1":
+    """The X-Test-User-* bypass is active only in explicit test mode.
+
+    Reads the environment at request time (not import time) so tests can
+    monkeypatch it. The bypass requires BOTH ``STW_TEST_AUTH=1`` and
+    ``ENVIRONMENT`` in {"test", "dev"} (belt and suspenders, T003).
+    """
+    if os.getenv("STW_TEST_AUTH", "").strip() != "1":
         return False
-    return os.environ.get("ENVIRONMENT", "") in {"test", "dev"}
+    return os.getenv("ENVIRONMENT", "").strip() in {"test", "dev"}
 
 def _warn_test_auth_once() -> None:
     """Startup-visible warning when the bypass flag is ON (logged once per process)."""
@@ -158,8 +160,11 @@ _test_auth_warned = False
 def get_current_user(request: Request) -> dict:
     """Return the currently authenticated user from JWT session cookie.
 
-    Falls back to the legacy X-Test-User-* headers only when the explicit test
-    flag STW_TEST_AUTH=1 is set AND ENVIRONMENT is test/dev (T003)."""
+    Falls back to the legacy X-Test-User-* headers ONLY when the test-only
+    bypass is explicitly enabled (STW_TEST_AUTH=1 + ENVIRONMENT test/dev, T003).
+    The bypass is never active in normal/CI runs; the suite authenticates with
+    real JWTs.
+    """
     if _test_auth_bypass_enabled():
         _warn_test_auth_once()
         override = request.headers.get("X-Test-User-Id")
@@ -291,6 +296,11 @@ def _file_out(file: models.File, request: Request = None) -> dict:
 @app.on_event("startup")
 def _create_tables():
     Base.metadata.create_all(bind=engine)
+    if _test_auth_bypass_enabled():
+        logging.getLogger(__name__).warning(
+            "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
+            "auth bypass is ENABLED. Never run with this combination outside tests."
+        )
 
 
 app.add_middleware(

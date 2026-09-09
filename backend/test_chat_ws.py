@@ -2,45 +2,15 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from starlette.websockets import WebSocketDisconnect
 
-from app import app, Role, Base
-from database import get_db, set_db_url
+from app import app
+from conftest import as_user
 
 
 def _token_for(user_id: str) -> str:
     from app import create_access_token
     return create_access_token(user_id)
-
-
-@pytest.fixture(scope="function")
-def db_session():
-    url = "sqlite:///./test_stw_ws.db"
-    set_db_url(url)
-    engine = create_engine(url)
-    Base.metadata.create_all(bind=engine)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    set_db_url("sqlite:///./test_stw_ws.db")
-    app.dependency_overrides[get_db] = lambda: db_session
-    yield TestClient(app)
-    app.dependency_overrides.clear()
-
-
-def as_user(client: TestClient, user_id: str, role: str = "owner"):
-    client.headers["X-Test-User-Id"] = user_id
-    client.headers["X-Test-User-Role"] = role
 
 
 def create_workspace(client: TestClient, user_id: str = "owner", name: str = "WS", slug: str = "ws"):
