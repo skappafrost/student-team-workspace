@@ -196,7 +196,20 @@ class ChannelCreate(BaseModel):
 
 class ChannelUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    topic: Optional[str] = Field(default=None, max_length=2000)
     type: Optional[ChannelType] = None
+
+
+class ChannelMemberAdd(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=36)
+
+
+class ChannelMemberOut(BaseModel):
+    channel_id: str
+    user_id: str
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    joined_at: Optional[datetime] = None
 
 
 class ChannelOut(BaseModel):
