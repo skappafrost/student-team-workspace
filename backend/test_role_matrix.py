@@ -413,10 +413,18 @@ class TestRoleMatrix:
                 )
             elif allowed_roles is not None and role in allowed_roles:
                 # Role is allowed
-                assert response.status_code < 400, (
-                    f"Allowed role {role.value} got {response.status_code} for {method} {path}. "
-                    f"Expected 2xx. Response: {response.text}"
-                )
+                if path == "/invites/accept" and response.status_code == 409:
+                    # T015: the accepting user is already a member (every matrix
+                    # role user is). The invite is consumed and a 409 is returned
+                    # instead of creating a duplicate membership row.
+                    assert response.json()["detail"] == "User is already a member of this workspace", (
+                        f"Unexpected 409 detail for {role.value} on {method} {path}: {response.text}"
+                    )
+                else:
+                    assert response.status_code < 400, (
+                        f"Allowed role {role.value} got {response.status_code} for {method} {path}. "
+                        f"Expected 2xx. Response: {response.text}"
+                    )
             else:
                 # Role is NOT allowed - should get 403 (or 404 for non-existent resources)
                 assert response.status_code in (403, 404), (

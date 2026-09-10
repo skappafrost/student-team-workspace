@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -172,6 +173,10 @@ class WorkspaceMember(Base):
     role: Mapped[str] = mapped_column(String(50), default="member", nullable=False)
     joined_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'user_id', name='uq_workspace_members_workspace_user'),
     )
 
     workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="members")
