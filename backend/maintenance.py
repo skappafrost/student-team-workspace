@@ -142,12 +142,13 @@ def _print_report(report: Report) -> None:
 
 
 def cmd_purge_orphans(args: argparse.Namespace) -> int:
-    if args.db_url:
-        database.set_db_url(args.db_url)
+    # Build a LOCAL engine when --db-url is given. Never rebind the global
+    # database engine here: this function also runs in-process (tests, REPL)
+    # and rebinding would strand later code on the wrong database.
+    from sqlalchemy.orm import sessionmaker
+    eng = database._make_engine(args.db_url) if args.db_url else database.engine
 
-    # Resolve the effective engine at call time: set_db_url() reassigns the
-    # database module globals, so imported bindings would be stale.
-    effective_url = str(database.engine.url)
+    effective_url = str(eng.url)
     if _is_postgres_url(effective_url) and not args.apply:
         print(
             "Refusing to run purge-orphans against a PostgreSQL database without "
@@ -165,7 +166,7 @@ def cmd_purge_orphans(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    if not inspect(database.engine).has_table("files"):
+    if not inspect(eng).has_table("files"):
         print(
             "The 'files' table was not found in the database — run migrations "
             "(alembic upgrade head) before sweeping.",
@@ -175,7 +176,7 @@ def cmd_purge_orphans(args: argparse.Namespace) -> int:
 
     min_age = timedelta(hours=args.min_age_hours)
 
-    db = database.SessionLocal()
+    db = sessionmaker(bind=eng)()
     try:
         report = purge_orphans(db, upload_dir, apply=args.apply, min_age=min_age)
     finally:

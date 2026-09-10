@@ -34,14 +34,18 @@ from database import Base
 
 @pytest.fixture()
 def db_session(tmp_path):
-    database.set_db_url(f"sqlite:///{tmp_path / 'test.db'}")
-    Base.metadata.create_all(bind=database.engine)
-    db = database.SessionLocal()
+    # Isolated engine (FK pragma ON via _make_engine). Must NOT call
+    # database.set_db_url(): rebinding the global engine leaks into later
+    # tests sharing this process (test pollution under T014 enforcement).
+    from sqlalchemy.orm import sessionmaker
+    eng = database._make_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    Base.metadata.create_all(bind=eng)
+    db = sessionmaker(bind=eng)()
     try:
         yield db
     finally:
         db.close()
-        Base.metadata.drop_all(bind=database.engine)
+        Base.metadata.drop_all(bind=eng)
 
 
 @pytest.fixture()
@@ -307,11 +311,16 @@ def test_purge_cli_refuses_missing_files_table(capsys, tmp_path):
     assert "files' table" in capsys.readouterr().err
 
 
-def test_purge_cli_dry_run_runs_on_sqlite(db_session, upload_dir, capsys):
-    # The db_session fixture already pointed the engine at a tmp sqlite db.
+def test_purge_cli_dry_run_runs_on_sqlite(db_session, upload_dir, capsys, tmp_path):
+    # The db_session fixture uses an isolated tmp sqlite db: pass its URL
+    # explicitly (same formula as the fixture) since the CLI reads --db-url.
     add_file_row(db_session, "f-missing", "gone.pdf")
 
-    rc = maintenance.main(["purge-orphans", "--upload-dir", str(upload_dir)])
+    rc = maintenance.main([
+        "purge-orphans",
+        "--db-url", f"sqlite:///{tmp_path / 'test.db'}",
+        "--upload-dir", str(upload_dir),
+    ])
     assert rc == 0
     out = capsys.readouterr().out
     assert "gone.pdf" in out

@@ -79,13 +79,53 @@ def db_session():
 
 @pytest.fixture(scope="function")
 def client(db_session):
-    """Provide a TestClient with the test database session overridden."""
+    """Provide a TestClient with the test database session overridden.
+
+    The client ensures a real ``User`` row exists for whatever JWT identity
+    (Bearer header or session cookie) each request carries (T014: with FK
+    enforcement ON, membership/author rows referencing a ghost user_id would
+    500). Invalid tokens are left alone so 401-path tests keep working.
+    """
     def _get_db_override():
         return db_session
 
     app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
+    yield _EnsuringClient(app, _db=db_session)
     app.dependency_overrides.clear()
+
+
+class _EnsuringClient(TestClient):
+    """TestClient that materializes the JWT identity's User row pre-request."""
+
+    def __init__(self, *args, _db=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._db = _db
+
+    def request(self, method, url, **kwargs):
+        if self._db is not None:
+            token = None
+            headers = kwargs.get("headers") or {}
+            auth = headers.get("Authorization", "") or self.headers.get("Authorization", "")
+            if auth.lower().startswith("bearer "):
+                token = auth.split(" ", 1)[1]
+            if not token:
+                cookies = kwargs.get("cookies") or {}
+                token = cookies.get("session_token") or self.cookies.get("session_token")
+            if token:
+                try:
+                    from app import _decode_token as _dec
+                    payload = _dec(token)
+                    uid = (payload or {}).get("sub")
+                    if uid and self._db.get(User, uid) is None:
+                        self._db.add(User(
+                            id=uid,
+                            email=f"{uid}@example.com",
+                            display_name=uid,
+                        ))
+                        self._db.commit()
+                except Exception:
+                    pass  # malformed/expired token: let the app answer 401
+        return super().request(method, url, **kwargs)
 
 
 # ---------------------------------------------------------------------------

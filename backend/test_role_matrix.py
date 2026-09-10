@@ -198,6 +198,14 @@ def _create_test_member(client: TestClient, ws_id: str, role: Role = Role.MEMBER
     assert invite_resp.status_code == 201, f"Failed to create invite for member: {invite_resp.text}"
     token = invite_resp.json()["token"]
 
+    # FK-enforcing DBs (T014) need the real User row before accept creates
+    # the membership row.
+    from database import SessionLocal as _SL
+    _db = _SL()
+    try:
+        make_user(_db, user_id)
+    finally:
+        _db.close()
     accept_client = TestClient(app)
     accept_client.headers["Authorization"] = f"Bearer {create_access_token(user_id)}"
     accept_resp = accept_client.post("/invites/accept", json={"token": token})
@@ -496,7 +504,7 @@ class TestRoleMatrix:
 
         admin.clear_auth()
 
-    def test_unauthenticated_cannot_access_guarded_endpoints(self, client, unauthenticated_user):
+    def test_unauthenticated_cannot_access_guarded_endpoints(self, client, db_session, unauthenticated_user):
         """Test that unauthenticated users get 401 on all guarded endpoints."""
         guarded_endpoints = [
             ("POST", "/workspaces"),
@@ -509,7 +517,9 @@ class TestRoleMatrix:
         ]
 
         # For workspace-specific endpoints, we need a valid workspace_id
-        # Create one first using a temporary authenticated user
+        # Create one first using a temporary authenticated user (real User row
+        # required: FK enforcement (T014) rejects ghost-user memberships).
+        make_user(db_session, "temp-owner")
         temp_client = TestClient(app)
         temp_client.headers["Authorization"] = f"Bearer {create_access_token('temp-owner')}"
         ws_resp = temp_client.post("/workspaces", json={"name": "Temp", "slug": "temp"})
