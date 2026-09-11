@@ -130,3 +130,23 @@ def test_reaction_emoji_validation(client, db_session):
     assert resp.status_code == 422
     resp = client.post(f"/messages/{message['id']}/reactions", json={"emoji": "x" * 40})
     assert resp.status_code == 422
+
+
+def test_message_search_filters_by_content(client, db_session):
+    channel, _ = _setup_message(client, db_session)
+    client.post(f"/channels/{channel['id']}/messages", json={"content": "deploy the slides"})
+    client.post(f"/channels/{channel['id']}/messages", json={"content": "lunch at noon"})
+
+    all_msgs = client.get(f"/channels/{channel['id']}/messages").json()
+    assert len(all_msgs) == 3
+
+    hits = client.get(f"/channels/{channel['id']}/messages", params={"q": "slides"}).json()
+    assert [m["content"] for m in hits] == ["deploy the slides"]
+
+    # Case-insensitive.
+    hits = client.get(f"/channels/{channel['id']}/messages", params={"q": "LUNCH"}).json()
+    assert [m["content"] for m in hits] == ["lunch at noon"]
+
+    # No match -> empty, not error.
+    hits = client.get(f"/channels/{channel['id']}/messages", params={"q": "zzz"}).json()
+    assert hits == []

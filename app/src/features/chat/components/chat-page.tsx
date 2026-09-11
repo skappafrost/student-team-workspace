@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import PageContainer from '@/components/layout/page-container';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import type { Channel, DMChannel, Message } from '../api/types';
@@ -48,6 +50,8 @@ export default function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const meQuery = useQuery<{ id: string } | null>({
     queryKey: ['auth', 'me'],
@@ -99,10 +103,10 @@ export default function ChatPage() {
   });
 
   const messagesQuery = useQuery<Message[]>({
-    queryKey: channelKeys.messages(selectedChannel?.id ?? null),
+    queryKey: [...channelKeys.messages(selectedChannel?.id ?? null), searchQuery],
     queryFn: async () => {
       if (!selectedChannel) return [];
-      return getMessages(selectedChannel.id);
+      return getMessages(selectedChannel.id, searchQuery);
     },
     enabled: !!selectedChannel
   });
@@ -133,7 +137,7 @@ export default function ChatPage() {
     },
     onMutate: async (content) => {
       if (!selectedChannel) return;
-      const key = channelKeys.messages(selectedChannel.id);
+      const key = [...channelKeys.messages(selectedChannel.id), searchQuery];
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<Message[]>(key);
       const optimistic = buildOptimisticMessage(
@@ -169,7 +173,7 @@ export default function ChatPage() {
       toggleReaction(messageId, emoji),
     onSuccess: (reactions, { messageId }) => {
       if (!selectedChannel) return;
-      const key = channelKeys.messages(selectedChannel.id);
+      const key = [...channelKeys.messages(selectedChannel.id), searchQuery];
       queryClient.setQueryData<Message[]>(key, (old) =>
         (old ?? []).map((m) => (m.id === messageId ? { ...m, reactions } : m))
       );
@@ -198,14 +202,19 @@ export default function ChatPage() {
       if (payload.type === 'new_message' && payload.message) {
         const msg = payload.message;
         if (msg.channel_id !== selectedChannel?.id) return;
-        void queryClient.setQueryData<Message[]>(channelKeys.messages(msg.channel_id), (old) =>
-          old ? [...old, msg] : [msg]
+        // While a search filter is active, don't append non-matching messages.
+        if (searchQuery && !msg.content.toLowerCase().includes(searchQuery.toLowerCase())) {
+          return;
+        }
+        void queryClient.setQueryData<Message[]>(
+          [...channelKeys.messages(msg.channel_id), searchQuery],
+          (old) => (old ? [...old, msg] : [msg])
         );
       } else if (payload.type === 'reaction_update' && payload.message_id) {
         if (!selectedChannel) return;
         const { message_id, reactions } = payload;
         void queryClient.setQueryData<Message[]>(
-          channelKeys.messages(selectedChannel.id),
+          [...channelKeys.messages(selectedChannel.id), searchQuery],
           (old) =>
             (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
         );
@@ -254,6 +263,40 @@ export default function ChatPage() {
                     {selectedDM ? 'Direct message' : `${selectedChannel.type} channel`}
                   </p>
                 </div>
+                <form
+                  role='search'
+                  className='flex items-center gap-2'
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setSearchQuery(searchInput.trim());
+                  }}
+                >
+                  <label htmlFor='message-search' className='sr-only'>
+                    Search messages in this conversation
+                  </label>
+                  <Input
+                    id='message-search'
+                    type='search'
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder='Search messages…'
+                    className='border-border/40 bg-background/60 h-8 w-40 rounded-xl text-xs sm:w-56'
+                  />
+                  {searchQuery ? (
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      className='h-8 px-2 text-xs'
+                      onClick={() => {
+                        setSearchInput('');
+                        setSearchQuery('');
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  ) : null}
+                </form>
               </header>
 
               {messagesQuery.isLoading ? (

@@ -25,7 +25,7 @@ async function backendRequest(
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ channelId: string }> }
 ) {
   const sessionCookie = await getSessionCookie();
@@ -33,8 +33,10 @@ export async function GET(
     return NextResponse.json({ messages: [] });
   }
   const { channelId } = await params;
+  const q = new URL(request.url).searchParams.get('q');
+  const qs = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
   const res = await backendRequest(
-    `/channels/${encodeURIComponent(channelId)}/messages`,
+    `/channels/${encodeURIComponent(channelId)}/messages${qs}`,
     { method: 'GET' },
     sessionCookie
   );

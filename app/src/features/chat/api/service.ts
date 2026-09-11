@@ -38,9 +38,10 @@ export async function createChannel(payload: CreateChannelPayload): Promise<Chan
   return data.channel;
 }
 
-export async function getMessages(channelId: string): Promise<Message[]> {
+export async function getMessages(channelId: string, q?: string): Promise<Message[]> {
+  const query = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
   const data = await apiRequest<{ messages: Message[] }>(
-    `/${encodeURIComponent(channelId)}/messages`
+    `/${encodeURIComponent(channelId)}/messages${query}`
   );
   return data.messages || [];
 }

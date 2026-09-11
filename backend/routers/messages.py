@@ -17,19 +17,22 @@ router = APIRouter()
 @router.get("/channels/{channel_id}/messages", response_model=list[schemas.MessageOut])
 async def list_channel_messages(
     channel_id: str,
+    q: str | None = None,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List messages in a channel. Requires workspace membership and private channel access."""
+    """List messages in a channel, optionally filtered by a case-insensitive
+    content substring (`q`). Requires workspace membership and channel access."""
     channel = _get_channel_or_404(db, channel_id)
     _require_member(channel.workspace_id, current_user["id"], db)
     if not _is_private_channel_member(channel, current_user["id"], db):
         raise HTTPException(status_code=403, detail="Not allowed to view this channel")
 
+    query = db.query(models.Message).filter(models.Message.channel_id == channel_id)
+    if q and q.strip():
+        query = query.filter(models.Message.content.ilike(f"%{q.strip()}%"))
     messages = (
-        db.query(models.Message)
-        .filter(models.Message.channel_id == channel_id)
-        .order_by(models.Message.created_at.asc())
+        query.order_by(models.Message.created_at.asc())
         .options(selectinload(models.Message.author), selectinload(models.Message.reactions))
         .all()
     )
