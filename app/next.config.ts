@@ -1,9 +1,15 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
 
 // Define the base Next.js configuration
 const baseConfig: NextConfig = {
   output: process.env.BUILD_STANDALONE === 'true' ? 'standalone' : undefined,
+  // Pin workspace root: a stray package-lock.json in the parent user dir makes
+  // Turbopack infer the wrong root, which breaks next/font internal modules.
+  turbopack: {
+    root: path.resolve(__dirname)
+  },
   // LAN test hosting (Tailscale / Radmin / home WiFi): allow dev origins
   // so hydration + HMR work when accessed via LAN IP, not just localhost.
   // Range covers 192.168.x.x so DHCP IP changes don't break it.

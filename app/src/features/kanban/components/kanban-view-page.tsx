@@ -56,7 +56,7 @@ function ProjectSelect({ projects, selectedProjectId, isLoading, onChange }: Pro
     return <div className='text-muted-foreground text-sm'>Loading projects...</div>;
   }
   return (
-    <Select value={selectedProjectId || undefined} onValueChange={(value) => onChange(value ?? '')}>
+    <Select value={selectedProjectId} onValueChange={(value) => onChange(value ?? '')}>
       <SelectTrigger className='w-[200px]'>
         <SelectValue placeholder='Select project' />
       </SelectTrigger>

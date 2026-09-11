@@ -1,6 +1,5 @@
 import {
   Architects_Daughter,
-  DM_Sans,
   Fira_Code,
   Geist,
   Geist_Mono,
@@ -8,14 +7,14 @@ import {
   Instrument_Sans,
   Inter,
   JetBrains_Mono,
-  Merriweather,
-  Mulish,
   Playfair_Display,
   Noto_Sans_Mono,
   Outfit,
+  Plus_Jakarta_Sans,
   Source_Code_Pro,
   Space_Mono
 } from 'next/font/google';
+import localFont from 'next/font/local';
 
 import { cn } from '@/lib/utils';
 
@@ -49,8 +48,11 @@ const fontNotoMono = Noto_Sans_Mono({
   variable: '--font-noto-mono'
 });
 
-const fontMullish = Mulish({
-  subsets: ['latin'],
+// Self-hosted: Google Fonts fetch for these three hangs on some networks
+// (big variable-font css2 responses), which wedges the whole dev compile.
+const fontMullish = localFont({
+  src: '../../fonts/mulish.woff2',
+  weight: '100 900',
   variable: '--font-mullish'
 });
 
@@ -65,8 +67,9 @@ const fontArchitectsDaughter = Architects_Daughter({
   variable: '--font-architects-daughter'
 });
 
-const fontDMSans = DM_Sans({
-  subsets: ['latin'],
+const fontDMSans = localFont({
+  src: '../../fonts/dm-sans.woff2',
+  weight: '100 900',
   variable: '--font-dm-sans'
 });
 
@@ -91,15 +94,20 @@ const fontJetBrainsMono = JetBrains_Mono({
   variable: '--font-jetbrains-mono'
 });
 
-const fontMerriweather = Merriweather({
-  subsets: ['latin'],
-  weight: ['300', '400', '700'],
+const fontMerriweather = localFont({
+  src: '../../fonts/merriweather.woff2',
+  weight: '300 900',
   variable: '--font-merriweather'
 });
 
 const fontPlayfairDisplay = Playfair_Display({
   subsets: ['latin'],
   variable: '--font-playfair-display'
+});
+
+const fontJakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  variable: '--font-jakarta'
 });
 
 export const fontVariables = cn(
@@ -118,5 +126,6 @@ export const fontVariables = cn(
   fontSpaceMono.variable,
   fontJetBrainsMono.variable,
   fontMerriweather.variable,
-  fontPlayfairDisplay.variable
+  fontPlayfairDisplay.variable,
+  fontJakarta.variable
 );

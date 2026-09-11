@@ -6,7 +6,6 @@ import SearchInput from '../search-input';
 import { AISearchTrigger } from '@/features/ai/components/ai-search';
 import { ThemeSelector } from '../themes/theme-selector';
 import { ThemeModeToggle } from '../themes/theme-mode-toggle';
-import CtaGithub from './cta-github';
 import { UserMenu } from './user-menu';
 import { NotificationCenter } from '@/features/notifications/components/notification-center';
 import { type SessionUser } from '@/lib/auth';
@@ -21,7 +20,6 @@ export default function Header({ user }: { user: SessionUser }) {
       </div>
 
       <div className='flex items-center gap-2 px-4'>
-        <CtaGithub />
         <div className='hidden md:flex md:w-40 lg:w-64'>
           <AISearchTrigger />
         </div>

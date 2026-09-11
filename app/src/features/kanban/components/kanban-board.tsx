@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Kanban, KanbanBoard as KanbanBoardPrimitive, KanbanOverlay } from '@/components/ui/kanban';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -41,7 +41,11 @@ function buildColumns(tasks: Task[] | undefined): Record<TaskStatus, Task[]> {
 
 export function KanbanBoard({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
-  const { data: tasks = [], isLoading } = useQuery(tasksQueryOptions(projectId));
+  const { data: tasksData, isLoading } = useQuery(tasksQueryOptions(projectId));
+  // Stable reference: `?? []` inline creates a new array every render, which
+  // makes the columns-sync effect loop forever (setColumns -> render -> new
+  // tasks ref -> setColumns...).
+  const tasks = useMemo(() => tasksData ?? [], [tasksData]);
 
   const create = useMutation({
     mutationFn: (payload: { title: string; status: TaskStatus }) =>

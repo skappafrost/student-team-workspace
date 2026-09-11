@@ -1,4 +1,5 @@
 /* Import individual theme files */
+@import './themes/teamspace.css';
 @import './themes/claude.css';
 @import './themes/discord.css';
 @import './themes/supabase.css';

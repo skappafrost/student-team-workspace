@@ -16,11 +16,11 @@ export default async function LandingPage() {
     <div className='flex min-h-svh flex-col items-center justify-center gap-8 bg-background px-4 py-16'>
       <div className='text-center'>
         <h1 className='text-4xl font-bold tracking-tight sm:text-6xl'>
-          Welcome to <span className='text-primary'>Shadcn Dashboard</span>
+          Your study team, <span className='text-primary'>one workspace</span>
         </h1>
         <p className='mt-6 text-lg text-muted-foreground max-w-md mx-auto'>
-          A modern admin dashboard starter built with Next.js 16, shadcn/ui, Tailwind CSS v4, and
-          TypeScript.
+          Teamspace brings your group chat, tasks, wiki notes, files, and deadlines together so
+          your team can ship the project on time.
         </p>
       </div>
       <div className='flex flex-col sm:flex-row gap-4'>
