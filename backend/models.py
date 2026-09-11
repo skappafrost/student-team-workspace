@@ -16,6 +16,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -338,6 +339,36 @@ class Message(Base):
     files: Mapped[list[File]] = relationship(
         "File", back_populates="message", cascade="all, delete-orphan"
     )
+    reactions: Mapped[list[MessageReaction]] = relationship(
+        "MessageReaction", back_populates="message", cascade="all, delete-orphan"
+    )
+
+
+# ---------------------------------------------------------------------------
+# MessageReaction
+# ---------------------------------------------------------------------------
+class MessageReaction(Base):
+    """One user's emoji reaction to a message. Unique per (message, user, emoji)."""
+
+    __tablename__ = "message_reactions"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", "emoji", name="uq_message_user_emoji"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    message_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    emoji: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    message: Mapped[Message] = relationship("Message", back_populates="reactions")
+    user: Mapped[User] = relationship("User")
 
 
 # ---------------------------------------------------------------------------

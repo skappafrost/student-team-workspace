@@ -5,12 +5,15 @@ import { motion, useReducedMotion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { Message } from '../api/types';
+import { Message, ReactionSummary } from '../api/types';
+
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '👀'];
 
 interface MessageListProps {
   messages: Message[];
   currentUserId?: string;
   onReply?: (message: Message) => void;
+  onToggleReaction?: (message: Message, emoji: string) => void;
 }
 
 function authorLabel(message: Message): string {
@@ -21,15 +24,79 @@ function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
+function ReactionChips({
+  reactions,
+  currentUserId,
+  onToggle
+}: {
+  reactions: ReactionSummary[];
+  currentUserId?: string;
+  onToggle?: (emoji: string) => void;
+}) {
+  if (reactions.length === 0) return null;
+  return (
+    <div className='mt-1.5 flex flex-wrap gap-1'>
+      {reactions.map((r) => {
+        const mine = !!currentUserId && r.user_ids.includes(currentUserId);
+        return (
+          <button
+            key={r.emoji}
+            type='button'
+            onClick={() => onToggle?.(r.emoji)}
+            aria-pressed={mine}
+            aria-label={`${r.emoji} reaction, ${r.count} ${r.count === 1 ? 'person' : 'people'}`}
+            className={cn(
+              'flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors',
+              mine
+                ? 'border-primary/60 bg-primary/15 text-primary'
+                : 'border-border/60 bg-background/70 text-foreground/80 hover:bg-muted'
+            )}
+          >
+            <span aria-hidden='true'>{r.emoji}</span>
+            <span className='tabular-nums'>{r.count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
+  return (
+    <div
+      role='menu'
+      aria-label='Add reaction'
+      className='border-border/60 bg-background flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 shadow-sm'
+    >
+      {REACTION_EMOJIS.map((emoji) => (
+        <button
+          key={emoji}
+          type='button'
+          role='menuitem'
+          onClick={() => onPick(emoji)}
+          aria-label={`React with ${emoji}`}
+          className='hover:bg-muted rounded-full p-1 text-sm transition-transform hover:scale-110'
+        >
+          <span aria-hidden='true'>{emoji}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Source: shadcn/ui Avatar/Button + Slack-style thread row pattern.
 function MessageBubble({
   message,
   isMe,
-  compact = false
+  compact = false,
+  currentUserId,
+  onToggleReaction
 }: {
   message: Message;
   isMe: boolean;
   compact?: boolean;
+  currentUserId?: string;
+  onToggleReaction?: (emoji: string) => void;
 }) {
   return (
     <div
@@ -79,12 +146,22 @@ function MessageBubble({
         >
           {timeLabel(message.created_at)}
         </span>
+        <ReactionChips
+          reactions={message.reactions ?? []}
+          currentUserId={currentUserId}
+          onToggle={onToggleReaction}
+        />
       </div>
     </div>
   );
 }
 
-export function MessageList({ messages, currentUserId, onReply }: MessageListProps) {
+export function MessageList({
+  messages,
+  currentUserId,
+  onReply,
+  onToggleReaction
+}: MessageListProps) {
   const shouldReduceMotion = useReducedMotion();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -128,8 +205,22 @@ export function MessageList({ messages, currentUserId, onReply }: MessageListPro
             >
               <div className='flex items-center gap-2'>
                 <div className='min-w-0 flex-1'>
-                  <MessageBubble message={message} isMe={isMe} />
+                  <MessageBubble
+                    message={message}
+                    isMe={isMe}
+                    currentUserId={currentUserId}
+                    onToggleReaction={
+                      onToggleReaction
+                        ? (emoji) => onToggleReaction(message, emoji)
+                        : undefined
+                    }
+                  />
                 </div>
+                {onToggleReaction && (
+                  <div className='opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'>
+                    <EmojiPicker onPick={(emoji) => onToggleReaction(message, emoji)} />
+                  </div>
+                )}
                 {onReply && (
                   <Button
                     type='button'
@@ -167,6 +258,12 @@ export function MessageList({ messages, currentUserId, onReply }: MessageListPro
                           message={reply}
                           isMe={reply.author_id === currentUserId}
                           compact
+                          currentUserId={currentUserId}
+                          onToggleReaction={
+                            onToggleReaction
+                              ? (emoji) => onToggleReaction(reply, emoji)
+                              : undefined
+                          }
                         />
                       ))}
                     </div>

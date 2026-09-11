@@ -30,7 +30,7 @@ async def list_channel_messages(
         db.query(models.Message)
         .filter(models.Message.channel_id == channel_id)
         .order_by(models.Message.created_at.asc())
-        .options(selectinload(models.Message.author))
+        .options(selectinload(models.Message.author), selectinload(models.Message.reactions))
         .all()
     )
     return messages
@@ -73,7 +73,7 @@ async def create_message(
     message = (
         db.query(models.Message)
         .filter(models.Message.id == message.id)
-        .options(selectinload(models.Message.author))
+        .options(selectinload(models.Message.author), selectinload(models.Message.reactions))
         .first()
     )
 
@@ -118,6 +118,64 @@ async def update_message(
     )
 
     return message
+
+
+@router.post(
+    "/messages/{message_id}/reactions",
+    response_model=list[schemas.ReactionSummary],
+)
+async def toggle_reaction(
+    message_id: str,
+    payload: schemas.ReactionToggle,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle the current user's emoji reaction on a message.
+
+    Adds the reaction if absent, removes it if present. Returns the updated
+    reaction summary for the message and broadcasts it to the channel room.
+    """
+    message = _get_message_or_404(db, message_id)
+    channel = _get_channel_or_404(db, message.channel_id)
+    _require_member(channel.workspace_id, current_user["id"], db)
+    if not _is_private_channel_member(channel, current_user["id"], db):
+        raise HTTPException(status_code=403, detail="Not allowed to react in this channel")
+
+    existing = (
+        db.query(models.MessageReaction)
+        .filter(
+            models.MessageReaction.message_id == message_id,
+            models.MessageReaction.user_id == current_user["id"],
+            models.MessageReaction.emoji == payload.emoji,
+        )
+        .first()
+    )
+    if existing is not None:
+        db.delete(existing)
+    else:
+        db.add(
+            models.MessageReaction(
+                message_id=message_id, user_id=current_user["id"], emoji=payload.emoji
+            )
+        )
+    db.commit()
+
+    message = (
+        db.query(models.Message)
+        .filter(models.Message.id == message_id)
+        .options(selectinload(models.Message.reactions))
+        .first()
+    )
+    summary = schemas.MessageOut.model_validate(message).reactions
+    await _ws_broadcast(
+        message.channel_id,
+        {
+            "type": "reaction_update",
+            "message_id": message_id,
+            "reactions": [s.model_dump() for s in summary],
+        },
+    )
+    return summary
 
 
 @router.delete("/messages/{message_id}", status_code=204)

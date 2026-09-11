@@ -212,6 +212,16 @@ class ChannelOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ReactionToggle(BaseModel):
+    emoji: str = Field(..., min_length=1, max_length=32)
+
+
+class ReactionSummary(BaseModel):
+    emoji: str
+    count: int
+    user_ids: list[str]
+
+
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
     parent_id: str | None = None
@@ -230,6 +240,7 @@ class MessageOut(BaseModel):
     parent_id: str | None
     created_at: datetime
     updated_at: datetime
+    reactions: list[ReactionSummary] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -247,6 +258,17 @@ class MessageOut(BaseModel):
         # Preserve any already-set author_name if author wasn't loaded.
         if author_name is None and hasattr(data, "author_name") and data.author_name is not None:
             author_name = data.author_name
+        # Aggregate reactions (grouped by emoji) when the relationship is loaded.
+        reactions: list[dict] = []
+        loaded = getattr(data, "reactions", None)
+        if loaded is not None and not isinstance(loaded, (int, str)):
+            grouped: dict[str, list[str]] = {}
+            for r in loaded:
+                grouped.setdefault(r.emoji, []).append(r.user_id)
+            reactions = [
+                {"emoji": emoji, "count": len(uids), "user_ids": uids}
+                for emoji, uids in grouped.items()
+            ]
         return {
             "id": data.id,
             "channel_id": data.channel_id,
@@ -256,6 +278,7 @@ class MessageOut(BaseModel):
             "parent_id": data.parent_id,
             "created_at": data.created_at,
             "updated_at": data.updated_at,
+            "reactions": reactions,
         }
 
 

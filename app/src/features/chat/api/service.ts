@@ -1,4 +1,10 @@
-import { Channel, Message, CreateChannelPayload, CreateMessagePayload } from './types';
+import {
+  Channel,
+  Message,
+  CreateChannelPayload,
+  CreateMessagePayload,
+  ReactionSummary
+} from './types';
 
 async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api/channels${endpoint}`, {
@@ -49,6 +55,26 @@ export async function sendMessage(
     }
   );
   return data.message;
+}
+
+export async function toggleReaction(
+  messageId: string,
+  emoji: string
+): Promise<ReactionSummary[]> {
+  const res = await fetch(`/api/messages/${encodeURIComponent(messageId)}/reactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ emoji }),
+    credentials: 'include'
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    reactions?: ReactionSummary[];
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data.error || `API error: ${res.status}`);
+  }
+  return data.reactions ?? [];
 }
 
 export async function createMessage(

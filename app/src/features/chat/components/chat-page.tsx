@@ -8,7 +8,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import type { Channel, Message } from '../api/types';
 import { CreateChannelPayload } from '../api/types';
-import { getChannels, getMessages, sendMessage, createChannel } from '../api/service';
+import {
+  getChannels,
+  getMessages,
+  sendMessage,
+  createChannel,
+  toggleReaction
+} from '../api/service';
 import { channelKeys } from '../api/queries';
 import { useChannelWebSocket } from '../utils/use-channel-websocket';
 import { ChannelList } from './channel-list';
@@ -19,16 +25,18 @@ import { CreateChannelDialog } from './create-channel-dialog';
 function buildOptimisticMessage(
   content: string,
   channelId: string,
-  parentId: string | null = null
+  parentId: string | null = null,
+  authorId: string = 'you'
 ): Message {
   return {
     id: `pending-${Date.now()}`,
     channel_id: channelId,
-    author_id: 'you',
+    author_id: authorId,
     content,
     parent_id: parentId,
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
+    reactions: []
   };
 }
 
@@ -37,6 +45,18 @@ export default function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+
+  const meQuery = useQuery<{ id: string } | null>({
+    queryKey: ['auth', 'me'],
+    queryFn: async () => {
+      const res = await fetch('/api/auth/me', { credentials: 'include' });
+      if (!res.ok) return null;
+      const data = (await res.json().catch(() => ({}))) as { user?: { id: string } | null };
+      return data.user ?? null;
+    },
+    staleTime: 5 * 60 * 1000
+  });
+  const currentUserId = meQuery.data?.id;
 
   const channelsQuery = useQuery<Channel[]>({
     queryKey: channelKeys.list(),
@@ -86,7 +106,12 @@ export default function ChatPage() {
       const key = channelKeys.messages(selectedChannel.id);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<Message[]>(key);
-      const optimistic = buildOptimisticMessage(content, selectedChannel.id, replyingTo?.id ?? null);
+      const optimistic = buildOptimisticMessage(
+        content,
+        selectedChannel.id,
+        replyingTo?.id ?? null,
+        currentUserId ?? 'you'
+      );
       queryClient.setQueryData<Message[]>(key, (old) => [...(old ?? []), optimistic]);
       return { previous, key };
     },
@@ -109,17 +134,50 @@ export default function ChatPage() {
     sendMessageMutation.mutate(content);
   };
 
+  const reactionMutation = useMutation({
+    mutationFn: async ({ messageId, emoji }: { messageId: string; emoji: string }) =>
+      toggleReaction(messageId, emoji),
+    onSuccess: (reactions, { messageId }) => {
+      if (!selectedChannel) return;
+      const key = channelKeys.messages(selectedChannel.id);
+      queryClient.setQueryData<Message[]>(key, (old) =>
+        (old ?? []).map((m) => (m.id === messageId ? { ...m, reactions } : m))
+      );
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to react');
+    }
+  });
+
+  const handleToggleReaction = (message: Message, emoji: string) => {
+    if (message.id.startsWith('pending-')) return;
+    reactionMutation.mutate({ messageId: message.id, emoji });
+  };
+
   // Realtime WebSocket: append incoming messages for the selected channel.
   useChannelWebSocket({
     channelId: selectedChannel?.id ?? undefined,
     onMessage: (data: unknown) => {
       if (!data || typeof data !== 'object') return;
-      const payload = data as { type?: string; message?: Message };
+      const payload = data as {
+        type?: string;
+        message?: Message;
+        message_id?: string;
+        reactions?: Message['reactions'];
+      };
       if (payload.type === 'new_message' && payload.message) {
         const msg = payload.message;
         if (msg.channel_id !== selectedChannel?.id) return;
         void queryClient.setQueryData<Message[]>(channelKeys.messages(msg.channel_id), (old) =>
           old ? [...old, msg] : [msg]
+        );
+      } else if (payload.type === 'reaction_update' && payload.message_id) {
+        if (!selectedChannel) return;
+        const { message_id, reactions } = payload;
+        void queryClient.setQueryData<Message[]>(
+          channelKeys.messages(selectedChannel.id),
+          (old) =>
+            (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
         );
       }
     }
@@ -167,8 +225,9 @@ export default function ChatPage() {
               ) : (
                 <MessageList
                   messages={messagesQuery.data ?? []}
-                  currentUserId='you'
+                  currentUserId={currentUserId}
                   onReply={setReplyingTo}
+                  onToggleReaction={handleToggleReaction}
                 />
               )}
 
