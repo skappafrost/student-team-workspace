@@ -5,6 +5,7 @@ export const channelKeys = {
   all: ['channels'] as const,
   list: () => [...channelKeys.all, 'list'] as const,
   detail: (id: string) => [...channelKeys.all, 'detail', id] as const,
+  dms: () => [...channelKeys.all, 'dms'] as const,
   messages: (channelId: string | null) =>
     [...channelKeys.all, 'messages', channelId ?? 'none'] as const
 };

@@ -28,6 +28,18 @@ export interface Message {
   reactions?: ReactionSummary[];
 }
 
+export interface DMChannel extends Channel {
+  peer_id: string | null;
+  peer_name: string | null;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  user_id: string;
+  role: string;
+  user?: { id: string; email: string; display_name: string } | null;
+}
+
 export interface CreateChannelPayload {
   name: string;
   type?: ChannelType;

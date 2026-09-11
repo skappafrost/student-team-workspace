@@ -212,6 +212,15 @@ class ChannelOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DMCreate(BaseModel):
+    user_id: str = Field(..., min_length=1)
+
+
+class DMChannelOut(ChannelOut):
+    peer_id: str | None = None
+    peer_name: str | None = None
+
+
 class ReactionToggle(BaseModel):
     emoji: str = Field(..., min_length=1, max_length=32)
 

@@ -6,15 +6,18 @@ import { toast } from 'sonner';
 import PageContainer from '@/components/layout/page-container';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import type { Channel, Message } from '../api/types';
+import type { Channel, DMChannel, Message } from '../api/types';
 import { CreateChannelPayload } from '../api/types';
 import {
   getChannels,
+  getDMs,
   getMessages,
   sendMessage,
   createChannel,
+  createDM,
   toggleReaction
 } from '../api/service';
+import { NewDMDialog } from './new-dm-dialog';
 import { channelKeys } from '../api/queries';
 import { useChannelWebSocket } from '../utils/use-channel-websocket';
 import { ChannelList } from './channel-list';
@@ -63,10 +66,37 @@ export default function ChatPage() {
     queryFn: async () => getChannels()
   });
 
-  const selectedChannel = useMemo(
-    () => channelsQuery.data?.find((c) => c.id === selectedId) ?? channelsQuery.data?.[0] ?? null,
-    [channelsQuery.data, selectedId]
+  const dmsQuery = useQuery<DMChannel[]>({
+    queryKey: channelKeys.dms(),
+    queryFn: getDMs
+  });
+
+  const allChannels = useMemo(
+    () => [...(channelsQuery.data ?? []), ...(dmsQuery.data ?? [])],
+    [channelsQuery.data, dmsQuery.data]
   );
+
+  const selectedChannel = useMemo(
+    () => allChannels.find((c) => c.id === selectedId) ?? allChannels[0] ?? null,
+    [allChannels, selectedId]
+  );
+
+  const selectedDM = useMemo(
+    () => dmsQuery.data?.find((d) => d.id === selectedChannel?.id) ?? null,
+    [dmsQuery.data, selectedChannel]
+  );
+
+  const createDMMutation = useMutation({
+    mutationFn: createDM,
+    onSuccess: (dm) => {
+      void queryClient.invalidateQueries({ queryKey: channelKeys.dms() });
+      setSelectedId(dm.id);
+      toast.success(`Chat with ${dm.peer_name ?? 'member'} ready`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to open DM');
+    }
+  });
 
   const messagesQuery = useQuery<Message[]>({
     queryKey: channelKeys.messages(selectedChannel?.id ?? null),
@@ -192,12 +222,22 @@ export default function ChatPage() {
       >
         <ChannelList
           channels={channelsQuery.data ?? []}
+          dms={dmsQuery.data ?? []}
           selectedId={selectedChannel?.id ?? null}
           onSelect={setSelectedId}
           action={
             <CreateChannelDialog
               onSubmit={handleCreateChannel}
               isSubmitting={createChannelMutation.isPending}
+            />
+          }
+          dmAction={
+            <NewDMDialog
+              currentUserId={currentUserId}
+              onSubmit={async (userId) => {
+                await createDMMutation.mutateAsync(userId);
+              }}
+              isSubmitting={createDMMutation.isPending}
             />
           }
         />
@@ -208,10 +248,10 @@ export default function ChatPage() {
               <header className='border-border/40 bg-background/80 flex items-center justify-between rounded-2xl border px-4 py-3 backdrop-blur sm:px-6'>
                 <div>
                   <h2 className='text-foreground text-base font-semibold sm:text-lg'>
-                    #{selectedChannel.name}
+                    {selectedDM ? (selectedDM.peer_name ?? 'Direct message') : `#${selectedChannel.name}`}
                   </h2>
                   <p className='text-muted-foreground text-xs capitalize'>
-                    {selectedChannel.type} channel
+                    {selectedDM ? 'Direct message' : `${selectedChannel.type} channel`}
                   </p>
                 </div>
               </header>
@@ -238,7 +278,9 @@ export default function ChatPage() {
                 placeholder={
                   replyingTo
                     ? `Reply to ${replyingTo.author_name || replyingTo.author_id}...`
-                    : `Message #${selectedChannel.name}`
+                    : selectedDM
+                      ? `Message ${selectedDM.peer_name ?? 'direct message'}`
+                      : `Message #${selectedChannel.name}`
                 }
                 disabled={sendMessageMutation.isPending}
                 replyingTo={

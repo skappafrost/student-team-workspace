@@ -42,6 +42,23 @@ def _channel_to_dict(channel: models.Channel) -> dict:
 def _is_private_channel_member(channel: models.Channel, user_id: str, db: Session) -> bool:
     if not channel.is_private:
         return True
+    # Channels with explicit channel members (e.g. DMs) are restricted to them.
+    has_members = (
+        db.query(models.ChannelMember)
+        .filter(models.ChannelMember.channel_id == channel.id)
+        .first()
+        is not None
+    )
+    if has_members:
+        return (
+            db.query(models.ChannelMember)
+            .filter(
+                models.ChannelMember.channel_id == channel.id,
+                models.ChannelMember.user_id == user_id,
+            )
+            .first()
+            is not None
+        )
     membership = (
         db.query(models.WorkspaceMember)
         .filter(
@@ -51,6 +68,107 @@ def _is_private_channel_member(channel: models.Channel, user_id: str, db: Sessio
         .first()
     )
     return membership is not None
+
+
+def _dm_out(channel: models.Channel, user_id: str, db: Session) -> schemas.DMChannelOut:
+    peer = (
+        db.query(models.User)
+        .join(models.ChannelMember, models.ChannelMember.user_id == models.User.id)
+        .filter(
+            models.ChannelMember.channel_id == channel.id,
+            models.ChannelMember.user_id != user_id,
+        )
+        .first()
+    )
+    return schemas.DMChannelOut(
+        id=channel.id,
+        workspace_id=channel.workspace_id,
+        name=channel.name,
+        type=channel.type,
+        created_by=channel.created_by,
+        is_private=channel.is_private,
+        created_at=channel.created_at,
+        peer_id=peer.id if peer else None,
+        peer_name=peer.display_name if peer else None,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/dms", response_model=schemas.DMChannelOut, status_code=201
+)
+async def create_dm(
+    workspace_id: str,
+    payload: schemas.DMCreate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create (or return existing) 1:1 direct-message channel with another member."""
+    _get_workspace_or_404(db, workspace_id)
+    _require_member(workspace_id, current_user["id"], db)
+    if payload.user_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="Cannot open a DM with yourself")
+    _require_member(workspace_id, payload.user_id, db)
+
+    pair = sorted([current_user["id"], payload.user_id])
+    # Find an existing DM channel between exactly these two users.
+    candidates = (
+        db.query(models.Channel)
+        .filter(
+            models.Channel.workspace_id == workspace_id,
+            models.Channel.type == "dm",
+        )
+        .all()
+    )
+    for channel in candidates:
+        member_ids = {
+            m.user_id
+            for m in db.query(models.ChannelMember)
+            .filter(models.ChannelMember.channel_id == channel.id)
+            .all()
+        }
+        if member_ids == set(pair):
+            return _dm_out(channel, current_user["id"], db)
+
+    channel = models.Channel(
+        workspace_id=workspace_id,
+        name=f"dm-{pair[0]}-{pair[1]}",
+        type="dm",
+        created_by=current_user["id"],
+        is_private=True,
+    )
+    db.add(channel)
+    db.flush()
+    db.add_all(
+        [
+            models.ChannelMember(channel_id=channel.id, user_id=pair[0]),
+            models.ChannelMember(channel_id=channel.id, user_id=pair[1]),
+        ]
+    )
+    db.commit()
+    db.refresh(channel)
+    return _dm_out(channel, current_user["id"], db)
+
+
+@router.get("/workspaces/{workspace_id}/dms", response_model=list[schemas.DMChannelOut])
+async def list_dms(
+    workspace_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List the current user's DM channels in a workspace."""
+    _get_workspace_or_404(db, workspace_id)
+    _require_member(workspace_id, current_user["id"], db)
+    channels = (
+        db.query(models.Channel)
+        .join(models.ChannelMember, models.ChannelMember.channel_id == models.Channel.id)
+        .filter(
+            models.Channel.workspace_id == workspace_id,
+            models.Channel.type == "dm",
+            models.ChannelMember.user_id == current_user["id"],
+        )
+        .all()
+    )
+    return [_dm_out(c, current_user["id"], db) for c in channels]
 
 
 @router.websocket("/ws/channels/{channel_id}")
@@ -143,5 +261,12 @@ async def list_workspace_channels(
     """List all channels in a workspace. Members see all channels; non-members are blocked."""
     _get_workspace_or_404(db, workspace_id)
     _require_member(workspace_id, current_user["id"], db)
-    channels = db.query(models.Channel).filter(models.Channel.workspace_id == workspace_id).all()
+    channels = (
+        db.query(models.Channel)
+        .filter(
+            models.Channel.workspace_id == workspace_id,
+            models.Channel.type != "dm",
+        )
+        .all()
+    )
     return channels

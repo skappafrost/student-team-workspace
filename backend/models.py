@@ -298,6 +298,27 @@ class Channel(Base):
     )
 
 
+class ChannelMember(Base):
+    __tablename__ = "channel_members"
+    __table_args__ = (
+        UniqueConstraint("channel_id", "user_id", name="uq_channel_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    channel_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("channels.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    channel: Mapped[Channel] = relationship("Channel")
+    user: Mapped[User] = relationship("User")
+
+
 # ---------------------------------------------------------------------------
 # Message
 # ---------------------------------------------------------------------------
