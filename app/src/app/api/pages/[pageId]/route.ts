@@ -24,65 +24,63 @@ async function backendRequest(
   });
 }
 
-export async function GET(_request: Request, { params }: { params: Promise<{ pageId: string }> }) {
+/** Backend page routes are workspace-scoped; resolve the current workspace. */
+async function resolveWorkspaceId(sessionCookie: string): Promise<string | null> {
+  const res = await backendRequest('/workspaces', { method: 'GET' }, sessionCookie);
+  if (!res.ok) return null;
+  const workspaces = (await res.json()) as Array<{ id: string }>;
+  return workspaces[0]?.id ?? null;
+}
+
+async function proxy(
+  request: Request,
+  pageId: string,
+  method: 'GET' | 'PATCH' | 'DELETE'
+): Promise<NextResponse> {
   const sessionCookie = await getSessionCookie();
   if (!sessionCookie) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const { pageId } = await params;
+  const workspaceId = await resolveWorkspaceId(sessionCookie);
+  if (!workspaceId) {
+    return NextResponse.json({ error: 'No workspace' }, { status: 404 });
+  }
+
+  const init: RequestInit = { method };
+  if (method === 'PATCH') {
+    init.body = JSON.stringify(await request.json().catch(() => ({})));
+  }
+
   const res = await backendRequest(
-    `/pages/${encodeURIComponent(pageId)}`,
-    { method: 'GET' },
+    `/workspaces/${workspaceId}/pages/${encodeURIComponent(pageId)}`,
+    init,
     sessionCookie
   );
   if (!res.ok) {
-    const text = await res.text().catch(() => 'Failed to fetch page');
+    const text = await res.text().catch(() => `Failed to ${method.toLowerCase()} page`);
     return NextResponse.json({ error: text }, { status: res.status });
+  }
+  if (method === 'DELETE') {
+    return NextResponse.json({ ok: true });
   }
   const page = (await res.json()) as Record<string, unknown>;
   return NextResponse.json({ page });
+}
+
+export async function GET(request: Request, { params }: { params: Promise<{ pageId: string }> }) {
+  const { pageId } = await params;
+  return proxy(request, pageId, 'GET');
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ pageId: string }> }) {
-  const sessionCookie = await getSessionCookie();
-  if (!sessionCookie) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-  }
   const { pageId } = await params;
-  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const res = await backendRequest(
-    `/pages/${encodeURIComponent(pageId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(body)
-    },
-    sessionCookie
-  );
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'Failed to update page');
-    return NextResponse.json({ error: text }, { status: res.status });
-  }
-  const page = (await res.json()) as Record<string, unknown>;
-  return NextResponse.json({ page });
+  return proxy(request, pageId, 'PATCH');
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ pageId: string }> }
 ) {
-  const sessionCookie = await getSessionCookie();
-  if (!sessionCookie) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-  }
   const { pageId } = await params;
-  const res = await backendRequest(
-    `/pages/${encodeURIComponent(pageId)}`,
-    { method: 'DELETE' },
-    sessionCookie
-  );
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'Failed to delete page');
-    return NextResponse.json({ error: text }, { status: res.status });
-  }
-  return NextResponse.json({ ok: true });
+  return proxy(request, pageId, 'DELETE');
 }
