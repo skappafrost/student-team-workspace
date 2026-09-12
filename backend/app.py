@@ -1,5 +1,6 @@
 """FastAPI application with workspace CRUD and invite endpoints."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
@@ -297,7 +298,19 @@ class TokenOut(BaseModel):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Student Team Workspace API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create tables on startup for simplicity in this scaffold stage.
+    Base.metadata.create_all(bind=engine)  # TODO(T036)
+    if _test_auth_bypass_enabled():
+        logging.getLogger(__name__).warning(
+            "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
+            "auth bypass is ENABLED. Never run with this combination outside tests."
+        )
+    yield
+
+
+app = FastAPI(title="Student Team Workspace API", lifespan=lifespan)
 
 logger = logging.getLogger("stw")
 
@@ -329,17 +342,6 @@ def _file_out(file: models.File, request: Request = None) -> dict:
         "uploaded_by": file.uploader_id,
         "created_at": file.created_at,
     }
-
-
-# Create tables on startup for simplicity in this scaffold stage.
-@app.on_event("startup")
-def _create_tables():
-    Base.metadata.create_all(bind=engine)
-    if _test_auth_bypass_enabled():
-        logging.getLogger(__name__).warning(
-            "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
-            "auth bypass is ENABLED. Never run with this combination outside tests."
-        )
 
 
 app.add_middleware(
