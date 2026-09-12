@@ -342,6 +342,7 @@ class TaskCreate(BaseModel):
     priority: TaskPriority = "medium"
     status: TaskStatus = "todo"
     position: float = 0.0
+    due_at: datetime | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -351,6 +352,7 @@ class TaskUpdate(BaseModel):
     priority: TaskPriority | None = None
     status: TaskStatus | None = None
     position: float | None = None
+    due_at: datetime | None = None
 
 
 class TaskOut(BaseModel):
@@ -362,10 +364,18 @@ class TaskOut(BaseModel):
     status: str
     priority: str
     position: float
+    due_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MyTaskOut(TaskOut):
+    """TaskOut enriched with project/workspace names for cross-workspace views."""
+
+    project_name: str
+    workspace_name: str
 
 
 # ---------------------------------------------------------------------------

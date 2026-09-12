@@ -1,6 +1,8 @@
 """Task CRUD."""
 
-from fastapi import APIRouter, Depends, HTTPException
+import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 import models
@@ -10,6 +12,63 @@ from database import get_db
 from dependencies import _get_project_or_404, _get_task_or_404, get_current_user
 
 router = APIRouter()
+
+
+@router.get("/users/me/tasks", response_model=list[schemas.MyTaskOut])
+async def list_my_tasks(
+    due: str | None = Query(
+        default=None,
+        description="Due-date bucket: overdue | today | week | later | none",
+    ),
+    status: str | None = None,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """All tasks assigned to the current user across every workspace they belong to."""
+    rows = (
+        db.query(models.Task, models.Project, models.Workspace)
+        .join(models.Project, models.Task.project_id == models.Project.id)
+        .join(models.Workspace, models.Project.workspace_id == models.Workspace.id)
+        .join(
+            models.WorkspaceMember,
+            (models.WorkspaceMember.workspace_id == models.Workspace.id)
+            & (models.WorkspaceMember.user_id == current_user["id"]),
+        )
+        .filter(models.Task.assignee_id == current_user["id"])
+    )
+    if status:
+        rows = rows.filter(models.Task.status == status)
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    week_end = today_end + datetime.timedelta(days=7)
+
+    results = []
+    for task, project, workspace in rows.all():
+        due_at = task.due_at
+        if due_at is not None and due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=datetime.timezone.utc)
+        if due == "overdue" and not (due_at and due_at < now):
+            continue
+        if due == "today" and not (due_at and now <= due_at <= today_end):
+            continue
+        if due == "week" and not (due_at and today_end < due_at <= week_end):
+            continue
+        if due == "later" and not (due_at and due_at > week_end):
+            continue
+        if due == "none" and due_at is not None:
+            continue
+        out = schemas.MyTaskOut(
+            **schemas.TaskOut.model_validate(task).model_dump(),
+            project_name=project.name,
+            workspace_name=workspace.name,
+        )
+        if out.due_at is not None and out.due_at.tzinfo is None:
+            out.due_at = out.due_at.replace(tzinfo=datetime.timezone.utc)
+        results.append(out)
+
+    results.sort(key=lambda t: (t.due_at is None, t.due_at or datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)))
+    return results
 
 
 @router.post("/projects/{project_id}/tasks", response_model=schemas.TaskOut, status_code=201)
@@ -31,6 +90,7 @@ async def create_task(
         priority=payload.priority,
         status=payload.status,
         position=payload.position,
+        due_at=payload.due_at,
     )
     db.add(task)
     db.commit()
@@ -80,6 +140,8 @@ async def update_task(
         task.status = payload.status
     if payload.position is not None:
         task.position = payload.position
+    if payload.due_at is not None:
+        task.due_at = payload.due_at
 
     db.commit()
     db.refresh(task)
