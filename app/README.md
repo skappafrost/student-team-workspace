@@ -191,6 +191,25 @@ bun run typecheck
 bun run build
 ```
 
+### API type generation (pilot)
+
+Backend response types are generated from the FastAPI OpenAPI schema — never
+hand-maintained — via [`openapi-typescript`](https://openapi-typescript.dev):
+
+```bash
+bun run gen:api
+```
+
+This spins up the backend on `127.0.0.1:8123` with a throwaway temp SQLite DB
+(never the dev `stw.db`), fetches `/openapi.json`, and emits the typed client
+to `src/types/api.d.ts` (starts with a `DO-NOT-EDIT-GENERATED` header — do not
+edit it by hand, regenerate instead). The `notifications` feature is the pilot
+consumer: it re-exports `GeneratedNotificationOut` from the generated file and
+keeps its hand-written `BackendNotification` only where the shapes genuinely
+differ (nullable `content`). To roll out to another feature, import the
+matching `components['schemas'][...]` type the same way; on any shape mismatch
+keep the manual type and note it in the PR instead of force-fitting.
+
 > [!WARNING]
 > After cloning or forking, be careful when pulling the latest changes. Updates can cause merge conflicts.
 
