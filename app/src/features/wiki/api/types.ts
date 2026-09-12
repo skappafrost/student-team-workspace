@@ -16,3 +16,14 @@ export interface WikiPageSummary {
   title: string;
   slug: string;
 }
+
+export interface WikiPageVersion {
+  id: string;
+  page_id: string;
+  version: number;
+  title: string;
+  content: string | null;
+  author_id: string | null;
+  author_name: string | null;
+  created_at: string;
+}

@@ -24,6 +24,25 @@ def _validate_parent_id(
         raise HTTPException(status_code=400, detail="Page cannot be its own parent")
 
 
+def _snapshot_version(
+    db: Session, page: models.Page, author_id: str
+) -> models.PageVersion:
+    """Create the next PageVersion row capturing the page's current state."""
+    latest = (
+        db.query(models.PageVersion.version)
+        .filter(models.PageVersion.page_id == page.id)
+        .order_by(models.PageVersion.version.desc())
+        .first()
+    )
+    return models.PageVersion(
+        page_id=page.id,
+        version=(latest[0] if latest else 0) + 1,
+        title=page.title,
+        content=page.content,
+        author_id=author_id,
+    )
+
+
 def _check_page_write_permission(
     page: models.Page, membership: models.WorkspaceMembership, current_user: dict
 ) -> bool:
@@ -75,6 +94,7 @@ async def create_page(
     )
     db.add(page)
     db.flush()
+    db.add(_snapshot_version(db, page, current_user["id"]))
     log_activity(
         db,
         workspace_id=workspace_id,
@@ -204,6 +224,97 @@ async def update_page(
         page.content = payload.content
 
     page.updated_by = current_user["id"]
+    db.flush()
+    db.add(_snapshot_version(db, page, current_user["id"]))
+    db.commit()
+    db.refresh(page)
+    return page
+
+
+@router.get(
+    "/workspaces/{workspace_id}/pages/{page_id}/history",
+    response_model=list[schemas.PageVersionOut],
+)
+async def list_page_history(
+    workspace_id: str,
+    page_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List version history for a page, newest first."""
+    _get_workspace_or_404(db, workspace_id)
+    _require_member(workspace_id, current_user["id"], db)
+    page = _get_page_or_404(db, page_id)
+    if page.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Page not found in workspace")
+
+    versions = (
+        db.query(models.PageVersion, models.User.display_name)
+        .outerjoin(models.User, models.User.id == models.PageVersion.author_id)
+        .filter(models.PageVersion.page_id == page_id)
+        .order_by(models.PageVersion.version.desc())
+        .all()
+    )
+    return [
+        schemas.PageVersionOut(
+            id=v.id,
+            page_id=v.page_id,
+            version=v.version,
+            title=v.title,
+            content=v.content,
+            author_id=v.author_id,
+            author_name=author_name,
+            created_at=v.created_at,
+        )
+        for v, author_name in versions
+    ]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/pages/{page_id}/restore/{version}",
+    response_model=schemas.PageOut,
+)
+async def restore_page_version(
+    workspace_id: str,
+    page_id: str,
+    version: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Restore a page to a prior version. Same permissions as update."""
+    _get_workspace_or_404(db, workspace_id)
+    membership = _require_member(workspace_id, current_user["id"], db)
+    page = _get_page_or_404(db, page_id)
+    if page.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Page not found in workspace")
+    if not _check_page_write_permission(page, membership, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to update this page")
+
+    snapshot = (
+        db.query(models.PageVersion)
+        .filter(
+            models.PageVersion.page_id == page_id,
+            models.PageVersion.version == version,
+        )
+        .first()
+    )
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    page.title = snapshot.title
+    page.content = snapshot.content
+    page.updated_by = current_user["id"]
+    db.flush()
+    db.add(_snapshot_version(db, page, current_user["id"]))
+    log_activity(
+        db,
+        workspace_id=workspace_id,
+        actor_id=current_user["id"],
+        verb="restored page",
+        target_type="page",
+        target_id=page.id,
+        target_label=page.title,
+    )
     db.commit()
     db.refresh(page)
     return page

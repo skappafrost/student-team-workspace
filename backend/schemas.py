@@ -330,6 +330,17 @@ class PageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PageVersionOut(BaseModel):
+    id: str
+    page_id: str
+    version: int
+    title: str
+    content: str | None
+    author_id: str | None
+    author_name: str | None = None
+    created_at: datetime
+
+
 class PageTreeItem(PageOut):
     children: list["PageTreeItem"] = []
 

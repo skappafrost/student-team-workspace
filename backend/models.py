@@ -611,6 +611,29 @@ class Page(Base):
     updater: Mapped[User | None] = relationship("User", foreign_keys=[updated_by])
 
 
+class PageVersion(Base):
+    """Immutable snapshot of a wiki page before an edit (F09 history)."""
+
+    __tablename__ = "page_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    page_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("pages.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    page: Mapped[Page] = relationship("Page", foreign_keys=[page_id])
+    author: Mapped[User | None] = relationship("User", foreign_keys=[author_id])
+
+
 # ---------------------------------------------------------------------------
 # Legacy aliases for backward compatibility with W2-1b code.
 # The old ``WorkspaceMembership`` model is replaced by ``WorkspaceMember``;

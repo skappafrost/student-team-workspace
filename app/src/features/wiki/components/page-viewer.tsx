@@ -19,6 +19,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { WikiPage } from '../api/types';
 import { AISummaryCard } from '@/features/ai/components/ai-summary-card';
+import { PageHistorySheet } from './page-history-sheet';
 
 interface PageViewerProps {
   page: WikiPage | null | undefined;
@@ -56,8 +57,13 @@ export function PageViewer({ page, isLoading }: PageViewerProps) {
   return (
     <Card className='flex h-full flex-col overflow-hidden'>
       <CardHeader className='shrink-0 border-b'>
-        <CardTitle className='text-base sm:text-lg'>{page.title}</CardTitle>
-        <CardDescription>Slug: {page.slug}</CardDescription>
+        <div className='flex items-start justify-between gap-2'>
+          <div className='space-y-1.5'>
+            <CardTitle className='text-base sm:text-lg'>{page.title}</CardTitle>
+            <CardDescription>Slug: {page.slug}</CardDescription>
+          </div>
+          <PageHistorySheet page={page} />
+        </div>
       </CardHeader>
       <ScrollArea className='flex-1'>
         <CardContent className='py-4'>
