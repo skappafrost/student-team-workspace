@@ -1,4 +1,5 @@
 # Student Team Workspace (STW)
+[![CI](https://github.com/skappafrost/student-team-workspace/actions/workflows/ci.yml/badge.svg)](https://github.com/skappafrost/student-team-workspace/actions/workflows/ci.yml)
 
 A team collaboration dashboard for student teams — kanban boards, chat, wiki, files, calendar, and notifications in one place.
 
