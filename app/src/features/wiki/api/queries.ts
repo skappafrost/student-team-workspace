@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { getPage, getPageHistory, getPages, searchPages } from './service';
+import { getPage, getPageBacklinks, getPageHistory, getPages, searchPages } from './service';
 
 export const wikiKeys = {
   all: ['wiki'] as const,
@@ -43,6 +43,14 @@ export function pageHistoryQueryOptions(id: string | null) {
   return queryOptions({
     queryKey: [...wikiKeys.detail(id), 'history'] as const,
     queryFn: () => (id ? getPageHistory(id) : Promise.resolve([])),
+    enabled: !!id
+  });
+}
+
+export function pageBacklinksQueryOptions(id: string | null) {
+  return queryOptions({
+    queryKey: [...wikiKeys.detail(id), 'backlinks'] as const,
+    queryFn: () => (id ? getPageBacklinks(id) : Promise.resolve([])),
     enabled: !!id
   });
 }

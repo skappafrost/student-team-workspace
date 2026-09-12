@@ -74,7 +74,11 @@ export default function WikiPage() {
         )}
 
         <div className='min-h-0 flex-1 overflow-hidden rounded-2xl border border-transparent bg-transparent sm:gap-4'>
-          <PageViewer page={pageQuery.data} isLoading={pageQuery.isLoading} />
+          <PageViewer
+            page={pageQuery.data}
+            isLoading={pageQuery.isLoading}
+            onSelectPage={setSelectedId}
+          />
         </div>
       </div>
     </PageContainer>

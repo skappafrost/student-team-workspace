@@ -55,3 +55,10 @@ export async function restorePageVersion(
   );
   return data.page ?? null;
 }
+
+export async function getPageBacklinks(id: string): Promise<WikiPageSummary[]> {
+  const data = await apiRequest<{ backlinks: WikiPageSummary[] }>(
+    `/${encodeURIComponent(id)}/backlinks`
+  );
+  return data.backlinks || [];
+}

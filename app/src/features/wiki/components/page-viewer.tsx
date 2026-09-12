@@ -14,19 +14,24 @@
  *   (https://github.com/uiwjs/react-md-editor)
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { WikiPage } from '../api/types';
+import { pageBacklinksQueryOptions } from '../api/queries';
 import { AISummaryCard } from '@/features/ai/components/ai-summary-card';
 import { PageHistorySheet } from './page-history-sheet';
 
 interface PageViewerProps {
   page: WikiPage | null | undefined;
   isLoading?: boolean;
+  onSelectPage?: (id: string) => void;
 }
 
-export function PageViewer({ page, isLoading }: PageViewerProps) {
+export function PageViewer({ page, isLoading, onSelectPage }: PageViewerProps) {
+  const backlinksQuery = useQuery(pageBacklinksQueryOptions(page?.id ?? null));
+  const backlinks = backlinksQuery.data ?? [];
   if (isLoading) {
     return (
       <Card className='h-full overflow-hidden'>
@@ -72,6 +77,25 @@ export function PageViewer({ page, isLoading }: PageViewerProps) {
           </article>
         </CardContent>
       </ScrollArea>
+      {backlinks.length > 0 && (
+        <div className='shrink-0 border-t px-4 py-3'>
+          <p className='text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wide'>
+            Linked from
+          </p>
+          <div className='flex flex-wrap gap-1.5'>
+            {backlinks.map((b) => (
+              <button
+                key={b.id}
+                type='button'
+                onClick={() => onSelectPage?.(b.id)}
+                className='bg-muted/60 hover:bg-muted rounded-md px-2 py-1 text-xs'
+              >
+                {b.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className='shrink-0 border-t p-4'>
         <AISummaryCard kind='page' refId={page.id} title='Summarize page' />
       </div>

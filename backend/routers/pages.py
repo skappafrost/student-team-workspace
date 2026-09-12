@@ -1,5 +1,7 @@
 """Wiki / knowledge-base page CRUD."""
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -229,6 +231,43 @@ async def update_page(
     db.commit()
     db.refresh(page)
     return page
+
+
+_WIKILINK_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
+
+
+@router.get(
+    "/workspaces/{workspace_id}/pages/{page_id}/backlinks",
+    response_model=list[schemas.PageTreeItem],
+)
+async def list_page_backlinks(
+    workspace_id: str,
+    page_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Pages in the workspace whose content links to this page via [[title]]/[[slug]]."""
+    _get_workspace_or_404(db, workspace_id)
+    _require_member(workspace_id, current_user["id"], db)
+    page = _get_page_or_404(db, page_id)
+    if page.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Page not found in workspace")
+
+    candidates = (
+        db.query(models.Page)
+        .filter(
+            models.Page.workspace_id == workspace_id,
+            models.Page.id != page_id,
+            models.Page.content.isnot(None),
+        )
+        .all()
+    )
+    names = {page.title.lower(), page.slug.lower()}
+    return [
+        p
+        for p in candidates
+        if {m.strip().lower() for m in _WIKILINK_RE.findall(p.content or "")} & names
+    ]
 
 
 @router.get(
