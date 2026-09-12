@@ -86,6 +86,16 @@ cd app && node e2e-auth-flow.mjs
 - [ ] AI assist features (search, summarize)
 - [ ] Cloud deploy: Vercel (frontend) + Neon/Supabase (Postgres) + Render/Fly (FastAPI)
 
+## Dev shortcuts (Makefile)
+
+```bash
+make dev   # Postgres (Docker) + backend uvicorn :8000 + frontend :3000 (webpack)
+make test  # backend pytest + frontend typecheck
+make seed  # placeholder until T045 manage.py lands
+```
+
+Requires Docker (for Postgres), `backend/.venv`, and `bun install` in `app/`.
+
 ## License
 
 MIT
