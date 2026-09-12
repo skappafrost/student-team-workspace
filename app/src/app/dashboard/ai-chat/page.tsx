@@ -8,6 +8,7 @@ export const metadata = {
 export default function Page() {
   return (
     <PageContainer>
+      <h1 className='sr-only'>AI Chat</h1>
       <AiChatDemo />
     </PageContainer>
   );

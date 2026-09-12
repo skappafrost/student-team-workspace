@@ -94,9 +94,9 @@ export default function OverviewDashboard() {
     <PageContainer>
       <div className='flex flex-1 flex-col gap-4'>
         <div className='flex items-center justify-between'>
-          <h2 className='text-2xl font-bold tracking-tight'>
+          <h1 className='text-2xl font-bold tracking-tight'>
             {workspace.data?.name ? `${workspace.data.name} overview` : 'Overview'}
-          </h2>
+          </h1>
           <Badge variant='outline' className='gap-1'>
             <Icons.circleCheck className='size-3.5' />
             {completionPct}% complete
