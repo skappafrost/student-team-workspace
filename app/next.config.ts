@@ -26,6 +26,41 @@ const baseConfig: NextConfig = {
   transpilePackages: ['geist'],
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production'
+  },
+  // S04: security headers on every route.
+  async headers() {
+    const isDev = process.env.NODE_ENV !== 'production';
+    // CSP: scripts need 'unsafe-eval' in dev (HMR) and 'unsafe-inline' for
+    // Next inline bootstrap scripts; styles need 'unsafe-inline' (Tailwind/
+    // shadcn inline style attributes + Next style tags). Tighten with nonces
+    // when the app stops shipping inline scripts.
+    const csp = [
+      "default-src 'self'",
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self' ws: wss: http://127.0.0.1:8000 http://localhost:8000",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'"
+    ].join('; ');
+
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: csp },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()'
+          }
+        ]
+      }
+    ];
   }
 };
 
