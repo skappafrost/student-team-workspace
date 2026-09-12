@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAppForm } from '@/lib/form';
 import { Icons } from '@/components/icons';
-import { CalendarEventType } from '../api/types';
+import { CalendarEventType, Recurrence } from '../api/types';
 
 interface FormValues {
   title: string;
@@ -22,6 +22,7 @@ interface FormValues {
   end_at?: string;
   all_day: boolean;
   event_type: CalendarEventType;
+  recurrence: Recurrence;
 }
 
 const eventTypeOptions: { value: CalendarEventType; label: string }[] = [
@@ -31,13 +32,21 @@ const eventTypeOptions: { value: CalendarEventType; label: string }[] = [
   { value: 'reminder', label: 'Reminder' }
 ];
 
+const recurrenceOptions: { value: Recurrence; label: string }[] = [
+  { value: 'none', label: 'Does not repeat' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' }
+];
+
 const createEventSchema = z.object({
   title: z.string().min(1, 'Title is required').max(100, 'Too long'),
   description: z.string().max(500, 'Too long'),
   start_at: z.string().min(1, 'Start date is required'),
   end_at: z.string().max(500).optional(),
   all_day: z.boolean(),
-  event_type: z.enum(['deadline', 'exam', 'meeting', 'reminder'])
+  event_type: z.enum(['deadline', 'exam', 'meeting', 'reminder']),
+  recurrence: z.enum(['none', 'daily', 'weekly', 'monthly'])
 });
 
 interface CreateEventDialogProps {
@@ -48,6 +57,7 @@ interface CreateEventDialogProps {
     end_at?: string;
     all_day?: boolean;
     event_type?: CalendarEventType;
+    recurrence?: Recurrence;
   }) => Promise<void>;
   isSubmitting?: boolean;
   children?: React.ReactNode;
@@ -62,7 +72,8 @@ export function CreateEventDialog({ onSubmit, isSubmitting, children }: CreateEv
       start_at: '',
       end_at: undefined,
       all_day: false,
-      event_type: 'meeting' as CalendarEventType
+      event_type: 'meeting' as CalendarEventType,
+      recurrence: 'none' as Recurrence
     } as FormValues,
     validators: {
       onSubmit: createEventSchema
@@ -74,7 +85,8 @@ export function CreateEventDialog({ onSubmit, isSubmitting, children }: CreateEv
         start_at: value.start_at,
         end_at: value.end_at || undefined,
         all_day: value.all_day,
-        event_type: value.event_type
+        event_type: value.event_type,
+        recurrence: value.recurrence
       });
       setOpen(false);
       form.reset();
@@ -84,7 +96,7 @@ export function CreateEventDialog({ onSubmit, isSubmitting, children }: CreateEv
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       {children ? (
-        <DialogTrigger>{children}</DialogTrigger>
+        <DialogTrigger render={children as React.ReactElement} />
       ) : (
         <DialogTrigger
           render={
@@ -137,6 +149,9 @@ export function CreateEventDialog({ onSubmit, isSubmitting, children }: CreateEv
           </div>
           <form.AppField name='event_type'>
             {(field) => <field.SelectField label='Event type' options={eventTypeOptions} />}
+          </form.AppField>
+          <form.AppField name='recurrence'>
+            {(field) => <field.SelectField label='Repeats' options={recurrenceOptions} />}
           </form.AppField>
           <form.AppField name='all_day'>
             {(field) => <field.SwitchField label='All day' />}

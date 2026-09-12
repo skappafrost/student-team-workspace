@@ -1,6 +1,7 @@
 """Calendar event CRUD."""
 
-from datetime import datetime
+import calendar
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
@@ -58,11 +59,71 @@ async def create_event(
         end_at=payload.end_at,
         all_day=payload.all_day,
         event_type=payload.event_type,
+        recurrence=payload.recurrence,
     )
     db.add(event)
     db.commit()
     db.refresh(event)
     return event
+
+
+def _add_months(dt: datetime, months: int) -> datetime:
+    month = dt.month - 1 + months
+    year = dt.year + month // 12
+    month = month % 12 + 1
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
+
+
+def _expand_occurrences(
+    event: models.Event,
+    range_start: datetime | None,
+    range_end: datetime | None,
+    cap: int = 200,
+) -> list[schemas.EventOut]:
+    """Expand a recurring event into concrete occurrences intersecting the range.
+
+    RRULE-lite: daily / weekly / monthly steps from the base start_at.
+    """
+    base = schemas.EventOut.model_validate(event)
+    if event.recurrence in (None, "none") or range_start is None or range_end is None:
+        return [base]
+
+    duration = (event.end_at - event.start_at) if event.end_at else None
+
+    def step(dt: datetime) -> datetime:
+        if event.recurrence == "daily":
+            return dt + timedelta(days=1)
+        if event.recurrence == "weekly":
+            return dt + timedelta(weeks=1)
+        return _add_months(dt, 1)
+
+    out: list[schemas.EventOut] = []
+    start_at = event.start_at
+    while start_at <= range_end and len(out) < cap:
+        occ_end = start_at + duration if duration else None
+        if (occ_end is None or occ_end >= range_start) and start_at >= range_start:
+            out.append(
+                base.model_copy(
+                    update={
+                        "start_at": start_at,
+                        "end_at": occ_end,
+                        "occurrence_id": f"{event.id}@{start_at.date().isoformat()}",
+                    }
+                )
+            )
+        elif start_at < range_start and occ_end is not None and occ_end >= range_start:
+            out.append(
+                base.model_copy(
+                    update={
+                        "start_at": start_at,
+                        "end_at": occ_end,
+                        "occurrence_id": f"{event.id}@{start_at.date().isoformat()}",
+                    }
+                )
+            )
+        start_at = step(start_at)
+    return out
 
 
 @router.get("/workspaces/{workspace_id}/events", response_model=list[schemas.EventOut])
@@ -73,34 +134,57 @@ async def list_workspace_events(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List events in a workspace, optionally filtered by start/end date range."""
+    """List events in a workspace, optionally filtered by start/end date range.
+
+    With a range, recurring events are expanded into per-occurrence instances
+    (occurrence_id set); without a range the base events are returned as-is.
+    """
     _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
         raise HTTPException(status_code=403, detail="Guests cannot view events")
 
-    query = db.query(models.Event).filter(models.Event.workspace_id == workspace_id)
+    start_dt = end_dt = None
     if start:
         try:
-            start_dt = datetime.fromisoformat(start)
-            query = query.filter(
-                or_(
-                    models.Event.end_at.is_(None),
-                    models.Event.end_at >= start_dt,
-                )
-            )
+            start_dt = datetime.fromisoformat(start).replace(tzinfo=None)
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid start date format") from None
     if end:
         try:
-            end_dt = datetime.fromisoformat(end)
-            query = query.filter(models.Event.start_at <= end_dt)
+            end_dt = datetime.fromisoformat(end).replace(tzinfo=None)
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid end date format") from None
 
-    events = query.order_by(models.Event.start_at.asc()).all()
-    return events
+    base_query = db.query(models.Event).filter(models.Event.workspace_id == workspace_id)
+
+    # Non-recurring events: overlap filter in SQL as before.
+    query = base_query.filter(
+        or_(models.Event.recurrence.is_(None), models.Event.recurrence == "none")
+    )
+    if start_dt:
+        query = query.filter(
+            or_(
+                models.Event.end_at.is_(None),
+                models.Event.end_at >= start_dt,
+            )
+        )
+    if end_dt:
+        query = query.filter(models.Event.start_at <= end_dt)
+    plain = query.order_by(models.Event.start_at.asc()).all()
+
+    results: list[schemas.EventOut] = [schemas.EventOut.model_validate(e) for e in plain]
+
+    # Recurring events: expand into occurrences (only meaningful with a range).
+    recurring = base_query.filter(
+        models.Event.recurrence.isnot(None), models.Event.recurrence != "none"
+    ).all()
+    for event in recurring:
+        results.extend(_expand_occurrences(event, start_dt, end_dt))
+
+    results.sort(key=lambda e: e.start_at)
+    return results
 
 
 @router.get("/events/{event_id}", response_model=schemas.EventOut)
@@ -144,6 +228,8 @@ async def update_event(
         event.all_day = payload.all_day
     if payload.event_type is not None:
         event.event_type = payload.event_type
+    if payload.recurrence is not None:
+        event.recurrence = payload.recurrence
     if payload.project_id is not None:
         if payload.project_id:
             project = _get_project_or_404(db, payload.project_id)

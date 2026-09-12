@@ -1,4 +1,5 @@
 export type CalendarEventType = 'deadline' | 'exam' | 'meeting' | 'reminder';
+export type Recurrence = 'none' | 'daily' | 'weekly' | 'monthly';
 
 export interface CalendarEvent {
   id: string;
@@ -11,6 +12,9 @@ export interface CalendarEvent {
   end_at: string | null;
   all_day: boolean;
   event_type: CalendarEventType;
+  recurrence: Recurrence;
+  /** Set on expanded occurrences of a recurring event (unique per instance). */
+  occurrence_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -22,6 +26,7 @@ export interface CreateEventPayload {
   end_at?: string | null;
   all_day?: boolean;
   event_type?: CalendarEventType;
+  recurrence?: Recurrence;
   project_id?: string | null;
 }
 
@@ -32,6 +37,7 @@ export interface UpdateEventPayload {
   end_at?: string | null;
   all_day?: boolean;
   event_type?: CalendarEventType;
+  recurrence?: Recurrence;
   project_id?: string | null;
 }
 

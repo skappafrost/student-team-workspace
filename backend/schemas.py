@@ -121,6 +121,7 @@ class WorkspaceMemberOut(BaseModel):
 # Event schemas
 # ---------------------------------------------------------------------------
 EventType = Literal["deadline", "exam", "meeting", "reminder"]
+Recurrence = Literal["none", "daily", "weekly", "monthly"]
 
 
 class EventCreate(BaseModel):
@@ -130,6 +131,7 @@ class EventCreate(BaseModel):
     end_at: datetime | None = None
     all_day: bool = False
     event_type: EventType = "reminder"
+    recurrence: Recurrence = "none"
     project_id: str | None = None
 
 
@@ -140,6 +142,7 @@ class EventUpdate(BaseModel):
     end_at: datetime | None = None
     all_day: bool | None = None
     event_type: EventType | None = None
+    recurrence: Recurrence | None = None
     project_id: str | None = None
 
 
@@ -154,6 +157,8 @@ class EventOut(BaseModel):
     end_at: datetime | None
     all_day: bool
     event_type: str
+    recurrence: str = "none"
+    occurrence_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

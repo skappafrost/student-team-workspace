@@ -85,6 +85,7 @@ export function CalendarView({
         <DayPicker
           month={currentMonth}
           onMonthChange={onMonthChange}
+          onDayClick={(day) => handleDayClick(day)}
           showOutsideDays
           className='w-full'
           classNames={{
@@ -133,7 +134,7 @@ export function CalendarView({
                   </span>
                   <div className='mt-1 flex w-full flex-col gap-0.5 overflow-hidden'>
                     {dayEvents.slice(0, 3).map((event) => (
-                      <EventChip key={event.id} event={event} />
+                      <EventChip key={event.occurrence_id ?? event.id} event={event} />
                     ))}
                     {dayEvents.length > 3 && (
                       <span className='text-[10px] text-muted-foreground'>
@@ -162,7 +163,7 @@ export function CalendarView({
           </SheetHeader>
           <div className='mt-4 flex flex-col gap-3'>
             {selectedEvents.map((event) => (
-              <EventCard key={event.id} event={event} />
+              <EventCard key={event.occurrence_id ?? event.id} event={event} />
             ))}
             {selectedEvents.length === 0 && (
               <div className='text-muted-foreground text-sm'>
@@ -221,8 +222,14 @@ function CalendarViewShell({
 }
 
 function EventChip({ event }: { event: CalendarEvent }) {
+  const recurring = event.recurrence && event.recurrence !== 'none';
   return (
-    <Badge variant={eventTypeVariant[event.event_type]} className='w-full justify-start truncate'>
+    <Badge
+      variant={eventTypeVariant[event.event_type]}
+      className='w-full justify-start truncate'
+      title={recurring ? `Repeats ${event.recurrence}` : undefined}
+    >
+      {recurring && <span aria-hidden='true'>↻&nbsp;</span>}
       <span className='truncate'>{event.title}</span>
     </Badge>
   );

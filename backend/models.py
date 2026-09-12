@@ -481,6 +481,7 @@ class Event(Base):
     end_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     all_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     event_type: Mapped[str] = mapped_column(String(50), default="reminder", nullable=False)
+    recurrence: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
     created_by: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
