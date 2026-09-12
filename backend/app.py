@@ -26,6 +26,7 @@ import models
 import schemas
 import ai_assist
 import channel_access
+import logging_mw
 
 
 # ---------------------------------------------------------------------------
@@ -350,11 +351,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(logging_mw.RequestLoggingMiddleware)
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
+logging_mw.register_healthz(app)
 
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
