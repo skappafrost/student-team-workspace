@@ -26,6 +26,7 @@ import models
 import schemas
 import ai_assist
 import channel_access
+import rate_limit
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +408,7 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
 # Auth endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/auth/register", response_model=TokenOut, status_code=201)
+@app.post("/auth/register", response_model=TokenOut, status_code=201, dependencies=[Depends(rate_limit.register_limit)])
 async def register(payload: RegisterIn, response: Response, db: Session = Depends(get_db)):
     """Register a new user and return an JWT session."""
     existing = db.query(models.User).filter(models.User.email == payload.email).first()
@@ -434,7 +435,7 @@ async def register(payload: RegisterIn, response: Response, db: Session = Depend
     )
 
 
-@app.post("/auth/login", response_model=TokenOut)
+@app.post("/auth/login", response_model=TokenOut, dependencies=[Depends(rate_limit.login_limit)])
 async def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
     """Authenticate a user and return a JWT session."""
     user = db.query(models.User).filter(models.User.email == payload.email).first()
@@ -2021,7 +2022,7 @@ class SearchResponse(BaseModel):
     results: list[dict]
 
 
-@app.post("/ai/summarize", response_model=SummarizeResponse)
+@app.post("/ai/summarize", response_model=SummarizeResponse, dependencies=[Depends(rate_limit.ai_limit)])
 async def ai_summarize(
     payload: SummarizeRequest,
     current_user: dict = Depends(get_current_user),
@@ -2188,7 +2189,7 @@ def _can_modify_file(file: models.File, membership: models.WorkspaceMembership, 
 # ---------------------------------------------------------------------------
 # File CRUD endpoints
 # ---------------------------------------------------------------------------
-@app.post("/workspaces/{workspace_id}/files", status_code=201)
+@app.post("/workspaces/{workspace_id}/files", status_code=201, dependencies=[Depends(rate_limit.upload_limit)])
 async def upload_file(
     workspace_id: str,
     file: UploadFile = FileParam(...),
