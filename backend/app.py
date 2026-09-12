@@ -15,6 +15,7 @@ from dependencies import (  # noqa: F401
     create_access_token,  # re-exported for tests
 )
 from routers import (
+    account,
     ai,
     auth,
     channels,
@@ -67,6 +68,7 @@ for _r in (
     files.router,
     notifications.router,
     ai.router,
+    account.router,
 ):
     app.include_router(_r)
 
