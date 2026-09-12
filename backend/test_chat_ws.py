@@ -29,6 +29,10 @@ def db_session():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+        # Restore the module-level engine — S02's revocation check reads it.
+        from config import settings
+
+        set_db_url(settings.database_url)
 
 
 @pytest.fixture(scope="function")

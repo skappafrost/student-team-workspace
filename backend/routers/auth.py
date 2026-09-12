@@ -13,9 +13,12 @@ from dependencies import (
     _decode_token,
     _set_session_cookie,
     _token_from_request,
-    create_access_token,
     create_refresh_token,
+    create_session,
+    get_current_user,
     get_password_hash,
+    revoke_all_sessions,
+    revoke_session,
     verify_password,
 )
 
@@ -55,8 +58,9 @@ async def register(payload: RegisterIn, response: Response, db: Session = Depend
     db.commit()
     db.refresh(user)
 
-    access_token = create_access_token(user.id)
+    access_token = create_session(user.id, db)
     refresh_token = create_refresh_token(user.id)
+    db.commit()
     _set_session_cookie(response, access_token)
 
     return TokenOut(
@@ -75,8 +79,9 @@ async def login(payload: LoginIn, response: Response, db: Session = Depends(get_
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    access_token = create_access_token(user.id)
+    access_token = create_session(user.id, db)
     refresh_token = create_refresh_token(user.id)
+    db.commit()
     _set_session_cookie(response, access_token)
 
     return TokenOut(
@@ -105,7 +110,37 @@ async def me(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/auth/logout")
-async def logout(response: Response):
-    """Clear the session cookie."""
+async def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    """Revoke the current session (jti blocklist) and clear the cookie."""
+    token = _token_from_request(request)
+    if token:
+        payload = _decode_token(token)
+        # _decode_token returns None once revoked; decode raw to still allow
+        # idempotent logout on an already-dead token.
+        if payload is None:
+            from jose import JWTError, jwt
+
+            from dependencies import ALGORITHM, _get_secret
+
+            try:
+                payload = jwt.decode(token, _get_secret(), algorithms=[ALGORITHM])
+            except JWTError:
+                payload = None
+        if payload and payload.get("jti"):
+            revoke_session(db, payload["jti"])
+            db.commit()
     _clear_session_cookie(response)
     return {"ok": True}
+
+
+@router.post("/auth/logout-all")
+async def logout_all(
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Sign out everywhere: revoke every active session for the current user."""
+    revoked = revoke_all_sessions(db, current_user["id"])
+    db.commit()
+    _clear_session_cookie(response)
+    return {"ok": True, "revoked": revoked}

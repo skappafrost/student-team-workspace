@@ -106,6 +106,18 @@ export async function signOut(): Promise<void> {
   }
 }
 
+/** Sign out everywhere: revokes every backend session for this user (S02). */
+export async function signOutEverywhere(): Promise<void> {
+  try {
+    await fetch('/api/auth/session', {
+      method: 'PATCH',
+      credentials: 'include'
+    });
+  } catch {
+    // Best-effort, same rationale as signOut.
+  }
+}
+
 // ============================================================
 // Authenticated request helper
 // ============================================================

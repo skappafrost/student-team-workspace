@@ -1,5 +1,6 @@
 """Shared dependencies: auth tokens, current-user, cookies, resource getters."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -30,13 +31,64 @@ def _get_secret() -> str:
     return settings.jwt_secret_key
 
 
-def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
+def create_access_token(
+    subject: str, expires_delta: timedelta | None = None, jti: str | None = None
+) -> str:
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
     else:
         expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": subject, "exp": expire, "type": "access"}
+    if jti:
+        payload["jti"] = jti
     return jwt.encode(payload, _get_secret(), algorithm=ALGORITHM)
+
+
+def create_session(user_id: str, db) -> str:
+    """Mint an access token backed by a revocable auth_sessions row (S02)."""
+    import models
+
+    jti = str(uuid.uuid4())
+    expires_at = _utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    db.add(models.AuthSession(user_id=user_id, jti=jti, expires_at=expires_at))
+    db.flush()
+    return create_access_token(user_id, jti=jti)
+
+
+def revoke_session(db, jti: str) -> None:
+    import models
+
+    session = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
+    if session and session.revoked_at is None:
+        session.revoked_at = _utcnow()
+        db.flush()
+
+
+def revoke_all_sessions(db, user_id: str) -> int:
+    import models
+
+    rows = (
+        db.query(models.AuthSession)
+        .filter(models.AuthSession.user_id == user_id, models.AuthSession.revoked_at.is_(None))
+        .all()
+    )
+    for row in rows:
+        row.revoked_at = _utcnow()
+    db.flush()
+    return len(rows)
+
+
+def _is_jti_revoked(jti: str) -> bool:
+    """Revocation check against auth_sessions; missing row counts as revoked."""
+    import models
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        session = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
+        return session is None or session.revoked_at is not None
+    finally:
+        db.close()
 
 
 def create_refresh_token(subject: str) -> str:
@@ -90,6 +142,11 @@ def _decode_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(token, _get_secret(), algorithms=[ALGORITHM])
         if payload.get("type") != "access":
+            return None
+        # Tokens minted via create_session carry a jti; revoked/unknown jti = dead.
+        # Legacy jti-less tokens (tests) pass through.
+        jti = payload.get("jti")
+        if jti and _is_jti_revoked(jti):
             return None
         return payload
     except JWTError:

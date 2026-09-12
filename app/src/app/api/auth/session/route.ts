@@ -78,13 +78,17 @@ export async function POST(request: Request): Promise<NextResponse> {
   return proxyAuth(kind, body);
 }
 
-/** Clear the session cookie. */
-export async function DELETE(): Promise<NextResponse> {
+/** Clear the session cookie; revokes the backend session (jti) when present. */
+export async function DELETE(request: Request): Promise<NextResponse> {
+  const sessionCookie = request.headers
+    .get('cookie')
+    ?.match(/(?:^|;\s*)session_token=([^;]+)/)?.[1];
+
   let upstream: Response | undefined;
   try {
     upstream = await fetch(`${API_URL}/auth/logout`, {
       method: 'POST',
-      credentials: 'include'
+      headers: sessionCookie ? { Cookie: `session_token=${sessionCookie}` } : {}
     });
   } catch {
     // Best-effort call to the backend; still clear the cookie below.
@@ -99,5 +103,28 @@ export async function DELETE(): Promise<NextResponse> {
     res.headers.set('Set-Cookie', setCookie);
   }
 
+  return res;
+}
+
+/** Sign out everywhere: revoke ALL backend sessions for the user (S02). */
+export async function PATCH(request: Request): Promise<NextResponse> {
+  const sessionCookie = request.headers
+    .get('cookie')
+    ?.match(/(?:^|;\s*)session_token=([^;]+)/)?.[1];
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  try {
+    await fetch(`${API_URL}/auth/logout-all`, {
+      method: 'POST',
+      headers: { Cookie: `session_token=${sessionCookie}` }
+    });
+  } catch {
+    // Best-effort; still clear the local cookie below.
+  }
+
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set('session_token', '', { httpOnly: true, path: '/', maxAge: 0 });
   return res;
 }

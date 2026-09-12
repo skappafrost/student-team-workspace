@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
-import { signOut, type SessionUser } from '@/lib/auth';
+import { signOut, signOutEverywhere, type SessionUser } from '@/lib/auth';
 
 /**
  * Dashboard user menu (avatar trigger → account info + logout).
@@ -28,6 +28,14 @@ export function UserMenu({ user }: { user: SessionUser }) {
       window.location.assign('/auth/sign-in');
     })();
     // Mark the UI busy immediately so double-clicks can't fire twice.
+    startTransition(() => {});
+  };
+
+  const handleSignOutEverywhere = () => {
+    void (async () => {
+      await signOutEverywhere();
+      window.location.assign('/auth/sign-in');
+    })();
     startTransition(() => {});
   };
 
@@ -60,6 +68,17 @@ export function UserMenu({ user }: { user: SessionUser }) {
         >
           <Icons.logout />
           {isPending ? 'Signing out…' : 'Log out'}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          variant='destructive'
+          disabled={isPending}
+          onClick={(event) => {
+            event.preventDefault();
+            handleSignOutEverywhere();
+          }}
+        >
+          <Icons.logout />
+          {isPending ? 'Signing out…' : 'Sign out everywhere'}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
