@@ -9,6 +9,7 @@ from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
 from dependencies import _get_channel_or_404, _get_message_or_404, get_current_user
 from routers.channels import _is_private_channel_member
+from services import log_activity
 from ws import _ws_broadcast
 
 router = APIRouter()
@@ -69,6 +70,16 @@ async def create_message(
         parent_id=payload.parent_id,
     )
     db.add(message)
+    db.flush()
+    log_activity(
+        db,
+        workspace_id=channel.workspace_id,
+        actor_id=current_user["id"],
+        verb="posted in",
+        target_type="channel",
+        target_id=channel.id,
+        target_label=f"#{channel.name}",
+    )
     db.commit()
     db.refresh(message)
 

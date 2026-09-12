@@ -27,6 +27,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { projectsQueryOptions } from '@/features/projects/queries';
 import { tasksQueryOptions } from '@/features/kanban/api/queries';
 import { notificationsQueryOptions } from '@/features/notifications/api/queries';
+import { activityQueryOptions } from '@/features/activity/api/queries';
 import { useWorkspace } from '@/features/workspace/hooks/use-workspace';
 import { useWorkspaceMembers } from '@/features/workspace/hooks/use-workspace-members';
 import type { TaskStatus } from '@/features/kanban/api/types';
@@ -86,7 +87,8 @@ export default function OverviewDashboard() {
     }));
   }, [openTasks]);
 
-  const recent = notifications.slice(0, 5);
+  const activityQuery = useQuery(activityQueryOptions());
+  const activity = (activityQuery.data ?? []).slice(0, 8);
 
   return (
     <PageContainer>
@@ -221,32 +223,30 @@ export default function OverviewDashboard() {
             <Card className='lg:col-span-7'>
               <CardHeader>
                 <CardTitle>Recent activity</CardTitle>
-                <CardDescription>Latest notifications for you</CardDescription>
+                <CardDescription>What the team has been up to</CardDescription>
               </CardHeader>
               <CardContent>
-                {recent.length === 0 ? (
+                {activity.length === 0 ? (
                   <p className='text-muted-foreground py-8 text-center text-sm'>
-                    No activity yet. Assign a task or send a message to get things moving.
+                    No activity yet. Create a task, event or page to get things moving.
                   </p>
                 ) : (
                   <ul className='divide-border divide-y'>
-                    {recent.map((n) => (
-                      <li key={n.id} className='flex items-start gap-3 py-3 first:pt-0 last:pb-0'>
-                        <span
-                          className={
-                            n.status === 'unread'
-                              ? 'bg-primary mt-1.5 size-2 shrink-0 rounded-full'
-                              : 'bg-muted mt-1.5 size-2 shrink-0 rounded-full'
-                          }
-                        />
+                    {activity.map((a) => (
+                      <li key={a.id} className='flex items-start gap-3 py-3 first:pt-0 last:pb-0'>
+                        <span className='bg-primary mt-1.5 size-2 shrink-0 rounded-full' />
                         <div className='min-w-0 flex-1'>
-                          <p className='truncate text-sm font-medium'>{n.title}</p>
-                          {n.body && (
-                            <p className='text-muted-foreground truncate text-xs'>{n.body}</p>
-                          )}
+                          <p className='truncate text-sm font-medium'>
+                            <span className='font-semibold'>{a.actor_name}</span> {a.verb}{' '}
+                            {a.target_label ? (
+                              <span className='text-foreground'>{a.target_label}</span>
+                            ) : (
+                              a.target_type
+                            )}
+                          </p>
                         </div>
                         <time className='text-muted-foreground shrink-0 text-xs'>
-                          {new Date(n.createdAt).toLocaleDateString()}
+                          {new Date(a.created_at).toLocaleDateString()}
                         </time>
                       </li>
                     ))}

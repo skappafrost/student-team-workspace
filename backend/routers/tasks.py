@@ -10,6 +10,7 @@ import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
 from dependencies import _get_project_or_404, _get_task_or_404, get_current_user
+from services import log_activity, notify
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ async def list_my_tasks(
     if status:
         rows = rows.filter(models.Task.status == status)
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
     week_end = today_end + datetime.timedelta(days=7)
 
@@ -47,7 +48,7 @@ async def list_my_tasks(
     for task, project, workspace in rows.all():
         due_at = task.due_at
         if due_at is not None and due_at.tzinfo is None:
-            due_at = due_at.replace(tzinfo=datetime.timezone.utc)
+            due_at = due_at.replace(tzinfo=datetime.UTC)
         if due == "overdue" and not (due_at and due_at < now):
             continue
         if due == "today" and not (due_at and now <= due_at <= today_end):
@@ -64,10 +65,10 @@ async def list_my_tasks(
             workspace_name=workspace.name,
         )
         if out.due_at is not None and out.due_at.tzinfo is None:
-            out.due_at = out.due_at.replace(tzinfo=datetime.timezone.utc)
+            out.due_at = out.due_at.replace(tzinfo=datetime.UTC)
         results.append(out)
 
-    results.sort(key=lambda t: (t.due_at is None, t.due_at or datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)))
+    results.sort(key=lambda t: (t.due_at is None, t.due_at or datetime.datetime.max.replace(tzinfo=datetime.UTC)))
     return results
 
 
@@ -93,6 +94,25 @@ async def create_task(
         due_at=payload.due_at,
     )
     db.add(task)
+    db.flush()
+    if task.assignee_id and task.assignee_id != current_user["id"]:
+        notify(
+            db,
+            user_id=task.assignee_id,
+            type="task-assigned",
+            title=f"Task assigned: {task.title}",
+            content=f"You were assigned '{task.title}' in project {project.name}.",
+            link=f"/dashboard/projects/{project_id}",
+        )
+    log_activity(
+        db,
+        workspace_id=project.workspace_id,
+        actor_id=current_user["id"],
+        verb="created task",
+        target_type="task",
+        target_id=task.id,
+        target_label=task.title,
+    )
     db.commit()
     db.refresh(task)
     return task
@@ -133,6 +153,15 @@ async def update_task(
     if payload.description is not None:
         task.description = payload.description
     if payload.assignee_id is not None:
+        if payload.assignee_id != task.assignee_id and payload.assignee_id != current_user["id"]:
+            notify(
+                db,
+                user_id=payload.assignee_id,
+                type="task-assigned",
+                title=f"Task assigned: {task.title}",
+                content=f"You were assigned '{task.title}' in project {project.name}.",
+                link=f"/dashboard/projects/{project.id}",
+            )
         task.assignee_id = payload.assignee_id
     if payload.priority is not None:
         task.priority = payload.priority

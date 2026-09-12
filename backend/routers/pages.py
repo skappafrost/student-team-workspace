@@ -9,6 +9,7 @@ import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
 from dependencies import _get_page_or_404, _get_workspace_or_404, get_current_user
+from services import log_activity
 
 router = APIRouter()
 
@@ -73,6 +74,16 @@ async def create_page(
         updated_by=current_user["id"],
     )
     db.add(page)
+    db.flush()
+    log_activity(
+        db,
+        workspace_id=workspace_id,
+        actor_id=current_user["id"],
+        verb="created page",
+        target_type="page",
+        target_id=page.id,
+        target_label=page.title,
+    )
     db.commit()
     db.refresh(page)
     return page

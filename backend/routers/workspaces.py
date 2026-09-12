@@ -74,6 +74,41 @@ async def get_workspace(
     return workspace
 
 
+@router.get("/workspaces/{workspace_id}/activity", response_model=list[schemas.ActivityOut])
+async def list_workspace_activity(
+    workspace_id: str,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Recent activity feed for a workspace (members only), newest first."""
+    _get_workspace_or_404(db, workspace_id)
+    _require_member(workspace_id, current_user["id"], db)
+    limit = max(1, min(limit, 100))
+    rows = (
+        db.query(models.Activity, models.User.display_name)
+        .join(models.User, models.User.id == models.Activity.actor_id)
+        .filter(models.Activity.workspace_id == workspace_id)
+        .order_by(models.Activity.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        schemas.ActivityOut(
+            id=a.id,
+            workspace_id=a.workspace_id,
+            actor_id=a.actor_id,
+            actor_name=name,
+            verb=a.verb,
+            target_type=a.target_type,
+            target_id=a.target_id,
+            target_label=a.target_label,
+            created_at=a.created_at,
+        )
+        for a, name in rows
+    ]
+
+
 @router.patch("/workspaces/{workspace_id}", response_model=schemas.WorkspaceDetailOut)
 async def update_workspace(
     workspace_id: str,

@@ -22,6 +22,7 @@ from dependencies import (
     _get_workspace_or_404,
     get_current_user,
 )
+from services import log_activity, notify
 
 router = APIRouter()
 
@@ -143,14 +144,24 @@ async def upload_file(
     db.commit()
     db.refresh(db_file)
 
-    # Emit a notification for the uploader about the successful upload.
-    notification = models.Notification(
+    # Notify the uploader + record activity via the shared service layer (R03).
+    notify(
+        db,
         user_id=current_user["id"],
         type="file-upload",
         title="File uploaded",
         content=f"Your file {file.filename} was uploaded successfully.",
+        link="/dashboard/files",
     )
-    db.add(notification)
+    log_activity(
+        db,
+        workspace_id=workspace_id,
+        actor_id=current_user["id"],
+        verb="uploaded",
+        target_type="file",
+        target_id=db_file.id,
+        target_label=file.filename,
+    )
     db.commit()
 
     return _file_out(db_file)

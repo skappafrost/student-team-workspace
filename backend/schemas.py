@@ -444,7 +444,20 @@ class NotificationOut(BaseModel):
     type: str
     title: str
     content: str | None
+    link: str | None = None
     read: bool
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ActivityOut(BaseModel):
+    id: str
+    workspace_id: str
+    actor_id: str
+    actor_name: str
+    verb: str
+    target_type: str
+    target_id: str
+    target_label: str | None
+    created_at: datetime

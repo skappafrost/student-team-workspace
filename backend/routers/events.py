@@ -17,6 +17,7 @@ from dependencies import (
     _get_workspace_or_404,
     get_current_user,
 )
+from services import log_activity
 
 router = APIRouter()
 
@@ -62,6 +63,16 @@ async def create_event(
         recurrence=payload.recurrence,
     )
     db.add(event)
+    db.flush()
+    log_activity(
+        db,
+        workspace_id=workspace_id,
+        actor_id=current_user["id"],
+        verb="created event",
+        target_type="event",
+        target_id=event.id,
+        target_label=event.title,
+    )
     db.commit()
     db.refresh(event)
     return event
@@ -102,17 +113,7 @@ def _expand_occurrences(
     start_at = event.start_at
     while start_at <= range_end and len(out) < cap:
         occ_end = start_at + duration if duration else None
-        if (occ_end is None or occ_end >= range_start) and start_at >= range_start:
-            out.append(
-                base.model_copy(
-                    update={
-                        "start_at": start_at,
-                        "end_at": occ_end,
-                        "occurrence_id": f"{event.id}@{start_at.date().isoformat()}",
-                    }
-                )
-            )
-        elif start_at < range_start and occ_end is not None and occ_end >= range_start:
+        if (occ_end is None or occ_end >= range_start) and start_at >= range_start or start_at < range_start and occ_end is not None and occ_end >= range_start:
             out.append(
                 base.model_copy(
                     update={
