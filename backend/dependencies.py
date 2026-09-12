@@ -1,6 +1,5 @@
 """Shared dependencies: auth tokens, current-user, cookies, resource getters."""
 
-import os
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -10,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
 
 import models
+from config import settings
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
@@ -26,11 +26,8 @@ def _utcnow() -> datetime:
 
 
 def _get_secret() -> str:
-    secret = os.getenv("JWT_SECRET_KEY")
-    if not secret:
-        # Insecure default for local development only.
-        secret = "super-secret-change-me-in-production"
-    return secret
+    # Insecure default for local development only; set JWT_SECRET_KEY in prod.
+    return settings.jwt_secret_key
 
 
 def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
@@ -149,7 +146,7 @@ def _ws_user_from_token(token: str) -> dict:
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
-    secure = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+    secure = settings.cookie_secure
     response.set_cookie(
         key="session_token",
         value=token,
@@ -166,15 +163,7 @@ def _clear_session_cookie(response: Response) -> None:
 
 
 def _parse_cors_origins() -> list[str]:
-    raw = os.getenv("CORS_ORIGINS", "")
-    if raw:
-        return [origin.strip() for origin in raw.split(",") if origin.strip()]
-    return [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-    ]
+    return settings.cors_origin_list()
 
 
 # ---------------------------------------------------------------------------

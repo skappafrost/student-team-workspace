@@ -1,12 +1,12 @@
 """SQLAlchemy database setup for STW backend."""
 
-import os
-
 import sqlalchemy
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./stw.db")
+from config import settings
+
+DATABASE_URL = settings.database_url
 
 # SQLite-specific args for thread safety.
 engine_kwargs = {}

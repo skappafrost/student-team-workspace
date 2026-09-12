@@ -1,7 +1,6 @@
 """File upload / management endpoints + upload-dir config."""
 
 import mimetypes
-import os
 import uuid
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
+from config import settings
 from database import get_db
 from dependencies import (
     _get_channel_or_404,
@@ -25,7 +25,7 @@ from dependencies import (
 
 router = APIRouter()
 
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
+UPLOAD_DIR = Path(settings.upload_dir)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 

@@ -6,7 +6,6 @@ can be plugged in later via environment variables without changing the API.
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
+from config import settings
 
 
 class ProviderNotConfiguredError(Exception):
@@ -25,13 +25,12 @@ class ProviderNotConfiguredError(Exception):
 
 def _provider_config() -> dict[str, Any] | None:
     """Return active provider config from env, or None if not configured."""
-    api_key = os.getenv("AI_PROVIDER_API_KEY")
-    if not api_key:
+    if not settings.ai_provider_api_key:
         return None
     return {
-        "api_key": api_key,
-        "base_url": os.getenv("AI_PROVIDER_BASE_URL"),
-        "model": os.getenv("AI_PROVIDER_MODEL", "gpt-4o-mini"),
+        "api_key": settings.ai_provider_api_key,
+        "base_url": settings.ai_provider_base_url,
+        "model": settings.ai_provider_model,
     }
 
 
