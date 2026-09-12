@@ -16,7 +16,7 @@ def _ws_room_leave(channel_id: str, websocket) -> None:
             _ws_rooms.pop(channel_id, None)
 
 
-async def _ws_broadcast(channel_id: str, payload: dict) -> None:
+async def _ws_broadcast(channel_id: str, payload: dict, exclude=None) -> None:
     import json
 
     room = _ws_rooms.get(channel_id)
@@ -25,6 +25,8 @@ async def _ws_broadcast(channel_id: str, payload: dict) -> None:
     message = json.dumps(payload)
     dead = []
     for ws in list(room):
+        if exclude is not None and ws is exclude:
+            continue
         try:
             await ws.send_text(message)
         except Exception:

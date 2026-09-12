@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import PageContainer from '@/components/layout/page-container';
@@ -188,8 +188,13 @@ export default function ChatPage() {
     reactionMutation.mutate({ messageId: message.id, emoji });
   };
 
+  // Typing indicators (F11): map of user_id -> name, cleared after 3s idle.
+  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+  const typingTimersRef = useRef<Record<string, number>>({});
+  const lastTypingSentRef = useRef(0);
+
   // Realtime WebSocket: append incoming messages for the selected channel.
-  useChannelWebSocket({
+  const { sendTyping } = useChannelWebSocket({
     channelId: selectedChannel?.id ?? undefined,
     onMessage: (data: unknown) => {
       if (!data || typeof data !== 'object') return;
@@ -198,7 +203,25 @@ export default function ChatPage() {
         message?: Message;
         message_id?: string;
         reactions?: Message['reactions'];
+        user_id?: string;
+        user_name?: string;
       };
+      if (payload.type === 'typing' && payload.user_id) {
+        const uid = payload.user_id;
+        if (uid === currentUserId) return;
+        setTypingUsers((prev) => ({ ...prev, [uid]: payload.user_name ?? 'Someone' }));
+        if (typingTimersRef.current[uid]) {
+          window.clearTimeout(typingTimersRef.current[uid]);
+        }
+        typingTimersRef.current[uid] = window.setTimeout(() => {
+          setTypingUsers((prev) => {
+            const next = { ...prev };
+            delete next[uid];
+            return next;
+          });
+        }, 3000);
+        return;
+      }
       if (payload.type === 'new_message' && payload.message) {
         const msg = payload.message;
         if (msg.channel_id !== selectedChannel?.id) return;
@@ -221,6 +244,13 @@ export default function ChatPage() {
       }
     }
   });
+
+  const throttledSendTyping = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < 1500) return;
+    lastTypingSentRef.current = now;
+    sendTyping();
+  }, [sendTyping]);
 
   return (
     <PageContainer pageTitle='Chat' pageDescription='Workspace channels and messages.'>
@@ -314,9 +344,21 @@ export default function ChatPage() {
                 />
               )}
 
+              <div
+                aria-live='polite'
+                className='text-muted-foreground h-4 px-1 text-xs'
+              >
+                {Object.values(typingUsers).length > 0 &&
+                  `${Object.values(typingUsers).join(', ')} ${
+                    Object.values(typingUsers).length === 1 ? 'is' : 'are'
+                  } typing…`}
+              </div>
               <MessageInput
                 value={draft}
-                onChange={setDraft}
+                onChange={(v) => {
+                  setDraft(v);
+                  throttledSendTyping();
+                }}
                 onSubmit={handleSend}
                 placeholder={
                   replyingTo

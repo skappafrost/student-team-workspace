@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -105,4 +105,13 @@ export function useChannelWebSocket({
       }
     };
   }, [channelId, onMessage, onOpen, onClose]);
+
+  const sendTyping = useCallback(() => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'typing' }));
+    }
+  }, []);
+
+  return { sendTyping };
 }

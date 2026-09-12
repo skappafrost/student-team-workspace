@@ -21,7 +21,7 @@ from dependencies import (
     _ws_user_from_token,
     get_current_user,
 )
-from ws import _ws_room_join, _ws_room_leave
+from ws import _ws_broadcast, _ws_room_join, _ws_room_leave
 
 router = APIRouter()
 
@@ -201,13 +201,34 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
         if not _is_private_channel_member(channel, user["id"], db):
             await websocket.close(code=1008, reason="Not allowed to join this channel")
             return
+        db_user = db.get(models.User, user["id"])
+        user_name = db_user.display_name if db_user else "Someone"
     finally:
         db.close()
     _ws_room_join(channel_id, websocket)
     try:
         while True:
-            # Keep connection open; clients can send heartbeats if desired.
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            # Client frames: plain heartbeat text or JSON {"type": "typing"}.
+            if raw.strip().startswith("{"):
+                import json as _json
+
+                try:
+                    frame = _json.loads(raw)
+                except ValueError:
+                    continue
+                if frame.get("type") == "typing":
+                    await _ws_broadcast(
+                        channel_id,
+                        {
+                            "type": "typing",
+                            "channel_id": channel_id,
+                            "user_id": user["id"],
+                            "user_name": user_name,
+                        },
+                        exclude=websocket,
+                    )
+                continue
             # Echo back a heartbeat acknowledgement.
             await websocket.send_json({"type": "pong", "channel_id": channel_id})
     except WebSocketDisconnect:

@@ -109,3 +109,32 @@ def test_ws_rejects_non_member(client):
             f"/ws/channels/{channel['id']}?session_token={stranger_token}"
         ) as wsock:
             wsock.receive_text()
+
+
+def test_ws_typing_broadcast_excludes_sender(client, db_session):
+    ws_owner = "owner-typing"
+    ws = create_workspace(client, ws_owner, name="WS-T", slug="ws-t")
+    as_user(client, ws_owner)
+    channel = client.post(
+        f"/workspaces/{ws['id']}/channels", json={"name": "general", "type": "general"}
+    ).json()
+    channel_id = channel["id"]
+
+    token = _token_for(ws_owner)
+    other = _token_for("other-user")
+    # other must be a member
+    import models as _m
+    db_session.add(
+        _m.WorkspaceMembership(workspace_id=ws["id"], user_id="other-user", role="member")
+    )
+    db_session.commit()
+
+    with client.websocket_connect(f"/ws/channels/{channel_id}?session_token={token}") as ws1:
+        with client.websocket_connect(
+            f"/ws/channels/{channel_id}?session_token={other}"
+        ) as ws2:
+            ws1.send_text('{"type": "typing"}')
+            data = ws2.receive_json()
+            assert data["type"] == "typing"
+            assert data["user_id"] == ws_owner
+            assert data["channel_id"] == channel_id
