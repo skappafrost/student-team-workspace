@@ -19,6 +19,7 @@ import { navGroups } from '@/config/nav-config';
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 import { signOut } from '@/lib/auth';
+import { useI18n } from '@/lib/i18n';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import * as React from 'react';
@@ -29,6 +30,7 @@ export default function AppSidebar() {
   const { isOpen } = useMediaQuery();
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
+  const { t } = useI18n();
 
   const handleLogout = React.useCallback(async () => {
     await signOut();
@@ -46,7 +48,7 @@ export default function AppSidebar() {
       <SidebarContent className='overflow-x-hidden'>
         {filteredGroups.map((group) => (
           <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
-            {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+            {group.label && <SidebarGroupLabel>{t(group.label)}</SidebarGroupLabel>}
             <SidebarMenu>
               {group.items.map((item) => {
                 const Icon = item.icon ? Icons[item.icon] : Icons.logo;
@@ -66,7 +68,7 @@ export default function AppSidebar() {
                       }
                     >
                       {item.icon && <Icon />}
-                      <span>{item.title}</span>
+                      <span>{t(item.title)}</span>
                       <Icons.chevronRight className='ml-auto transition-transform duration-200 group-data-panel-open/collapsible:rotate-90' />
                     </CollapsibleTrigger>
                     <CollapsibleContent>
@@ -77,7 +79,7 @@ export default function AppSidebar() {
                               render={<Link href={subItem.url} aria-label={subItem.title} />}
                               isActive={pathname === subItem.url}
                             >
-                              <span>{subItem.title}</span>
+                              <span>{t(subItem.title)}</span>
                             </SidebarMenuSubButton>
                           </SidebarMenuSubItem>
                         ))}
@@ -92,7 +94,7 @@ export default function AppSidebar() {
                       isActive={pathname === item.url}
                     >
                       <Icon />
-                      <span>{item.title}</span>
+                      <span>{t(item.title)}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
@@ -104,9 +106,9 @@ export default function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleLogout} tooltip='Log out'>
+            <SidebarMenuButton onClick={handleLogout} tooltip={t('Log out')}>
               <Icons.logout className='size-4' />
-              <span>Log out</span>
+              <span>{t('Log out')}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
