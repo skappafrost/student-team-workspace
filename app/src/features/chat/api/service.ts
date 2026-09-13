@@ -7,23 +7,9 @@ import {
   ReactionSummary,
   WorkspaceMember
 } from './types';
+import { createApiClient } from '@/lib/api-client';
 
-async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/channels${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers as Record<string, string>)
-    },
-    credentials: 'include'
-  });
-
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) {
-    throw new Error(data.error || `API error: ${res.status}`);
-  }
-  return data;
-}
+const apiRequest = createApiClient('/api/channels');
 
 export async function getChannels(): Promise<Channel[]> {
   const data = await apiRequest<{ channels: Channel[] }>('');

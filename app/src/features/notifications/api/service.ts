@@ -1,4 +1,8 @@
 import { BackendNotification, Notification } from './types';
+import { createApiClient } from '@/lib/api-client';
+
+const apiRequest = createApiClient('/api/notifications');
+
 
 const typeMap: Record<string, Notification['type']> = {
   info: 'info',
@@ -22,22 +26,6 @@ function mapNotification(n: BackendNotification): Notification {
     status: n.read ? 'read' : 'unread',
     createdAt: n.created_at
   };
-}
-
-async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/notifications${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers as Record<string, string>)
-    },
-    credentials: 'include'
-  });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) {
-    throw new Error(data.error || `API error: ${res.status}`);
-  }
-  return data;
 }
 
 export async function getNotifications(): Promise<Notification[]> {

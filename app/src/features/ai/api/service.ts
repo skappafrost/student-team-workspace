@@ -1,21 +1,8 @@
 import { SummarizePayload, SummarizeResponse, AISearchResponse, AISearchResult } from './types';
+import { createApiClient } from '@/lib/api-client';
 
-async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/ai${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers as Record<string, string>)
-    },
-    credentials: 'include'
-  });
+const apiRequest = createApiClient('/api/ai');
 
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string; detail?: string };
-  if (!res.ok) {
-    throw new Error(data.error || data.detail || `AI API error: ${res.status}`);
-  }
-  return data;
-}
 
 export async function summarize({ kind, ref_id }: SummarizePayload): Promise<string> {
   const data = await apiRequest<SummarizeResponse>('/summarize', {

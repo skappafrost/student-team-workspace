@@ -1,21 +1,8 @@
 import { CreateTaskPayload, Task, UpdateTaskPayload } from './types';
+import { createApiClient } from '@/lib/api-client';
 
-async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/tasks${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers as Record<string, string>)
-    },
-    credentials: 'include'
-  });
+const apiRequest = createApiClient('/api/tasks');
 
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) {
-    throw new Error(data.error || `API error: ${res.status}`);
-  }
-  return data;
-}
 
 export async function getTasks(projectId: string): Promise<Task[]> {
   const data = await apiRequest<{ tasks: Task[] }>(`?project_id=${encodeURIComponent(projectId)}`);

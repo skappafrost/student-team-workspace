@@ -1,22 +1,9 @@
 import { FileRecord } from './types';
+import { createApiClient } from '@/lib/api-client';
 
 const API_BASE = '/api/files';
 
-async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    credentials: 'include'
-  });
-
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({ error: 'Request failed' }))) as {
-      error?: string;
-    };
-    throw new Error(data.error || `API error: ${res.status}`);
-  }
-
-  return res.json() as Promise<T>;
-}
+const apiRequest = createApiClient(API_BASE, { jsonHeaders: false });
 
 export interface FileLinkFilter {
   project_id?: string;
