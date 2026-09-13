@@ -74,3 +74,32 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Typecheck
         run: bun run typecheck
+
+  demo-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate demo pack structure
+        run: |
+          python - <<'EOF'
+          import json, sys
+          p = json.load(open("scripts/demo-packs/busy-workspace.json"))
+          e, seen, ck = [], set(), lambda c, m: e.append(m) if not c else None
+          ck({"workspace", "users", "projects", "channels", "pages"} <= set(p), "top-level keys")
+          us, ps, cs, gs = (p.get(k, []) for k in ("users", "projects", "channels", "pages"))
+          ts = [t for pr in ps for t in pr.get("tasks", [])]; ms = [m for c in cs for m in c.get("messages", [])]
+          for n, g, w in (("users", len(us), 10), ("projects", len(ps), 4), ("tasks", len(ts), 200), ("channels", len(cs), 3), ("messages", len(ms), 135), ("pages", len(gs), 6)): ck(g == w, f"{n}={g} want {w}")
+          ck(all(t.get("title") and (t.get("assignee_index") is None or 0 <= t.get("assignee_index") < len(us)) for t in ts), "task title + assignee_index resolves")
+          ck(all(m.get("content") and (m.get("author_index") is None or m.get("author_index") >= 0) for m in ms), "message content + author_index sane")
+          for g in gs:
+              ck(bool(g.get("title") and g.get("slug")) and g["slug"] not in seen and (g.get("parent_slug") is None or g.get("parent_slug") in seen), f"page {g.get('slug')}")
+              seen.add(g.get("slug"))
+          ck(len({u.get("email") for u in us}) == 10 and all(u.get("password") for u in us) and p["workspace"].get("name") and p["workspace"].get("slug"), "users unique + contactable, workspace named")
+          print(*("FAIL: " + m for m in e), sep="\n")
+          print(f"demo-pack OK: {len(us)} users, {len(ts)} tasks, {len(ms)} messages, {len(gs)} pages")
+          sys.exit(bool(e))
+          EOF
