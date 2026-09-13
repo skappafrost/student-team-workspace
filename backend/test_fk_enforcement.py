@@ -7,6 +7,8 @@ so raw/bulk deletes and inserts are integrity-checked exactly like prod
 (Postgres).  These tests exercise the raw SQL path - no ORM cascade involved.
 """
 
+import os
+
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +16,17 @@ from sqlalchemy.exc import IntegrityError
 import database
 from database import Base
 import models  # noqa: F401  - registers all models on Base.metadata
+
+
+def _uses_postgres() -> bool:
+    """True when the suite runs against Postgres (backend-pg CI job)."""
+    return os.environ.get("DATABASE_URL", "").startswith("postgres")
+
+
+requires_sqlite = pytest.mark.skipif(
+    _uses_postgres(),
+    reason="sqlite-only: PRAGMA foreign_keys has no Postgres equivalent",
+)
 
 
 @pytest.fixture(scope="function")
@@ -31,15 +44,18 @@ def _fk_pragma(engine):
         return conn.execute(text("PRAGMA foreign_keys")).scalar()
 
 
+@requires_sqlite
 def test_make_engine_enables_fk_pragma(fk_engine):
     assert _fk_pragma(fk_engine) == 1
 
 
+@requires_sqlite
 def test_module_engine_enables_fk_pragma():
     # The engine created at import time must carry the pragma too.
     assert _fk_pragma(database.engine) == 1
 
 
+@requires_sqlite
 def test_set_db_url_keeps_fk_pragma(tmp_path):
     url = "sqlite:///" + (tmp_path / "fk_set_db_url.db").as_posix()
     database.set_db_url(url)

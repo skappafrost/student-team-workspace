@@ -40,6 +40,9 @@ nul
 .agents/
 
 # Test artifacts
-cookies.txt
+cookies*.txt
+register.json
+e2e-debug*.mjs
+test_stw*.db
 test-results/
 playwright-report/

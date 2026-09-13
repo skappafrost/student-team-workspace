@@ -1,0 +1,2313 @@
+{
+  "meta": {
+    "generator": "scripts/demo-packs/make-pack.py",
+    "seed": 20260912,
+    "generated_at": "2026-09-12T12:13:06.068120+00:00",
+    "counts": {
+      "users": 10,
+      "projects": 4,
+      "tasks": 200,
+      "channels": 3,
+      "messages": 135,
+      "pages": 6
+    }
+  },
+  "workspace": {
+    "name": "Busy Workspace (demo)",
+    "slug": "busy-workspace-demo",
+    "description": "Seeded QA workspace: 10 teammates, ~200 tasks, long channels, sample wiki."
+  },
+  "users": [
+    {
+      "display_name": "An Nguyen",
+      "email": "qa-an@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "admin"
+    },
+    {
+      "display_name": "Binh Tran",
+      "email": "qa-binh@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Chi Le",
+      "email": "qa-chi@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Dung Pham",
+      "email": "qa-dung@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Hieu Vo",
+      "email": "qa-hieu@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Khanh Do",
+      "email": "qa-khanh@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Linh Hoang",
+      "email": "qa-linh@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Minh Bui",
+      "email": "qa-minh@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Ngoc Dang",
+      "email": "qa-ngoc@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    },
+    {
+      "display_name": "Phuc Ngo",
+      "email": "qa-phuc@example.com",
+      "password": "DemoQA-2026-pass!",
+      "role": "member"
+    }
+  ],
+  "projects": [
+    {
+      "key": "website",
+      "name": "Website Redesign",
+      "description": "Marketing site refresh: landing, blog, docs theme.",
+      "tasks": [
+        {
+          "title": "Design footer links #01",
+          "description": "QA seed: Website Redesign — footer links (item 1/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 9,
+          "position": 0.0
+        },
+        {
+          "title": "Migrate pricing table #02",
+          "description": "QA seed: Website Redesign — pricing table (item 2/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 10.0
+        },
+        {
+          "title": "Design sitemap + robots #03",
+          "description": "QA seed: Website Redesign — sitemap + robots (item 3/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 8,
+          "position": 20.0
+        },
+        {
+          "title": "Migrate landing hero section #04",
+          "description": "QA seed: Website Redesign — landing hero section (item 4/50).",
+          "status": "todo",
+          "priority": "urgent",
+          "assignee_index": 8,
+          "position": 30.0
+        },
+        {
+          "title": "Implement OG images #05",
+          "description": "QA seed: Website Redesign — OG images (item 5/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 40.0
+        },
+        {
+          "title": "Review sitemap + robots #06",
+          "description": "QA seed: Website Redesign — sitemap + robots (item 6/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 50.0
+        },
+        {
+          "title": "Polish blog index layout #07",
+          "description": "QA seed: Website Redesign — blog index layout (item 7/50).",
+          "status": "done",
+          "priority": "urgent",
+          "assignee_index": 3,
+          "position": 60.0
+        },
+        {
+          "title": "Migrate pricing table #08",
+          "description": "QA seed: Website Redesign — pricing table (item 8/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 70.0
+        },
+        {
+          "title": "Fix footer links #09",
+          "description": "QA seed: Website Redesign — footer links (item 9/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 80.0
+        },
+        {
+          "title": "Implement docs sidebar #10",
+          "description": "QA seed: Website Redesign — docs sidebar (item 10/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 1,
+          "position": 90.0
+        },
+        {
+          "title": "Fix docs sidebar #11",
+          "description": "QA seed: Website Redesign — docs sidebar (item 11/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 100.0
+        },
+        {
+          "title": "Audit contact form validation #12",
+          "description": "QA seed: Website Redesign — contact form validation (item 12/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 9,
+          "position": 110.0
+        },
+        {
+          "title": "Fix sitemap + robots #13",
+          "description": "QA seed: Website Redesign — sitemap + robots (item 13/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 1,
+          "position": 120.0
+        },
+        {
+          "title": "Polish mobile nav drawer #14",
+          "description": "QA seed: Website Redesign — mobile nav drawer (item 14/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 3,
+          "position": 130.0
+        },
+        {
+          "title": "Polish blog index layout #15",
+          "description": "QA seed: Website Redesign — blog index layout (item 15/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 140.0
+        },
+        {
+          "title": "Migrate sitemap + robots #16",
+          "description": "QA seed: Website Redesign — sitemap + robots (item 16/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 150.0
+        },
+        {
+          "title": "Fix landing hero section #17",
+          "description": "QA seed: Website Redesign — landing hero section (item 17/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 9,
+          "position": 160.0
+        },
+        {
+          "title": "Audit footer links #18",
+          "description": "QA seed: Website Redesign — footer links (item 18/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 170.0
+        },
+        {
+          "title": "Prototype OG images #19",
+          "description": "QA seed: Website Redesign — OG images (item 19/50).",
+          "status": "done",
+          "priority": "urgent",
+          "assignee_index": 4,
+          "position": 180.0
+        },
+        {
+          "title": "Implement blog index layout #20",
+          "description": "QA seed: Website Redesign — blog index layout (item 20/50).",
+          "status": "todo",
+          "priority": "urgent",
+          "assignee_index": 0,
+          "position": 190.0
+        },
+        {
+          "title": "Fix landing hero section #21",
+          "description": "QA seed: Website Redesign — landing hero section (item 21/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 3,
+          "position": 200.0
+        },
+        {
+          "title": "Review landing hero section #22",
+          "description": "QA seed: Website Redesign — landing hero section (item 22/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 0,
+          "position": 210.0
+        },
+        {
+          "title": "Fix mobile nav drawer #23",
+          "description": "QA seed: Website Redesign — mobile nav drawer (item 23/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 8,
+          "position": 220.0
+        },
+        {
+          "title": "Polish pricing table #24",
+          "description": "QA seed: Website Redesign — pricing table (item 24/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 3,
+          "position": 230.0
+        },
+        {
+          "title": "Fix dark-mode tokens #25",
+          "description": "QA seed: Website Redesign — dark-mode tokens (item 25/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 240.0
+        },
+        {
+          "title": "Review dark-mode tokens #26",
+          "description": "QA seed: Website Redesign — dark-mode tokens (item 26/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 250.0
+        },
+        {
+          "title": "Fix sitemap + robots #27",
+          "description": "QA seed: Website Redesign — sitemap + robots (item 27/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 7,
+          "position": 260.0
+        },
+        {
+          "title": "Prototype mobile nav drawer #28",
+          "description": "QA seed: Website Redesign — mobile nav drawer (item 28/50).",
+          "status": "doing",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 270.0
+        },
+        {
+          "title": "Design OG images #29",
+          "description": "QA seed: Website Redesign — OG images (item 29/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 5,
+          "position": 280.0
+        },
+        {
+          "title": "Prototype sitemap + robots #30",
+          "description": "QA seed: Website Redesign — sitemap + robots (item 30/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 6,
+          "position": 290.0
+        },
+        {
+          "title": "Review pricing table #31",
+          "description": "QA seed: Website Redesign — pricing table (item 31/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 8,
+          "position": 300.0
+        },
+        {
+          "title": "Migrate mobile nav drawer #32",
+          "description": "QA seed: Website Redesign — mobile nav drawer (item 32/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 8,
+          "position": 310.0
+        },
+        {
+          "title": "Design footer links #33",
+          "description": "QA seed: Website Redesign — footer links (item 33/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 320.0
+        },
+        {
+          "title": "Audit landing hero section #34",
+          "description": "QA seed: Website Redesign — landing hero section (item 34/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 330.0
+        },
+        {
+          "title": "Fix landing hero section #35",
+          "description": "QA seed: Website Redesign — landing hero section (item 35/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 3,
+          "position": 340.0
+        },
+        {
+          "title": "Prototype footer links #36",
+          "description": "QA seed: Website Redesign — footer links (item 36/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 350.0
+        },
+        {
+          "title": "Polish blog index layout #37",
+          "description": "QA seed: Website Redesign — blog index layout (item 37/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 360.0
+        },
+        {
+          "title": "Implement dark-mode tokens #38",
+          "description": "QA seed: Website Redesign — dark-mode tokens (item 38/50).",
+          "status": "doing",
+          "priority": "urgent",
+          "assignee_index": 2,
+          "position": 370.0
+        },
+        {
+          "title": "Review pricing table #39",
+          "description": "QA seed: Website Redesign — pricing table (item 39/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 8,
+          "position": 380.0
+        },
+        {
+          "title": "Polish dark-mode tokens #40",
+          "description": "QA seed: Website Redesign — dark-mode tokens (item 40/50).",
+          "status": "backlog",
+          "priority": "urgent",
+          "assignee_index": 1,
+          "position": 390.0
+        },
+        {
+          "title": "Migrate mobile nav drawer #41",
+          "description": "QA seed: Website Redesign — mobile nav drawer (item 41/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 400.0
+        },
+        {
+          "title": "Fix footer links #42",
+          "description": "QA seed: Website Redesign — footer links (item 42/50).",
+          "status": "backlog",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 410.0
+        },
+        {
+          "title": "Prototype landing hero section #43",
+          "description": "QA seed: Website Redesign — landing hero section (item 43/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 4,
+          "position": 420.0
+        },
+        {
+          "title": "Review dark-mode tokens #44",
+          "description": "QA seed: Website Redesign — dark-mode tokens (item 44/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 430.0
+        },
+        {
+          "title": "Prototype OG images #45",
+          "description": "QA seed: Website Redesign — OG images (item 45/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 440.0
+        },
+        {
+          "title": "Fix contact form validation #46",
+          "description": "QA seed: Website Redesign — contact form validation (item 46/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 8,
+          "position": 450.0
+        },
+        {
+          "title": "Review landing hero section #47",
+          "description": "QA seed: Website Redesign — landing hero section (item 47/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 9,
+          "position": 460.0
+        },
+        {
+          "title": "Audit footer links #48",
+          "description": "QA seed: Website Redesign — footer links (item 48/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 470.0
+        },
+        {
+          "title": "Implement dark-mode tokens #49",
+          "description": "QA seed: Website Redesign — dark-mode tokens (item 49/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 1,
+          "position": 480.0
+        },
+        {
+          "title": "Migrate docs sidebar #50",
+          "description": "QA seed: Website Redesign — docs sidebar (item 50/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 490.0
+        }
+      ]
+    },
+    {
+      "key": "exam",
+      "name": "Exam Prep",
+      "description": "Shared study plan for the final exams season.",
+      "tasks": [
+        {
+          "title": "Recap calculus problem set #01",
+          "description": "QA seed: Exam Prep — calculus problem set (item 1/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 1,
+          "position": 0.0
+        },
+        {
+          "title": "Summarize history timeline #02",
+          "description": "QA seed: Exam Prep — history timeline (item 2/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 10.0
+        },
+        {
+          "title": "Solve mock test #1 #03",
+          "description": "QA seed: Exam Prep — mock test #1 (item 3/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 20.0
+        },
+        {
+          "title": "Summarize history timeline #04",
+          "description": "QA seed: Exam Prep — history timeline (item 4/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 30.0
+        },
+        {
+          "title": "Solve chemistry lab notes #05",
+          "description": "QA seed: Exam Prep — chemistry lab notes (item 5/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 40.0
+        },
+        {
+          "title": "Drill physics formulas sheet #06",
+          "description": "QA seed: Exam Prep — physics formulas sheet (item 6/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 50.0
+        },
+        {
+          "title": "Outline mock test #1 #07",
+          "description": "QA seed: Exam Prep — mock test #1 (item 7/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 9,
+          "position": 60.0
+        },
+        {
+          "title": "Solve past-paper review #08",
+          "description": "QA seed: Exam Prep — past-paper review (item 8/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 70.0
+        },
+        {
+          "title": "Schedule group quiz session #09",
+          "description": "QA seed: Exam Prep — group quiz session (item 9/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 80.0
+        },
+        {
+          "title": "Flashcard past-paper review #10",
+          "description": "QA seed: Exam Prep — past-paper review (item 10/50).",
+          "status": "doing",
+          "priority": "high",
+          "assignee_index": 4,
+          "position": 90.0
+        },
+        {
+          "title": "Drill english essay outlines #11",
+          "description": "QA seed: Exam Prep — english essay outlines (item 11/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 4,
+          "position": 100.0
+        },
+        {
+          "title": "Drill chemistry lab notes #12",
+          "description": "QA seed: Exam Prep — chemistry lab notes (item 12/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 1,
+          "position": 110.0
+        },
+        {
+          "title": "Outline history timeline #13",
+          "description": "QA seed: Exam Prep — history timeline (item 13/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 120.0
+        },
+        {
+          "title": "Drill study timetable #14",
+          "description": "QA seed: Exam Prep — study timetable (item 14/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 130.0
+        },
+        {
+          "title": "Schedule study timetable #15",
+          "description": "QA seed: Exam Prep — study timetable (item 15/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 140.0
+        },
+        {
+          "title": "Recap english essay outlines #16",
+          "description": "QA seed: Exam Prep — english essay outlines (item 16/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 5,
+          "position": 150.0
+        },
+        {
+          "title": "Summarize chemistry lab notes #17",
+          "description": "QA seed: Exam Prep — chemistry lab notes (item 17/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 160.0
+        },
+        {
+          "title": "Solve mock test #2 #18",
+          "description": "QA seed: Exam Prep — mock test #2 (item 18/50).",
+          "status": "backlog",
+          "priority": "medium",
+          "assignee_index": 3,
+          "position": 170.0
+        },
+        {
+          "title": "Recap history timeline #19",
+          "description": "QA seed: Exam Prep — history timeline (item 19/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 1,
+          "position": 180.0
+        },
+        {
+          "title": "Practice english essay outlines #20",
+          "description": "QA seed: Exam Prep — english essay outlines (item 20/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 190.0
+        },
+        {
+          "title": "Outline mock test #1 #21",
+          "description": "QA seed: Exam Prep — mock test #1 (item 21/50).",
+          "status": "backlog",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 200.0
+        },
+        {
+          "title": "Outline calculus problem set #22",
+          "description": "QA seed: Exam Prep — calculus problem set (item 22/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 210.0
+        },
+        {
+          "title": "Summarize calculus problem set #23",
+          "description": "QA seed: Exam Prep — calculus problem set (item 23/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 220.0
+        },
+        {
+          "title": "Flashcard english essay outlines #24",
+          "description": "QA seed: Exam Prep — english essay outlines (item 24/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 1,
+          "position": 230.0
+        },
+        {
+          "title": "Practice history timeline #25",
+          "description": "QA seed: Exam Prep — history timeline (item 25/50).",
+          "status": "todo",
+          "priority": "urgent",
+          "assignee_index": 4,
+          "position": 240.0
+        },
+        {
+          "title": "Summarize physics formulas sheet #26",
+          "description": "QA seed: Exam Prep — physics formulas sheet (item 26/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 250.0
+        },
+        {
+          "title": "Summarize mock test #1 #27",
+          "description": "QA seed: Exam Prep — mock test #1 (item 27/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 9,
+          "position": 260.0
+        },
+        {
+          "title": "Drill physics formulas sheet #28",
+          "description": "QA seed: Exam Prep — physics formulas sheet (item 28/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 1,
+          "position": 270.0
+        },
+        {
+          "title": "Recap english essay outlines #29",
+          "description": "QA seed: Exam Prep — english essay outlines (item 29/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 5,
+          "position": 280.0
+        },
+        {
+          "title": "Outline english essay outlines #30",
+          "description": "QA seed: Exam Prep — english essay outlines (item 30/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 290.0
+        },
+        {
+          "title": "Drill history timeline #31",
+          "description": "QA seed: Exam Prep — history timeline (item 31/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 4,
+          "position": 300.0
+        },
+        {
+          "title": "Outline calculus problem set #32",
+          "description": "QA seed: Exam Prep — calculus problem set (item 32/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 310.0
+        },
+        {
+          "title": "Recap mock test #2 #33",
+          "description": "QA seed: Exam Prep — mock test #2 (item 33/50).",
+          "status": "backlog",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 320.0
+        },
+        {
+          "title": "Outline study timetable #34",
+          "description": "QA seed: Exam Prep — study timetable (item 34/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 8,
+          "position": 330.0
+        },
+        {
+          "title": "Schedule mock test #2 #35",
+          "description": "QA seed: Exam Prep — mock test #2 (item 35/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 7,
+          "position": 340.0
+        },
+        {
+          "title": "Solve group quiz session #36",
+          "description": "QA seed: Exam Prep — group quiz session (item 36/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 0,
+          "position": 350.0
+        },
+        {
+          "title": "Summarize history timeline #37",
+          "description": "QA seed: Exam Prep — history timeline (item 37/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 8,
+          "position": 360.0
+        },
+        {
+          "title": "Schedule mock test #2 #38",
+          "description": "QA seed: Exam Prep — mock test #2 (item 38/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 370.0
+        },
+        {
+          "title": "Summarize english essay outlines #39",
+          "description": "QA seed: Exam Prep — english essay outlines (item 39/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 2,
+          "position": 380.0
+        },
+        {
+          "title": "Flashcard history timeline #40",
+          "description": "QA seed: Exam Prep — history timeline (item 40/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 1,
+          "position": 390.0
+        },
+        {
+          "title": "Recap study timetable #41",
+          "description": "QA seed: Exam Prep — study timetable (item 41/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 0,
+          "position": 400.0
+        },
+        {
+          "title": "Solve calculus problem set #42",
+          "description": "QA seed: Exam Prep — calculus problem set (item 42/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 8,
+          "position": 410.0
+        },
+        {
+          "title": "Schedule past-paper review #43",
+          "description": "QA seed: Exam Prep — past-paper review (item 43/50).",
+          "status": "doing",
+          "priority": "urgent",
+          "assignee_index": 8,
+          "position": 420.0
+        },
+        {
+          "title": "Drill chemistry lab notes #44",
+          "description": "QA seed: Exam Prep — chemistry lab notes (item 44/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 8,
+          "position": 430.0
+        },
+        {
+          "title": "Outline english essay outlines #45",
+          "description": "QA seed: Exam Prep — english essay outlines (item 45/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 440.0
+        },
+        {
+          "title": "Solve physics formulas sheet #46",
+          "description": "QA seed: Exam Prep — physics formulas sheet (item 46/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 5,
+          "position": 450.0
+        },
+        {
+          "title": "Schedule physics formulas sheet #47",
+          "description": "QA seed: Exam Prep — physics formulas sheet (item 47/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 460.0
+        },
+        {
+          "title": "Solve chemistry lab notes #48",
+          "description": "QA seed: Exam Prep — chemistry lab notes (item 48/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 3,
+          "position": 470.0
+        },
+        {
+          "title": "Solve physics formulas sheet #49",
+          "description": "QA seed: Exam Prep — physics formulas sheet (item 49/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 480.0
+        },
+        {
+          "title": "Schedule physics formulas sheet #50",
+          "description": "QA seed: Exam Prep — physics formulas sheet (item 50/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 7,
+          "position": 490.0
+        }
+      ]
+    },
+    {
+      "key": "robotics",
+      "name": "Robotics Club",
+      "description": "Line-follower bot build for the regional contest.",
+      "tasks": [
+        {
+          "title": "Assemble IR sensor array #01",
+          "description": "QA seed: Robotics Club — IR sensor array (item 1/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 0.0
+        },
+        {
+          "title": "Assemble battery pack #02",
+          "description": "QA seed: Robotics Club — battery pack (item 2/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 10.0
+        },
+        {
+          "title": "Assemble track test runs #03",
+          "description": "QA seed: Robotics Club — track test runs (item 3/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 20.0
+        },
+        {
+          "title": "Demo battery pack #04",
+          "description": "QA seed: Robotics Club — battery pack (item 4/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 30.0
+        },
+        {
+          "title": "Assemble IR sensor array #05",
+          "description": "QA seed: Robotics Club — IR sensor array (item 5/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 40.0
+        },
+        {
+          "title": "Order chassis frame #06",
+          "description": "QA seed: Robotics Club — chassis frame (item 6/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 50.0
+        },
+        {
+          "title": "Order wiring harness #07",
+          "description": "QA seed: Robotics Club — wiring harness (item 7/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 60.0
+        },
+        {
+          "title": "Document motor driver boards #08",
+          "description": "QA seed: Robotics Club — motor driver boards (item 8/50).",
+          "status": "doing",
+          "priority": "high",
+          "assignee_index": 1,
+          "position": 70.0
+        },
+        {
+          "title": "Assemble motor driver boards #09",
+          "description": "QA seed: Robotics Club — motor driver boards (item 9/50).",
+          "status": "doing",
+          "priority": "urgent",
+          "assignee_index": 2,
+          "position": 80.0
+        },
+        {
+          "title": "Order sponsor thank-you post #10",
+          "description": "QA seed: Robotics Club — sponsor thank-you post (item 10/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 7,
+          "position": 90.0
+        },
+        {
+          "title": "Calibrate contest rulebook notes #11",
+          "description": "QA seed: Robotics Club — contest rulebook notes (item 11/50).",
+          "status": "doing",
+          "priority": "urgent",
+          "assignee_index": 3,
+          "position": 100.0
+        },
+        {
+          "title": "Document contest rulebook notes #12",
+          "description": "QA seed: Robotics Club — contest rulebook notes (item 12/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 110.0
+        },
+        {
+          "title": "Calibrate track test runs #13",
+          "description": "QA seed: Robotics Club — track test runs (item 13/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 9,
+          "position": 120.0
+        },
+        {
+          "title": "Test chassis frame #14",
+          "description": "QA seed: Robotics Club — chassis frame (item 14/50).",
+          "status": "done",
+          "priority": "urgent",
+          "assignee_index": 1,
+          "position": 130.0
+        },
+        {
+          "title": "Solder sponsor thank-you post #15",
+          "description": "QA seed: Robotics Club — sponsor thank-you post (item 15/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 8,
+          "position": 140.0
+        },
+        {
+          "title": "Order wiring harness #16",
+          "description": "QA seed: Robotics Club — wiring harness (item 16/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 150.0
+        },
+        {
+          "title": "Assemble IR sensor array #17",
+          "description": "QA seed: Robotics Club — IR sensor array (item 17/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 9,
+          "position": 160.0
+        },
+        {
+          "title": "Demo sponsor thank-you post #18",
+          "description": "QA seed: Robotics Club — sponsor thank-you post (item 18/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 170.0
+        },
+        {
+          "title": "Order motor driver boards #19",
+          "description": "QA seed: Robotics Club — motor driver boards (item 19/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 180.0
+        },
+        {
+          "title": "Assemble wiring harness #20",
+          "description": "QA seed: Robotics Club — wiring harness (item 20/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 4,
+          "position": 190.0
+        },
+        {
+          "title": "Demo pit-crew checklist #21",
+          "description": "QA seed: Robotics Club — pit-crew checklist (item 21/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 200.0
+        },
+        {
+          "title": "Order track test runs #22",
+          "description": "QA seed: Robotics Club — track test runs (item 22/50).",
+          "status": "backlog",
+          "priority": "urgent",
+          "assignee_index": 2,
+          "position": 210.0
+        },
+        {
+          "title": "Order IR sensor array #23",
+          "description": "QA seed: Robotics Club — IR sensor array (item 23/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 4,
+          "position": 220.0
+        },
+        {
+          "title": "Calibrate PID constants #24",
+          "description": "QA seed: Robotics Club — PID constants (item 24/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 9,
+          "position": 230.0
+        },
+        {
+          "title": "Demo battery pack #25",
+          "description": "QA seed: Robotics Club — battery pack (item 25/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 1,
+          "position": 240.0
+        },
+        {
+          "title": "Test wiring harness #26",
+          "description": "QA seed: Robotics Club — wiring harness (item 26/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 9,
+          "position": 250.0
+        },
+        {
+          "title": "Demo motor driver boards #27",
+          "description": "QA seed: Robotics Club — motor driver boards (item 27/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 260.0
+        },
+        {
+          "title": "Calibrate pit-crew checklist #28",
+          "description": "QA seed: Robotics Club — pit-crew checklist (item 28/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 270.0
+        },
+        {
+          "title": "Calibrate IR sensor array #29",
+          "description": "QA seed: Robotics Club — IR sensor array (item 29/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 7,
+          "position": 280.0
+        },
+        {
+          "title": "Order chassis frame #30",
+          "description": "QA seed: Robotics Club — chassis frame (item 30/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 290.0
+        },
+        {
+          "title": "Order track test runs #31",
+          "description": "QA seed: Robotics Club — track test runs (item 31/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 300.0
+        },
+        {
+          "title": "Test chassis frame #32",
+          "description": "QA seed: Robotics Club — chassis frame (item 32/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 310.0
+        },
+        {
+          "title": "Order track test runs #33",
+          "description": "QA seed: Robotics Club — track test runs (item 33/50).",
+          "status": "doing",
+          "priority": "urgent",
+          "assignee_index": 4,
+          "position": 320.0
+        },
+        {
+          "title": "Calibrate sponsor thank-you post #34",
+          "description": "QA seed: Robotics Club — sponsor thank-you post (item 34/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 7,
+          "position": 330.0
+        },
+        {
+          "title": "Assemble PID constants #35",
+          "description": "QA seed: Robotics Club — PID constants (item 35/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 340.0
+        },
+        {
+          "title": "Demo pit-crew checklist #36",
+          "description": "QA seed: Robotics Club — pit-crew checklist (item 36/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 9,
+          "position": 350.0
+        },
+        {
+          "title": "Assemble pit-crew checklist #37",
+          "description": "QA seed: Robotics Club — pit-crew checklist (item 37/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 9,
+          "position": 360.0
+        },
+        {
+          "title": "Demo motor driver boards #38",
+          "description": "QA seed: Robotics Club — motor driver boards (item 38/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 6,
+          "position": 370.0
+        },
+        {
+          "title": "Solder battery pack #39",
+          "description": "QA seed: Robotics Club — battery pack (item 39/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 380.0
+        },
+        {
+          "title": "Solder wiring harness #40",
+          "description": "QA seed: Robotics Club — wiring harness (item 40/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 4,
+          "position": 390.0
+        },
+        {
+          "title": "Document pit-crew checklist #41",
+          "description": "QA seed: Robotics Club — pit-crew checklist (item 41/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 400.0
+        },
+        {
+          "title": "Order contest rulebook notes #42",
+          "description": "QA seed: Robotics Club — contest rulebook notes (item 42/50).",
+          "status": "backlog",
+          "priority": "urgent",
+          "assignee_index": 0,
+          "position": 410.0
+        },
+        {
+          "title": "Tune motor driver boards #43",
+          "description": "QA seed: Robotics Club — motor driver boards (item 43/50).",
+          "status": "doing",
+          "priority": "high",
+          "assignee_index": 1,
+          "position": 420.0
+        },
+        {
+          "title": "Solder chassis frame #44",
+          "description": "QA seed: Robotics Club — chassis frame (item 44/50).",
+          "status": "doing",
+          "priority": "urgent",
+          "assignee_index": 0,
+          "position": 430.0
+        },
+        {
+          "title": "Assemble sponsor thank-you post #45",
+          "description": "QA seed: Robotics Club — sponsor thank-you post (item 45/50).",
+          "status": "todo",
+          "priority": "urgent",
+          "assignee_index": 0,
+          "position": 440.0
+        },
+        {
+          "title": "Document motor driver boards #46",
+          "description": "QA seed: Robotics Club — motor driver boards (item 46/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 2,
+          "position": 450.0
+        },
+        {
+          "title": "Test pit-crew checklist #47",
+          "description": "QA seed: Robotics Club — pit-crew checklist (item 47/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 460.0
+        },
+        {
+          "title": "Calibrate motor driver boards #48",
+          "description": "QA seed: Robotics Club — motor driver boards (item 48/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 470.0
+        },
+        {
+          "title": "Tune PID constants #49",
+          "description": "QA seed: Robotics Club — PID constants (item 49/50).",
+          "status": "doing",
+          "priority": "high",
+          "assignee_index": 9,
+          "position": 480.0
+        },
+        {
+          "title": "Tune motor driver boards #50",
+          "description": "QA seed: Robotics Club — motor driver boards (item 50/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 8,
+          "position": 490.0
+        }
+      ]
+    },
+    {
+      "key": "mobile",
+      "name": "Mobile App",
+      "description": "Study-buddy app MVP: tasks, timer, streaks.",
+      "tasks": [
+        {
+          "title": "Sketch push reminders #01",
+          "description": "QA seed: Mobile App — push reminders (item 1/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 4,
+          "position": 0.0
+        },
+        {
+          "title": "Sketch beta feedback form #02",
+          "description": "QA seed: Mobile App — beta feedback form (item 2/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 1,
+          "position": 10.0
+        },
+        {
+          "title": "Localize push reminders #03",
+          "description": "QA seed: Mobile App — push reminders (item 3/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 20.0
+        },
+        {
+          "title": "Fix task list screen #04",
+          "description": "QA seed: Mobile App — task list screen (item 4/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 2,
+          "position": 30.0
+        },
+        {
+          "title": "Instrument onboarding flow #05",
+          "description": "QA seed: Mobile App — onboarding flow (item 5/50).",
+          "status": "backlog",
+          "priority": "medium",
+          "assignee_index": 2,
+          "position": 40.0
+        },
+        {
+          "title": "Test push reminders #06",
+          "description": "QA seed: Mobile App — push reminders (item 6/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 9,
+          "position": 50.0
+        },
+        {
+          "title": "Wire settings page #07",
+          "description": "QA seed: Mobile App — settings page (item 7/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 60.0
+        },
+        {
+          "title": "Wire app icon set #08",
+          "description": "QA seed: Mobile App — app icon set (item 8/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 70.0
+        },
+        {
+          "title": "Sketch app icon set #09",
+          "description": "QA seed: Mobile App — app icon set (item 9/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 1,
+          "position": 80.0
+        },
+        {
+          "title": "Wire app icon set #10",
+          "description": "QA seed: Mobile App — app icon set (item 10/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 5,
+          "position": 90.0
+        },
+        {
+          "title": "Sketch push reminders #11",
+          "description": "QA seed: Mobile App — push reminders (item 11/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 100.0
+        },
+        {
+          "title": "Sketch store listing draft #12",
+          "description": "QA seed: Mobile App — store listing draft (item 12/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 110.0
+        },
+        {
+          "title": "Build streak widget #13",
+          "description": "QA seed: Mobile App — streak widget (item 13/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 120.0
+        },
+        {
+          "title": "Test settings page #14",
+          "description": "QA seed: Mobile App — settings page (item 14/50).",
+          "status": "doing",
+          "priority": "high",
+          "assignee_index": 0,
+          "position": 130.0
+        },
+        {
+          "title": "Release push reminders #15",
+          "description": "QA seed: Mobile App — push reminders (item 15/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 2,
+          "position": 140.0
+        },
+        {
+          "title": "Instrument offline cache #16",
+          "description": "QA seed: Mobile App — offline cache (item 16/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 9,
+          "position": 150.0
+        },
+        {
+          "title": "Instrument offline cache #17",
+          "description": "QA seed: Mobile App — offline cache (item 17/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 0,
+          "position": 160.0
+        },
+        {
+          "title": "Sketch onboarding flow #18",
+          "description": "QA seed: Mobile App — onboarding flow (item 18/50).",
+          "status": "backlog",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 170.0
+        },
+        {
+          "title": "Sketch task list screen #19",
+          "description": "QA seed: Mobile App — task list screen (item 19/50).",
+          "status": "done",
+          "priority": "urgent",
+          "assignee_index": 2,
+          "position": 180.0
+        },
+        {
+          "title": "Fix settings page #20",
+          "description": "QA seed: Mobile App — settings page (item 20/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 7,
+          "position": 190.0
+        },
+        {
+          "title": "Wire settings page #21",
+          "description": "QA seed: Mobile App — settings page (item 21/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 2,
+          "position": 200.0
+        },
+        {
+          "title": "Build store listing draft #22",
+          "description": "QA seed: Mobile App — store listing draft (item 22/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 3,
+          "position": 210.0
+        },
+        {
+          "title": "Localize app icon set #23",
+          "description": "QA seed: Mobile App — app icon set (item 23/50).",
+          "status": "doing",
+          "priority": "high",
+          "assignee_index": 8,
+          "position": 220.0
+        },
+        {
+          "title": "Fix app icon set #24",
+          "description": "QA seed: Mobile App — app icon set (item 24/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 5,
+          "position": 230.0
+        },
+        {
+          "title": "Localize task list screen #25",
+          "description": "QA seed: Mobile App — task list screen (item 25/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 2,
+          "position": 240.0
+        },
+        {
+          "title": "Instrument pomodoro timer #26",
+          "description": "QA seed: Mobile App — pomodoro timer (item 26/50).",
+          "status": "todo",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 250.0
+        },
+        {
+          "title": "Instrument streak widget #27",
+          "description": "QA seed: Mobile App — streak widget (item 27/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 260.0
+        },
+        {
+          "title": "Release app icon set #28",
+          "description": "QA seed: Mobile App — app icon set (item 28/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 4,
+          "position": 270.0
+        },
+        {
+          "title": "Localize pomodoro timer #29",
+          "description": "QA seed: Mobile App — pomodoro timer (item 29/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 280.0
+        },
+        {
+          "title": "Build offline cache #30",
+          "description": "QA seed: Mobile App — offline cache (item 30/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 5,
+          "position": 290.0
+        },
+        {
+          "title": "Test task list screen #31",
+          "description": "QA seed: Mobile App — task list screen (item 31/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 9,
+          "position": 300.0
+        },
+        {
+          "title": "Test beta feedback form #32",
+          "description": "QA seed: Mobile App — beta feedback form (item 32/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 6,
+          "position": 310.0
+        },
+        {
+          "title": "Build settings page #33",
+          "description": "QA seed: Mobile App — settings page (item 33/50).",
+          "status": "todo",
+          "priority": "urgent",
+          "assignee_index": 7,
+          "position": 320.0
+        },
+        {
+          "title": "Instrument beta feedback form #34",
+          "description": "QA seed: Mobile App — beta feedback form (item 34/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 6,
+          "position": 330.0
+        },
+        {
+          "title": "Instrument offline cache #35",
+          "description": "QA seed: Mobile App — offline cache (item 35/50).",
+          "status": "done",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 340.0
+        },
+        {
+          "title": "Build beta feedback form #36",
+          "description": "QA seed: Mobile App — beta feedback form (item 36/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 350.0
+        },
+        {
+          "title": "Instrument push reminders #37",
+          "description": "QA seed: Mobile App — push reminders (item 37/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 1,
+          "position": 360.0
+        },
+        {
+          "title": "Test beta feedback form #38",
+          "description": "QA seed: Mobile App — beta feedback form (item 38/50).",
+          "status": "doing",
+          "priority": "urgent",
+          "assignee_index": 9,
+          "position": 370.0
+        },
+        {
+          "title": "Build pomodoro timer #39",
+          "description": "QA seed: Mobile App — pomodoro timer (item 39/50).",
+          "status": "done",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 380.0
+        },
+        {
+          "title": "Test onboarding flow #40",
+          "description": "QA seed: Mobile App — onboarding flow (item 40/50).",
+          "status": "doing",
+          "priority": "medium",
+          "assignee_index": 4,
+          "position": 390.0
+        },
+        {
+          "title": "Wire task list screen #41",
+          "description": "QA seed: Mobile App — task list screen (item 41/50).",
+          "status": "backlog",
+          "priority": "high",
+          "assignee_index": 6,
+          "position": 400.0
+        },
+        {
+          "title": "Sketch settings page #42",
+          "description": "QA seed: Mobile App — settings page (item 42/50).",
+          "status": "done",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 410.0
+        },
+        {
+          "title": "Instrument store listing draft #43",
+          "description": "QA seed: Mobile App — store listing draft (item 43/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 9,
+          "position": 420.0
+        },
+        {
+          "title": "Build task list screen #44",
+          "description": "QA seed: Mobile App — task list screen (item 44/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 9,
+          "position": 430.0
+        },
+        {
+          "title": "Release streak widget #45",
+          "description": "QA seed: Mobile App — streak widget (item 45/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 3,
+          "position": 440.0
+        },
+        {
+          "title": "Test pomodoro timer #46",
+          "description": "QA seed: Mobile App — pomodoro timer (item 46/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 450.0
+        },
+        {
+          "title": "Build push reminders #47",
+          "description": "QA seed: Mobile App — push reminders (item 47/50).",
+          "status": "todo",
+          "priority": "high",
+          "assignee_index": 1,
+          "position": 460.0
+        },
+        {
+          "title": "Fix push reminders #48",
+          "description": "QA seed: Mobile App — push reminders (item 48/50).",
+          "status": "todo",
+          "priority": "medium",
+          "assignee_index": 8,
+          "position": 470.0
+        },
+        {
+          "title": "Localize settings page #49",
+          "description": "QA seed: Mobile App — settings page (item 49/50).",
+          "status": "backlog",
+          "priority": "low",
+          "assignee_index": 4,
+          "position": 480.0
+        },
+        {
+          "title": "Build settings page #50",
+          "description": "QA seed: Mobile App — settings page (item 50/50).",
+          "status": "doing",
+          "priority": "low",
+          "assignee_index": 7,
+          "position": 490.0
+        }
+      ]
+    }
+  ],
+  "channels": [
+    {
+      "name": "general",
+      "type": "general",
+      "topic": "Whole-team announcements and chatter.",
+      "messages": [
+        {
+          "author_index": 0,
+          "content": "Demo went well! 'Test onboarding flow #40' got good feedback from the group."
+        },
+        {
+          "author_index": 3,
+          "content": "Just finished 'Tune motor driver boards #43' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 6,
+          "content": "Heads up: 'Sketch beta feedback form #02' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 9,
+          "content": "Just finished 'Build pomodoro timer #39' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 2,
+          "content": "Heads up: 'Solve group quiz session #36' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 5,
+          "content": "Just finished 'Solve physics formulas sheet #49' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 8,
+          "content": "Heads up: 'Fix app icon set #24' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 1,
+          "content": "Morning check-in: today I am working on 'Migrate pricing table #02'. Anyone blocked?"
+        },
+        {
+          "author_index": 4,
+          "content": "Just finished 'Instrument store listing draft #43' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 7,
+          "content": "Demo went well! 'Solder battery pack #39' got good feedback from the group."
+        },
+        {
+          "author_index": 0,
+          "content": "Demo went well! 'Schedule study timetable #15' got good feedback from the group."
+        },
+        {
+          "author_index": 3,
+          "content": "Reminder: mock review for 'Solve mock test #2 #18' is this Friday, don't forget."
+        },
+        {
+          "author_index": 6,
+          "content": "Celebrating a small win: 'Assemble pit-crew checklist #37' moved to done ✅"
+        },
+        {
+          "author_index": 9,
+          "content": "Celebrating a small win: 'Instrument offline cache #17' moved to done ✅"
+        },
+        {
+          "author_index": 2,
+          "content": "Just finished 'Test task list screen #31' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 5,
+          "content": "Quick poll: should we split 'Outline mock test #1 #07' into smaller chunks?"
+        },
+        {
+          "author_index": 8,
+          "content": "Demo went well! 'Solve calculus problem set #42' got good feedback from the group."
+        },
+        {
+          "author_index": 1,
+          "content": "Heads up: 'Calibrate PID constants #24' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 4,
+          "content": "Morning check-in: today I am working on 'Build push reminders #47'. Anyone blocked?"
+        },
+        {
+          "author_index": 7,
+          "content": "Can someone pair with me on 'Outline calculus problem set #22' after lunch?"
+        },
+        {
+          "author_index": 0,
+          "content": "Blocked on 'Fix settings page #20' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 3,
+          "content": "Can someone pair with me on 'Order contest rulebook notes #42' after lunch?"
+        },
+        {
+          "author_index": 6,
+          "content": "Reminder: mock review for 'Summarize chemistry lab notes #17' is this Friday, don't forget."
+        },
+        {
+          "author_index": 9,
+          "content": "Blocked on 'Review landing hero section #22' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 2,
+          "content": "Can someone pair with me on 'Polish blog index layout #15' after lunch?"
+        },
+        {
+          "author_index": 5,
+          "content": "Blocked on 'Localize app icon set #23' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 8,
+          "content": "Morning check-in: today I am working on 'Drill chemistry lab notes #12'. Anyone blocked?"
+        },
+        {
+          "author_index": 1,
+          "content": "Celebrating a small win: 'Schedule study timetable #15' moved to done ✅"
+        },
+        {
+          "author_index": 4,
+          "content": "Morning check-in: today I am working on 'Localize settings page #49'. Anyone blocked?"
+        },
+        {
+          "author_index": 7,
+          "content": "Reminder: mock review for 'Build task list screen #44' is this Friday, don't forget."
+        },
+        {
+          "author_index": 0,
+          "content": "Pushed a draft for 'Summarize mock test #1 #27'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 3,
+          "content": "Morning check-in: today I am working on 'Build push reminders #47'. Anyone blocked?"
+        },
+        {
+          "author_index": 6,
+          "content": "Heads up: 'Build beta feedback form #36' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 9,
+          "content": "Can someone pair with me on 'Polish pricing table #24' after lunch?"
+        },
+        {
+          "author_index": 2,
+          "content": "Reminder: mock review for 'Build task list screen #44' is this Friday, don't forget."
+        },
+        {
+          "author_index": 5,
+          "content": "Quick poll: should we split 'Design footer links #01' into smaller chunks?"
+        },
+        {
+          "author_index": 8,
+          "content": "Quick poll: should we split 'Flashcard past-paper review #10' into smaller chunks?"
+        },
+        {
+          "author_index": 1,
+          "content": "Demo went well! 'Summarize english essay outlines #39' got good feedback from the group."
+        },
+        {
+          "author_index": 4,
+          "content": "Can someone pair with me on 'Release streak widget #45' after lunch?"
+        },
+        {
+          "author_index": 7,
+          "content": "Celebrating a small win: 'Flashcard english essay outlines #24' moved to done ✅"
+        },
+        {
+          "author_index": 0,
+          "content": "Just finished 'Solve mock test #2 #18' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 3,
+          "content": "Pushed a draft for 'Test chassis frame #32'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 6,
+          "content": "Blocked on 'Fix landing hero section #21' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 9,
+          "content": "Heads up: 'Instrument offline cache #16' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 2,
+          "content": "Celebrating a small win: 'Summarize physics formulas sheet #26' moved to done ✅"
+        }
+      ]
+    },
+    {
+      "name": "study-group",
+      "type": "general",
+      "topic": "Daily study check-ins and questions.",
+      "messages": [
+        {
+          "author_index": 7,
+          "content": "Quick poll: should we split 'Order track test runs #22' into smaller chunks?"
+        },
+        {
+          "author_index": 0,
+          "content": "Celebrating a small win: 'Recap english essay outlines #29' moved to done ✅"
+        },
+        {
+          "author_index": 3,
+          "content": "Can someone pair with me on 'Localize push reminders #03' after lunch?"
+        },
+        {
+          "author_index": 6,
+          "content": "Can someone pair with me on 'Schedule mock test #2 #38' after lunch?"
+        },
+        {
+          "author_index": 9,
+          "content": "Can someone pair with me on 'Order wiring harness #16' after lunch?"
+        },
+        {
+          "author_index": 2,
+          "content": "Blocked on 'Migrate pricing table #08' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 5,
+          "content": "Celebrating a small win: 'Summarize english essay outlines #39' moved to done ✅"
+        },
+        {
+          "author_index": 8,
+          "content": "Reminder: mock review for 'Tune motor driver boards #43' is this Friday, don't forget."
+        },
+        {
+          "author_index": 1,
+          "content": "Blocked on 'Outline english essay outlines #30' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 4,
+          "content": "Morning check-in: today I am working on 'Assemble battery pack #02'. Anyone blocked?"
+        },
+        {
+          "author_index": 7,
+          "content": "Can someone pair with me on 'Wire settings page #21' after lunch?"
+        },
+        {
+          "author_index": 0,
+          "content": "Morning check-in: today I am working on 'Fix sitemap + robots #27'. Anyone blocked?"
+        },
+        {
+          "author_index": 3,
+          "content": "Morning check-in: today I am working on 'Assemble IR sensor array #05'. Anyone blocked?"
+        },
+        {
+          "author_index": 6,
+          "content": "Can someone pair with me on 'Localize app icon set #23' after lunch?"
+        },
+        {
+          "author_index": 9,
+          "content": "Blocked on 'Drill history timeline #31' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 2,
+          "content": "Demo went well! 'Solve mock test #1 #03' got good feedback from the group."
+        },
+        {
+          "author_index": 5,
+          "content": "Morning check-in: today I am working on 'Calibrate sponsor thank-you post #34'. Anyone blocked?"
+        },
+        {
+          "author_index": 8,
+          "content": "Blocked on 'Fix contact form validation #46' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 1,
+          "content": "Just finished 'Sketch store listing draft #12' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 4,
+          "content": "Heads up: 'Outline mock test #1 #21' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 7,
+          "content": "Morning check-in: today I am working on 'Calibrate motor driver boards #48'. Anyone blocked?"
+        },
+        {
+          "author_index": 0,
+          "content": "Just finished 'Solder wiring harness #40' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 3,
+          "content": "Heads up: 'Demo pit-crew checklist #36' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 6,
+          "content": "Pushed a draft for 'Solder wiring harness #40'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 9,
+          "content": "Just finished 'Demo motor driver boards #38' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 2,
+          "content": "Reminder: mock review for 'Solve group quiz session #36' is this Friday, don't forget."
+        },
+        {
+          "author_index": 5,
+          "content": "Can someone pair with me on 'Test push reminders #06' after lunch?"
+        },
+        {
+          "author_index": 8,
+          "content": "Can someone pair with me on 'Test settings page #14' after lunch?"
+        },
+        {
+          "author_index": 1,
+          "content": "Celebrating a small win: 'Order chassis frame #30' moved to done ✅"
+        },
+        {
+          "author_index": 4,
+          "content": "Heads up: 'Drill chemistry lab notes #12' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 7,
+          "content": "Just finished 'Schedule mock test #2 #38' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 0,
+          "content": "Can someone pair with me on 'Build store listing draft #22' after lunch?"
+        },
+        {
+          "author_index": 3,
+          "content": "Heads up: 'Solve chemistry lab notes #05' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 6,
+          "content": "Morning check-in: today I am working on 'Instrument offline cache #35'. Anyone blocked?"
+        },
+        {
+          "author_index": 9,
+          "content": "Pushed a draft for 'Outline english essay outlines #45'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 2,
+          "content": "Quick poll: should we split 'Test pit-crew checklist #47' into smaller chunks?"
+        },
+        {
+          "author_index": 5,
+          "content": "Can someone pair with me on 'Localize app icon set #23' after lunch?"
+        },
+        {
+          "author_index": 8,
+          "content": "Reminder: mock review for 'Fix footer links #42' is this Friday, don't forget."
+        },
+        {
+          "author_index": 1,
+          "content": "Blocked on 'Order motor driver boards #19' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 4,
+          "content": "Quick poll: should we split 'Solder battery pack #39' into smaller chunks?"
+        },
+        {
+          "author_index": 7,
+          "content": "Demo went well! 'Instrument onboarding flow #05' got good feedback from the group."
+        },
+        {
+          "author_index": 0,
+          "content": "Demo went well! 'Practice history timeline #25' got good feedback from the group."
+        },
+        {
+          "author_index": 3,
+          "content": "Just finished 'Fix task list screen #04' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 6,
+          "content": "Pushed a draft for 'Demo battery pack #04'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 9,
+          "content": "Pushed a draft for 'Sketch store listing draft #12'. Screenshots in the wiki page."
+        }
+      ]
+    },
+    {
+      "name": "project-updates",
+      "type": "project",
+      "topic": "Build progress, demos, blockers.",
+      "messages": [
+        {
+          "author_index": 4,
+          "content": "Blocked on 'Fix sitemap + robots #13' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 7,
+          "content": "Quick poll: should we split 'Document pit-crew checklist #41' into smaller chunks?"
+        },
+        {
+          "author_index": 0,
+          "content": "Can someone pair with me on 'Localize push reminders #03' after lunch?"
+        },
+        {
+          "author_index": 3,
+          "content": "Morning check-in: today I am working on 'Schedule physics formulas sheet #47'. Anyone blocked?"
+        },
+        {
+          "author_index": 6,
+          "content": "Just finished 'Order wiring harness #16' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 9,
+          "content": "Can someone pair with me on 'Flashcard history timeline #40' after lunch?"
+        },
+        {
+          "author_index": 2,
+          "content": "Just finished 'Review landing hero section #22' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 5,
+          "content": "Can someone pair with me on 'Sketch push reminders #01' after lunch?"
+        },
+        {
+          "author_index": 8,
+          "content": "Pushed a draft for 'Sketch beta feedback form #02'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 1,
+          "content": "Just finished 'Solder chassis frame #44' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 4,
+          "content": "Pushed a draft for 'Tune motor driver boards #50'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 7,
+          "content": "Blocked on 'Summarize calculus problem set #23' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 0,
+          "content": "Morning check-in: today I am working on 'Document motor driver boards #46'. Anyone blocked?"
+        },
+        {
+          "author_index": 3,
+          "content": "Blocked on 'Practice history timeline #25' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 6,
+          "content": "Quick poll: should we split 'Audit landing hero section #34' into smaller chunks?"
+        },
+        {
+          "author_index": 9,
+          "content": "Can someone pair with me on 'Instrument offline cache #35' after lunch?"
+        },
+        {
+          "author_index": 2,
+          "content": "Pushed a draft for 'Release push reminders #15'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 5,
+          "content": "Just finished 'Migrate sitemap + robots #16' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 8,
+          "content": "Just finished 'Sketch settings page #42' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 1,
+          "content": "Pushed a draft for 'Build settings page #50'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 4,
+          "content": "Celebrating a small win: 'Build task list screen #44' moved to done ✅"
+        },
+        {
+          "author_index": 7,
+          "content": "Quick poll: should we split 'Schedule physics formulas sheet #50' into smaller chunks?"
+        },
+        {
+          "author_index": 0,
+          "content": "Quick poll: should we split 'Fix mobile nav drawer #23' into smaller chunks?"
+        },
+        {
+          "author_index": 3,
+          "content": "Morning check-in: today I am working on 'Test settings page #14'. Anyone blocked?"
+        },
+        {
+          "author_index": 6,
+          "content": "Can someone pair with me on 'Sketch onboarding flow #18' after lunch?"
+        },
+        {
+          "author_index": 9,
+          "content": "Demo went well! 'Design OG images #29' got good feedback from the group."
+        },
+        {
+          "author_index": 2,
+          "content": "Just finished 'Review sitemap + robots #06' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 5,
+          "content": "Heads up: 'Release app icon set #28' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 8,
+          "content": "Demo went well! 'Test pit-crew checklist #47' got good feedback from the group."
+        },
+        {
+          "author_index": 1,
+          "content": "Demo went well! 'Outline english essay outlines #30' got good feedback from the group."
+        },
+        {
+          "author_index": 4,
+          "content": "Can someone pair with me on 'Fix dark-mode tokens #25' after lunch?"
+        },
+        {
+          "author_index": 7,
+          "content": "Heads up: 'Fix app icon set #24' is trickier than expected, might spill to tomorrow."
+        },
+        {
+          "author_index": 0,
+          "content": "Celebrating a small win: 'Test pit-crew checklist #47' moved to done ✅"
+        },
+        {
+          "author_index": 3,
+          "content": "Demo went well! 'Polish blog index layout #37' got good feedback from the group."
+        },
+        {
+          "author_index": 6,
+          "content": "Blocked on 'Calibrate contest rulebook notes #11' — waiting for the sensor parts to arrive."
+        },
+        {
+          "author_index": 9,
+          "content": "Reminder: mock review for 'Instrument pomodoro timer #26' is this Friday, don't forget."
+        },
+        {
+          "author_index": 2,
+          "content": "Just finished 'Wire task list screen #41' — leaving notes in the thread, please review 🙏"
+        },
+        {
+          "author_index": 5,
+          "content": "Quick poll: should we split 'Order contest rulebook notes #42' into smaller chunks?"
+        },
+        {
+          "author_index": 8,
+          "content": "Can someone pair with me on 'Implement OG images #05' after lunch?"
+        },
+        {
+          "author_index": 1,
+          "content": "Quick poll: should we split 'Review pricing table #31' into smaller chunks?"
+        },
+        {
+          "author_index": 4,
+          "content": "Demo went well! 'Release streak widget #45' got good feedback from the group."
+        },
+        {
+          "author_index": 7,
+          "content": "Celebrating a small win: 'Summarize chemistry lab notes #17' moved to done ✅"
+        },
+        {
+          "author_index": 0,
+          "content": "Celebrating a small win: 'Audit footer links #48' moved to done ✅"
+        },
+        {
+          "author_index": 3,
+          "content": "Pushed a draft for 'Release push reminders #15'. Screenshots in the wiki page."
+        },
+        {
+          "author_index": 6,
+          "content": "Celebrating a small win: 'Fix task list screen #04' moved to done ✅"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "title": "Welcome to the Busy Workspace",
+      "slug": "welcome",
+      "parent_slug": null,
+      "content": "# Welcome 👋\n\nThis is a seeded QA workspace with realistic volume: 10 teammates, ~200 tasks across 4 project boards, long chat channels, and this mini wiki.\n\n## Where to look\n\n- **Projects** for the kanban boards\n- **Channels** for chat history\n- **Wiki** (you are here) for docs\n\n> Generated by `scripts/demo-packs/make-pack.py`. Safe to delete and re-import."
+    },
+    {
+      "title": "Coding Standards",
+      "slug": "coding-standards",
+      "parent_slug": "welcome",
+      "content": "# Coding Standards\n\n1. Small PRs (< 300 lines) with a how-to-verify section.\n2. Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`.\n3. No secrets in the repo — use `.env` + `.env.example`.\n4. Green CI before requesting review.\n"
+    },
+    {
+      "title": "Onboarding Checklist",
+      "slug": "onboarding",
+      "parent_slug": "welcome",
+      "content": "# Onboarding Checklist\n\n- [ ] Accept the workspace invite\n- [ ] Introduce yourself in #general\n- [ ] Pick one `todo` task from Website Redesign\n- [ ] Open your first draft PR\n- [ ] Book a 15-min intro call with the team\n"
+    },
+    {
+      "title": "Study Guide",
+      "slug": "study-guide",
+      "parent_slug": null,
+      "content": "# Study Guide\n\nWeekly rhythm: 3 focused blocks per day, one mock test per weekend. Track everything on the **Exam Prep** board.\n\n## Resources\n\n- Past papers folder (ask An for access)\n- Formula sheets in the wiki children pages\n"
+    },
+    {
+      "title": "Exam Checklist",
+      "slug": "exam-checklist",
+      "parent_slug": "study-guide",
+      "content": "# Exam Checklist\n\n- [ ] ID card + pens packed\n- [ ] Calculator batteries checked\n- [ ] Sleep before 23:00 the night before\n- [ ] Arrive 30 minutes early\n"
+    },
+    {
+      "title": "Meeting Notes",
+      "slug": "meeting-notes",
+      "parent_slug": null,
+      "content": "# Meeting Notes\n\n## 2026-09-10 — Sprint kickoff\n\n- Agreed: demo every Friday 16:00.\n- Robotics parts budget approved.\n- Next: split the mobile-app MVP into v0.1 / v0.2.\n"
+    }
+  ]
+}

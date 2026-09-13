@@ -10,6 +10,7 @@ Covers privilege escalation attempts (member calling admin-only route, guest POS
 """
 
 import pytest
+import os
 import uuid
 from datetime import timedelta
 from typing import Optional
@@ -1132,16 +1133,17 @@ class TestT002ChannelWebsocket:
     """WS endpoint /ws/channels/{id}: membership check runs inside the handler.
 
     The handler uses the module-level DB (next(get_db())), so the world is seeded
-    through the same sqlite file via set_db_url (mirrors test_chat_ws.py).
+    through the same database via set_db_url (mirrors test_chat_ws.py).
     """
 
     @pytest.fixture
     def ws_world(self):
         # The WS handler reads the module-level engine (next(get_db())), so point it
-        # at the SAME sqlite file the REST fixtures use (./test_stw.db). Tables and
-        # rows are created by the db_session fixture + REST calls.
+        # at the SAME database the REST fixtures use (./test_stw.db on sqlite,
+        # the Postgres URL on the backend-pg CI job). Tables and rows are
+        # created by the db_session fixture + REST calls.
         from database import set_db_url
-        set_db_url("sqlite:///./test_stw.db")
+        set_db_url(os.environ.get("DATABASE_URL", "sqlite:///./test_stw.db"))
         yield
 
     def _seed(self, client):

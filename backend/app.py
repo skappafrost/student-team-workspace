@@ -1,5 +1,6 @@
 """FastAPI application with workspace CRUD and invite endpoints."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
@@ -26,6 +27,8 @@ import models
 import schemas
 import ai_assist
 import channel_access
+import logging_mw
+import rate_limit
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +300,19 @@ class TokenOut(BaseModel):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Student Team Workspace API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create tables on startup for simplicity in this scaffold stage.
+    Base.metadata.create_all(bind=engine)  # TODO(T036)
+    if _test_auth_bypass_enabled():
+        logging.getLogger(__name__).warning(
+            "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
+            "auth bypass is ENABLED. Never run with this combination outside tests."
+        )
+    yield
+
+
+app = FastAPI(title="Student Team Workspace API", lifespan=lifespan)
 
 logger = logging.getLogger("stw")
 
@@ -331,17 +346,6 @@ def _file_out(file: models.File, request: Request = None) -> dict:
     }
 
 
-# Create tables on startup for simplicity in this scaffold stage.
-@app.on_event("startup")
-def _create_tables():
-    Base.metadata.create_all(bind=engine)
-    if _test_auth_bypass_enabled():
-        logging.getLogger(__name__).warning(
-            "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
-            "auth bypass is ENABLED. Never run with this combination outside tests."
-        )
-
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -350,11 +354,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(logging_mw.RequestLoggingMiddleware)
+app.add_middleware(rate_limit.DefaultWriteLimitMiddleware)
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
+logging_mw.register_healthz(app)
 
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
@@ -407,7 +414,7 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
 # Auth endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/auth/register", response_model=TokenOut, status_code=201)
+@app.post("/auth/register", response_model=TokenOut, status_code=201, dependencies=[Depends(rate_limit.register_limit)])
 async def register(payload: RegisterIn, response: Response, db: Session = Depends(get_db)):
     """Register a new user and return an JWT session."""
     existing = db.query(models.User).filter(models.User.email == payload.email).first()
@@ -434,7 +441,7 @@ async def register(payload: RegisterIn, response: Response, db: Session = Depend
     )
 
 
-@app.post("/auth/login", response_model=TokenOut)
+@app.post("/auth/login", response_model=TokenOut, dependencies=[Depends(rate_limit.login_limit)])
 async def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
     """Authenticate a user and return a JWT session."""
     user = db.query(models.User).filter(models.User.email == payload.email).first()
@@ -741,7 +748,14 @@ async def accept_invite(
         raise HTTPException(status_code=404, detail="Invite not found")
     if invite.accepted_at is not None:
         raise HTTPException(status_code=409, detail="Invite already accepted")
-    if invite.expires_at < _utcnow():
+    # T4-E2 divergence fix: DateTime(timezone=True) columns round-trip NAIVE on
+    # SQLite but AWARE (timestamptz) on Postgres, while _utcnow() is naive by
+    # design. Normalize the DB value to naive UTC before comparing so the same
+    # code runs on both dialects (previously: TypeError -> 500 on Postgres).
+    expires_at = invite.expires_at
+    if expires_at.tzinfo is not None:
+        expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+    if expires_at < _utcnow():
         raise HTTPException(status_code=410, detail="Invite expired")
 
     # Check if user is already a member
@@ -2021,7 +2035,7 @@ class SearchResponse(BaseModel):
     results: list[dict]
 
 
-@app.post("/ai/summarize", response_model=SummarizeResponse)
+@app.post("/ai/summarize", response_model=SummarizeResponse, dependencies=[Depends(rate_limit.ai_limit)])
 async def ai_summarize(
     payload: SummarizeRequest,
     current_user: dict = Depends(get_current_user),
@@ -2188,7 +2202,7 @@ def _can_modify_file(file: models.File, membership: models.WorkspaceMembership, 
 # ---------------------------------------------------------------------------
 # File CRUD endpoints
 # ---------------------------------------------------------------------------
-@app.post("/workspaces/{workspace_id}/files", status_code=201)
+@app.post("/workspaces/{workspace_id}/files", status_code=201, dependencies=[Depends(rate_limit.upload_limit)])
 async def upload_file(
     workspace_id: str,
     file: UploadFile = FileParam(...),
