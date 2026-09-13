@@ -24,7 +24,8 @@ function mapNotification(n: BackendNotification): Notification {
     body: n.content ?? '',
     type: typeMap[n.type] ?? 'info',
     status: n.read ? 'read' : 'unread',
-    createdAt: n.created_at
+    createdAt: n.created_at,
+    link: n.link ?? null
   };
 }
 
