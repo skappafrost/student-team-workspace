@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   getWorkspaceMembers as fetchMembers,
   getWorkspaceInvites as fetchInvites,
@@ -15,13 +15,17 @@ export function useWorkspaceMembers() {
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const [m, i] = await Promise.all([fetchMembers(), fetchInvites()]);
       setMembers(m);
       setInvites(i);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load workspace data.');
     } finally {
       setIsLoading(false);
     }
@@ -56,6 +60,7 @@ export function useWorkspaceMembers() {
     members,
     invites,
     isLoading,
+    error,
     refresh,
     updateMemberRole,
     updateInviteRole,

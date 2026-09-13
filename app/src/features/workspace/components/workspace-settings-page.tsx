@@ -142,6 +142,8 @@ export default function WorkspaceSettingsPage() {
     members,
     invites,
     isLoading,
+    error,
+    refresh,
     updateMemberRole,
     updateInviteRole,
     sendInvite,
@@ -251,6 +253,20 @@ export default function WorkspaceSettingsPage() {
           <CardContent>
             {isLoading ? (
               <div className='text-muted-foreground py-8 text-center'>Loading members…</div>
+            ) : error ? (
+              <div className='py-8 text-center'>
+                <p className='text-destructive text-sm'>Couldn&apos;t load members: {error}</p>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='mt-3'
+                  onClick={() => {
+                    void refresh();
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
             ) : members.length === 0 ? (
               <div className='text-muted-foreground py-8 text-center'>No members yet.</div>
             ) : (
