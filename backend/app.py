@@ -747,7 +747,14 @@ async def accept_invite(
         raise HTTPException(status_code=404, detail="Invite not found")
     if invite.accepted_at is not None:
         raise HTTPException(status_code=409, detail="Invite already accepted")
-    if invite.expires_at < _utcnow():
+    # T4-E2 divergence fix: DateTime(timezone=True) columns round-trip NAIVE on
+    # SQLite but AWARE (timestamptz) on Postgres, while _utcnow() is naive by
+    # design. Normalize the DB value to naive UTC before comparing so the same
+    # code runs on both dialects (previously: TypeError -> 500 on Postgres).
+    expires_at = invite.expires_at
+    if expires_at.tzinfo is not None:
+        expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+    if expires_at < _utcnow():
         raise HTTPException(status_code=410, detail="Invite expired")
 
     # Check if user is already a member

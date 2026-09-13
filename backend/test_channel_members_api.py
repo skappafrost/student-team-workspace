@@ -6,6 +6,8 @@ visibility, /ai/search and /ai/summarize leakage, and the PATCH
 name/topic/type endpoint.
 """
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -55,9 +57,13 @@ def _restore_suite_db():
     This module rebinds the global engine (the WS handler reads the global
     session, not the get_db override), so it must not leak its file DB into
     later test modules (same pollution class as T014 review fixes).
+
+    Restores whatever DATABASE_URL the suite started with (Postgres URL on the
+    backend-pg CI job, the sqlite suite file otherwise) so later modules keep
+    testing the same dialect instead of leaking this module's file DB.
     """
     from conftest import TEST_DB_PATH
-    set_db_url(f"sqlite:///{TEST_DB_PATH}")
+    set_db_url(os.environ.get("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}"))
 
 
 # ---------------------------------------------------------------------------

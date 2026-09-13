@@ -82,8 +82,11 @@ def test_list_notifications_for_current_user(client, db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
-    assert data[0]["type"] == "mention"
-    assert data[1]["type"] == "file-upload"
+    # Order-insensitive: both rows share one created_at tick on SQLite
+    # (func.now() is second-precision there, microsecond on Postgres), so
+    # same-second ties fall back to storage order on SQLite but true
+    # created_at desc on Postgres. The API only guarantees the SET here.
+    assert {n["type"] for n in data} == {"mention", "file-upload"}
 
 
 def test_get_notification(client, db_session):

@@ -28,6 +28,39 @@ jobs:
         env:
           ENVIRONMENT: test
 
+  backend-pg:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: stw_test
+          POSTGRES_PASSWORD: stw_test
+          POSTGRES_DB: stw_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U stw_test -d stw_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run pytest (Postgres)
+        run: pytest -q
+        env:
+          ENVIRONMENT: test
+          DATABASE_URL: postgresql://stw_test:stw_test@localhost:5432/stw_test
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

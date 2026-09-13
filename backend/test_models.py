@@ -165,6 +165,9 @@ def test_migration_dedupes_and_enforces_unique():
 
     cfg = Config(os.path.join(os.path.dirname(__file__), "alembic.ini"))
     cfg.set_main_option("sqlalchemy.url", db_url)
+    # Save/restore (not pop): the backend-pg CI job provides a Postgres
+    # DATABASE_URL that later test modules still need.
+    _prev_db_url = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = db_url
     try:
         # 1) Schema at the revision BEFORE the T015 unique constraint.
@@ -220,7 +223,10 @@ def test_migration_dedupes_and_enforces_unique():
         assert count == 2
         engine.dispose()
     finally:
-        os.environ.pop("DATABASE_URL", None)
+        if _prev_db_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = _prev_db_url
         # Windows locks open sqlite files — retry after disposal if still held.
         for _ in range(3):
             try:
