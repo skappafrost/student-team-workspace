@@ -121,6 +121,7 @@ def require_permission(permission: str):
         "workspace.update": Role.ADMIN,
         "workspace.invite": Role.ADMIN,
         "workspace.manage_members": Role.ADMIN,
+        "workspace.view_audit_log": Role.ADMIN,
         # Member permissions
         "member.remove": Role.ADMIN,
         "member.update_role": Role.ADMIN,

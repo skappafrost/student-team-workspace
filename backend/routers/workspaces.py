@@ -109,6 +109,56 @@ async def list_workspace_activity(
     ]
 
 
+@router.get(
+    "/workspaces/{workspace_id}/audit-log", response_model=list[schemas.ActivityOut]
+)
+async def list_audit_log(
+    workspace_id: str,
+    verb: str | None = None,
+    target_type: str | None = None,
+    actor_id: str | None = None,
+    q: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: dict = Depends(require_permission("workspace.view_audit_log")),
+    db: Session = Depends(get_db),
+):
+    """Admin audit log: full activity history with filters. Admin or higher only."""
+    _get_workspace_or_404(db, workspace_id)
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    query = (
+        db.query(models.Activity, models.User.display_name)
+        .join(models.User, models.User.id == models.Activity.actor_id)
+        .filter(models.Activity.workspace_id == workspace_id)
+    )
+    if verb:
+        query = query.filter(models.Activity.verb == verb)
+    if target_type:
+        query = query.filter(models.Activity.target_type == target_type)
+    if actor_id:
+        query = query.filter(models.Activity.actor_id == actor_id)
+    if q:
+        query = query.filter(models.Activity.target_label.ilike(f"%{q}%"))
+    rows = (
+        query.order_by(models.Activity.created_at.desc()).offset(offset).limit(limit).all()
+    )
+    return [
+        schemas.ActivityOut(
+            id=a.id,
+            workspace_id=a.workspace_id,
+            actor_id=a.actor_id,
+            actor_name=name,
+            verb=a.verb,
+            target_type=a.target_type,
+            target_id=a.target_id,
+            target_label=a.target_label,
+            created_at=a.created_at,
+        )
+        for a, name in rows
+    ]
+
+
 @router.patch("/workspaces/{workspace_id}", response_model=schemas.WorkspaceDetailOut)
 async def update_workspace(
     workspace_id: str,

@@ -107,6 +107,13 @@ export const navGroups: NavGroup[] = [
         icon: 'settings',
         isActive: false,
         items: []
+      },
+      {
+        title: 'Audit Log',
+        url: '/dashboard/settings/audit-log',
+        icon: 'settings',
+        isActive: false,
+        items: []
       }
     ]
   }
