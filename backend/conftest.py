@@ -16,8 +16,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 # Use a file-based SQLite database for tests - it survives across connections.
+# Honor a CI-provided DATABASE_URL (the backend-pg job points this at Postgres)
+# so the same suite runs against both dialects; default stays SQLite.
 TEST_DB_PATH = "test_stw.db"
-os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
 
 # Import the app AFTER pinning DATABASE_URL so its engine targets the test DB.
 from app import app, create_access_token  # noqa: E402
