@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo } from 'react';
 import RenderResults from './render-result';
 import useThemeSwitching from './use-theme-switching';
+import { useSearchActions, SEARCH_CAP } from './use-search-actions';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 
 export default function KBar({ children }: { children: React.ReactNode }) {
@@ -61,6 +62,8 @@ export default function KBar({ children }: { children: React.ReactNode }) {
 }
 const KBarComponent = ({ children }: { children: React.ReactNode }) => {
   useThemeSwitching();
+  const router = useRouter();
+  const capped = useSearchActions((url) => router.push(url));
 
   return (
     <>
@@ -74,6 +77,9 @@ const KBarComponent = ({ children }: { children: React.ReactNode }) => {
               <RenderResults />
             </div>
             <div className='text-muted-foreground flex items-center gap-3 border-t px-3 py-2 text-xs'>
+              {capped ? (
+                <span className='text-amber-600'>Showing first {SEARCH_CAP} results</span>
+              ) : null}
               <span className='flex items-center gap-1'>
                 <Kbd>↑</Kbd>
                 <Kbd>↓</Kbd> navigate

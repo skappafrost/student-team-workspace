@@ -46,7 +46,7 @@
     "input-otp": "^1.4.2",
     "kbar": "^0.1.0-beta.48",
     "motion": "^11.18.2",
-    "next": "16.3.4",
+    "next": "16.3.5",
     "next-themes": "^0.4.6",
     "nextjs-toploader": "^3.9.17",
     "nuqs": "^2.8.9",
@@ -95,5 +95,8 @@
     "!(scripts)/**/*.{js,jsx,tsx,ts,css,less,scss,sass}": [
       "oxfmt --write"
     ]
+  },
+  "patchedDependencies": {
+    "next@16.3.5": "patches/next@16.3.5.patch"
   }
 }

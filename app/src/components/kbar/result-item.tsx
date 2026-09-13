@@ -1,7 +1,25 @@
 import type { ActionId, ActionImpl } from 'kbar';
+import { useKBar } from 'kbar';
 import * as React from 'react';
 import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/utils';
+
+function HighlightedName({ name }: { name: string }) {
+  const { searchQuery } = useKBar((state) => ({ searchQuery: state.searchQuery }));
+  const q = searchQuery.trim();
+  if (!q) return <span>{name}</span>;
+  const idx = name.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return <span>{name}</span>;
+  return (
+    <span>
+      {name.slice(0, idx)}
+      <mark className='bg-amber-200/60 text-inherit dark:bg-amber-500/40'>
+        {name.slice(idx, idx + q.length)}
+      </mark>
+      {name.slice(idx + q.length)}
+    </span>
+  );
+}
 
 const ResultItem = React.forwardRef(
   (
@@ -41,7 +59,7 @@ const ResultItem = React.forwardRef(
                     <span className='mr-2'>&rsaquo;</span>
                   </React.Fragment>
                 ))}
-              <span>{action.name}</span>
+              <HighlightedName name={action.name} />
             </div>
             {action.subtitle && (
               <span className='text-muted-foreground text-xs'>{action.subtitle}</span>

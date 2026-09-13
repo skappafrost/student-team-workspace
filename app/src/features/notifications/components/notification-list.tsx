@@ -132,13 +132,16 @@ export function NotificationList({ filter = 'all' }: NotificationListProps) {
               }
             }}
             className={`${
-              notification.status === 'unread' ? 'border-l-4 border-l-sky-500 bg-muted/40' : ''
+              notification.status === 'unread' ? 'bg-muted/40' : ''
             } ${notification.link ? 'hover:bg-accent/50 cursor-pointer transition-colors' : ''}`}
           >
             <CardContent className='p-4'>
               <div className='flex items-start justify-between gap-4'>
                 <div className='min-w-0 flex-1 space-y-1'>
                   <div className='flex items-center gap-2'>
+                    {notification.status === 'unread' && (
+                      <span aria-hidden className='size-1.5 shrink-0 rounded-full bg-sky-500' />
+                    )}
                     <h3
                       className={
                         notification.status === 'unread'

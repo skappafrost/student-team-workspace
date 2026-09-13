@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useQueryState } from 'nuqs';
 import PageContainer from '@/components/layout/page-container';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +17,11 @@ import NewTaskDialog from './new-task-dialog';
 
 export default function KanbanViewPage() {
   const { projects, isLoading } = useProjects();
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  // Selected project lives in the URL so kbar search results can deep-link
+  // straight into a project's board (/dashboard/kanban?project=<id>).
+  const [selectedProjectId, setSelectedProjectId] = useQueryState('project', {
+    defaultValue: ''
+  });
 
   return (
     <PageContainer

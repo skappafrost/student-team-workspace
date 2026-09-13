@@ -1,0 +1,16 @@
+diff --git a/dist/client/components/instant-validation/impl.js b/dist/client/components/instant-validation/impl.js
+index fa99037b2d55a2f9c49cc55d31467e34f05537a0..084e16bf9e684f4f1e38fb8b5d2185319993aa56 100644
+--- a/dist/client/components/instant-validation/impl.js	
++++ b/dist/client/components/instant-validation/impl.js
+@@ -28,7 +28,10 @@ _export(exports, {
+         return _boundaryimpl.SlotMarker;
+     }
+ });
+-const _boundaryimpl = require("../../../server/app-render/instant-validation/boundary-impl");
++// PATCH(LVT): Windows turbopack never applies the impl->impl.browser alias
++// (alias keys use path.join backslashes), so the server impl landed in browser
++// chunks and threw E1117. Delegate explicitly at runtime instead.
++const _boundaryimpl = typeof window === "undefined" ? require("../../../server/app-render/instant-validation/boundary-impl") : require("./impl.browser");
+ 
+ if ((typeof exports.default === 'function' || (typeof exports.default === 'object' && exports.default !== null)) && typeof exports.default.__esModule === 'undefined') {
+   Object.defineProperty(exports.default, '__esModule', { value: true });
