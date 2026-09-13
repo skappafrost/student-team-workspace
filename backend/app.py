@@ -355,6 +355,7 @@ app.add_middleware(
 )
 
 app.add_middleware(logging_mw.RequestLoggingMiddleware)
+app.add_middleware(rate_limit.DefaultWriteLimitMiddleware)
 
 @app.get("/health")
 async def health():

@@ -11,6 +11,11 @@ Buckets (per the task spec):
   - upload:   20/hour per user
   - ai:       30/hour per user
 
+Fallback (T4-E5): every other POST/PATCH/DELETE route shares
+``DEFAULT_WRITE_LIMIT`` per (identity, route group) via
+:class:`DefaultWriteLimitMiddleware` (one ``add_middleware`` line in app.py;
+the import line already exists, so wiring stays within budget).
+
 Notes / deliberate trade-offs:
   - ``register`` is keyed per (IP, email) rather than bare IP: the existing
     suite performs ~17 registrations from a single test-client IP, so a bare
@@ -39,6 +44,9 @@ import threading
 import time
 
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 # ---------------------------------------------------------------------------
 # Limits: (max_hits, window_seconds)
@@ -49,6 +57,11 @@ LOGIN_EMAIL_LIMIT = (5, 60)
 REGISTER_LIMIT = (5, 3600)
 UPLOAD_LIMIT = (20, 3600)
 AI_LIMIT = (30, 3600)
+#: Fallback cap (T4-E5) for mutating routes without a specific limiter:
+#: 120 writes/min per (identity, route group). Generous on purpose -- it
+#: only bites scripted floods, never interactive use; the sensitive families
+#: above keep their own tighter buckets.
+DEFAULT_WRITE_LIMIT = (120, 60)
 
 # ---------------------------------------------------------------------------
 # Core sliding-window store (stdlib only)
@@ -211,3 +224,105 @@ async def upload_limit(request: Request) -> None:
 async def ai_limit(request: Request) -> None:
     """30/hour per user on POST /ai/summarize (ai_search skipped: line budget)."""
     await _enforce([("ai", _user_key(request), *AI_LIMIT)])
+
+
+# ---------------------------------------------------------------------------
+# Fallback write limiter (T4-E5)
+# ---------------------------------------------------------------------------
+
+_WRITE_METHODS = frozenset({"POST", "PATCH", "DELETE"})
+
+#: Exact (method, path) pairs already guarded by a specific limiter above;
+#: the middleware skips them so a request is never double-counted.
+_SPECIFIC_LIMIT_ROUTES = frozenset(
+    {
+        ("POST", "/auth/login"),
+        ("POST", "/auth/register"),
+        ("POST", "/ai/summarize"),
+    }
+)
+
+#: Substring -> route group, checked in order (first hit wins; nested hints
+#: come before the parents they sit under, e.g. /messages before /channels).
+#: Nested writes such as POST /workspaces/{id}/channels belong to their
+#: feature group, not to "workspaces", so one busy feature cannot starve
+#: another.
+_WRITE_GROUP_HINTS = (
+    ("/invites", "invites"),
+    ("/members", "members"),
+    ("transfer-ownership", "workspaces"),
+    ("/messages", "messages"),
+    ("/channels", "channels"),
+    ("/events", "events"),
+    ("/tasks", "tasks"),
+    ("/projects", "projects"),
+    ("/pages", "pages"),
+    ("/files", "files"),
+    ("/notifications", "notifications"),
+    ("/ai/", "ai"),
+)
+
+
+def _write_group(method: str, path: str) -> str | None:
+    """Route group for the fallback limiter, or None when no fallback check
+    applies (safe method, or already covered by a specific limiter)."""
+    method = method.upper()
+    if method not in _WRITE_METHODS:
+        return None
+    norm = path.rstrip("/") or "/"
+    if (method, norm) in _SPECIFIC_LIMIT_ROUTES:
+        return None
+    if (
+        method == "POST"
+        and norm.startswith("/workspaces/")
+        and norm.endswith("/files")
+    ):
+        return None  # upload_limit covers POST /workspaces/{id}/files
+    for hint, group in _WRITE_GROUP_HINTS:
+        if hint in norm:
+            return group
+    seg = norm.lstrip("/").split("/", 1)[0]
+    return seg or "root"
+
+
+def _fallback_key(request: Request) -> str:
+    """Identity key for the fallback bucket: stable per user, never for auth.
+
+    Prefers the JWT ``sub`` (unverified decode, rate-limit key only), then the
+    legacy ``X-Test-User-Id`` header some older tests still carry, then the
+    client IP -- so tests acting as different users never share a bucket
+    while anonymous callers still share a per-IP one.
+    """
+    sub = _jwt_sub_unverified(request)
+    if sub:
+        return f"user:{sub}"
+    test_user = request.headers.get("X-Test-User-Id", "").strip()
+    if test_user:
+        return f"testuser:{test_user}"
+    return f"ip:{_client_ip(request)}"
+
+
+class DefaultWriteLimitMiddleware(BaseHTTPMiddleware):
+    """Fallback 429 net for mutating routes without a specific limiter.
+
+    Runs before routing and never touches the body: identity comes from
+    headers/cookies only. Denials answer 429 + JSON ``detail`` directly (a
+    middleware sits outside FastAPI's HTTPException handlers, so raising
+    there would 500 instead). ``RATELIMIT_ENABLED=0`` still disables
+    everything via :func:`check`.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        group = _write_group(request.method, request.url.path)
+        if group is None:
+            return await call_next(request)
+        allowed, retry_after = check(
+            "write", f"{_fallback_key(request)}:{group}", *DEFAULT_WRITE_LIMIT
+        )
+        if allowed:
+            return await call_next(request)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded for write:{group}"},
+            headers={"Retry-After": _retry_after_header(retry_after)},
+        )
