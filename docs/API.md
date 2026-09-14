@@ -9,10 +9,10 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 - **Register**: `POST /auth/register` `{email, password}` → `201` + `session_token` httpOnly cookie + `TokenOut` body.
 - **Login**: `POST /auth/login` `{email, password}` → `200` + `session_token` httpOnly cookie + `TokenOut` body (`access_token`, `refresh_token`, `token_type`, `user`).
 - **Every request** after that sends the cookie. Browsers do this automatically; `fetch` from the Next.js app goes through `/api/*` BFF route handlers, which read the cookie and forward it as `Cookie: session_token=...` to the backend.
-- **Sessions are revocable**: each login mints an access token carrying a `jti` backed by an `auth_sessions` row. `POST /auth/logout` revokes the current session; `POST /auth/logout-all` revokes every session for the user and returns `{"ok": true, "revoked": <count>}`. A revoked token gets `401` everywhere, including WebSocket auth. Logout is idempotent on an already-dead token.
-- `GET /auth/me` → current user profile (`AuthUser`: `id`, `name`, `email`, `role`).
-- Access tokens live 1 week (`ACCESS_TOKEN_EXPIRE_MINUTES = 10080`); refresh tokens 7 days.
-- Tests authenticate with real JWTs via the `conftest.py` fixtures (`make_user`, `as_user`); the legacy `X-Test-User-*` bypass is gated to test/dev environments.
+- **Sessions are revocable (S02)**: each login creates an `auth_sessions` row keyed by the JWT `jti`. `POST /auth/logout` revokes the current session; `POST /auth/logout-all` revokes all of the user's sessions. A revoked token gets `401` everywhere, including WebSocket auth.
+- **Refresh tokens are revocable + single-use (TA1-1)**: the refresh token returned by register/login shares the same `auth_sessions` row as the access token, so logout/logout-all also kill the refresh token. `POST /auth/refresh` rotates it into a fresh pair; replaying an already-rotated refresh token revokes the whole rotation family (reuse = theft signal).
+- `GET /auth/me` → current user profile.
+- Tests can bypass JWT with `X-Test-User-Id` / `X-Test-User-Role` headers (test-only path).
 
 ## Conventions
 
@@ -30,10 +30,11 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/auth/register` | `201`; creates user + session cookie |
-| POST | `/auth/login` | `200`; session cookie + tokens |
-| POST | `/auth/logout` | Revokes current session; clears cookie; idempotent |
-| POST | `/auth/logout-all` | Revokes all sessions; returns `revoked` count |
+| POST | `/auth/register` | Creates user + session cookie |
+| POST | `/auth/login` | Session cookie + tokens |
+| POST | `/auth/refresh` | Rotates a refresh token into a fresh pair (single-use; replay revokes the family) |
+| POST | `/auth/logout` | Revokes current session |
+| POST | `/auth/logout-all` | Revokes all sessions (sign out everywhere) |
 | GET | `/auth/me` | Current user |
 | GET | `/users/me/tasks` | My tasks across workspaces; `?due=overdue\|today\|week\|later\|none`, `?status=` |
 | GET | `/users/me/export` | JSON download of all my data (attachment) |
@@ -167,33 +168,21 @@ The Next.js app never calls the backend directly from the browser. `app/src/app/
 | `GET /api/activity` | `GET /workspaces/{first}/activity` |
 | `GET /api/account` / `DELETE /api/account` | `GET /users/me/export` / `DELETE /users/me` |
 
+The BFF resolves "current workspace" as the first entry of `GET /workspaces` — if you add multi-workspace switching, that resolution is the place to change.
+
+## Token refresh (TA1-1)
+
+`POST /auth/refresh` with JSON body `{"refresh_token": "<jwt>"}` → same shape as login: `{access_token, refresh_token, token_type: "bearer", user}` (+ rotated `session_token` httpOnly cookie).
+
+Rotation policy:
+
+- **Bound sessions**: a refresh token carries the same `jti` as the access token minted by the same login/register, both backed by one `auth_sessions` row. Consequence: `POST /auth/logout`, `POST /auth/logout-all` and account deletion revoke the refresh token too. Refresh tokens no longer survive logout.
+- **Single use**: each successful `/auth/refresh` marks the old row rotated+revoked and mints a successor row with a fresh `jti`, chained to the same `family_id`. The presented refresh token can never be used twice.
+- **Reuse detection / family invalidation**: replaying an already-rotated refresh token is treated as token theft — the entire rotation family (every successor row, every access+refresh pair minted from that login) is revoked and the request gets `401`. A concurrent double-spend of the same refresh token can only ever let one request win; the loser triggers the family kill.
+- **Plain 401, no family action**: expired, malformed, cross-user (signed `sub` ≠ row owner), unknown `jti`, revoked-but-not-rotated tokens, and pre-TA1-1 jti-less refresh tokens. An access token presented as a refresh token is likewise `401` (the `type` claim must be `refresh`).
+- Response shapes of existing endpoints are unchanged; `/auth/refresh` is a new endpoint and defines its own shape (deliberately identical to login's `TokenOut`).
+
 ## Changelog
 
-Hardening work shipped on `harden/*` branches (draft PRs, reviewer squash-merges). Status as of 16/09/2026.
+- **TA1-1 (harden/auth-refresh)**: added `POST /auth/refresh` with single-use rotation and family invalidation on replay; refresh tokens now share the session row (`jti`) with their access token, so logout/logout-all revoke them; new `auth_sessions.family_id` + `auth_sessions.rotated` columns (migration `a1f1_refresh_rotation`). No existing endpoint changed shape.
 
-**Landed on `main`** (squash-merged, in the 45-path surface above):
-- **Role matrix + RBAC** (T002, #5) — cross-workspace escalation fixed; `require_permission` map in `authorization.py`.
-- **Private channels** (T012, #8) — real `channel_members` gate on private channels (messages, reactions, WS join).
-- **SQLite FK enforcement** (T014, #9) — `PRAGMA foreign_keys=ON`.
-- **File delete + orphan sweeper** (T040, #7) — delete removes blob + row; `maintenance.py purge-orphans` dry-run sweeper.
-- **bcrypt 72-byte** (T009, #6) — passwords over 72 bytes rejected with 422 instead of silent truncation.
-- **Test-auth gate** (T003, #1) — `X-Test-User-*` bypass confined to test/dev envs; test fixtures moved to real JWT (T004, #2).
-- **Rate limiting** (T3-B02, #78) — sliding window, per-route limiters + fallback write cap.
-- **Request logging + healthz** (T3-B03, #79) — request ids, user ids, token-scrubbed logs, `GET /healthz` with db latency.
-- **Postgres CI** (T4-E2, #88) — `backend-pg` job; SQLite/PG parity enforced.
-- **Audit log** — `GET /workspaces/{id}/audit-log`, admin+, with filters.
-
-**Open `harden/*` PRs** (not yet on `main`; endpoints they add are documented above **only** where the branch is listed as merged — treat the rest as pending):
-- #123 `harden/auth-refresh` — `POST /auth/refresh` with single-use rotation + family invalidation.
-- #124 `harden/jwt-secret-governance` — refuse startup with the default JWT secret outside dev/test.
-- #126 `harden/jti-request-session` — jti revocation routed through the request DB session.
-- #128 `harden/upload-ingress` — sanitize, size cap, allow-list, executable sniffing on uploads.
-- #130 `harden/uploads-read-auth` — authenticated `/uploads` read path.
-- #132 `harden/storage-quota` — per-workspace storage quota at upload time.
-- #134 `harden/like-escape-channels-enum` — LIKE wildcard escaping; channel `type` validated.
-- #138 `harden/message-fanout` — notification fan-out on message create (DM peer, @mentions, thread replies).
-- #148 `harden/nplus1-indexes` — N+1 elimination + FK index plan.
-- #149 `harden/observability` — slow-query logging, 5xx counter, `/readyz` readiness.
-- #159 `harden/pagination-contract` — uniform `limit`/`offset` on list endpoints.
-
-**Docs-only regeneration note**: this file was rewritten for main @ bca27ce. When a `harden/*` PR above merges, add its row here and drop it from the open list — that is the whole maintenance burden.
