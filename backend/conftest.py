@@ -21,6 +21,11 @@ from sqlalchemy.orm import sessionmaker
 TEST_DB_PATH = "test_stw.db"
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
 
+# Pin the suite to test mode like CI does (ENVIRONMENT: test): app.lifespan's
+# JWT-secret governance gate (TA1-2) refuses to boot with the default secret
+# outside {test, dev}, so tests entering `with TestClient(app)` need this.
+os.environ.setdefault("ENVIRONMENT", "test")
+
 # Import the app AFTER pinning DATABASE_URL so its engine targets the test DB.
 from app import app, create_access_token  # noqa: E402
 from database import engine, get_db, Base  # noqa: E402

@@ -16,7 +16,7 @@ endif
 
 dev:
 	docker compose -f backend/docker-compose.yml up -d postgres
-	cd backend && $(BACKEND_PY) -m uvicorn app:app --reload --port 8000 & \
+	cd backend && ENVIRONMENT=dev $(BACKEND_PY) -m uvicorn app:app --reload --port 8000 & \
 	cd app && bun run dev:webpack
 
 test:

@@ -8,6 +8,11 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The shipped default JWT secret (TA1-2). It is PUBLIC knowledge (lives in the
+# repo), so signing tokens with it means anyone can forge a session. Startup
+# refuses to boot with it outside dev/test mode — see app.lifespan.
+JWT_SECRET_KEY_DEFAULT = "super-secret-change-me-in-production"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -16,7 +21,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./stw.db"
 
     # Auth / JWT
-    jwt_secret_key: str = "super-secret-change-me-in-production"
+    jwt_secret_key: str = JWT_SECRET_KEY_DEFAULT
     cookie_secure: bool = False
 
     # CORS — comma-separated list, or empty for local defaults.
