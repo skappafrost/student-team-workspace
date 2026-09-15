@@ -20,7 +20,10 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 - **Error envelope**: FastAPI default — `{"detail": "human-readable message"}` with the right status code (400 validation, 401 unauthenticated, 403 forbidden, 404 missing, 409 conflict, 422 bad payload, 429 rate-limited with `Retry-After`). Validation errors use `{"detail": [{"loc": [...], "msg": ..., "type": ...}]}`.
 - **Rate limiting**: login 10/min per IP + 5/min per email; register 5/hour; upload 20/hour; AI 30/hour; all other write routes 120/min per identity (sliding window; `429` + `Retry-After`). Set `RATELIMIT_ENABLED=0` to disable.
 - **IDs**: UUID strings. Timestamps: ISO-8601 UTC.
-- **Pagination**: collection endpoints accept `?limit=` and `?offset=` (see [Pagination](#pagination)).
+The BFF resolves "current workspace" as the first entry of `GET /workspaces` — if you add multi-workspace switching, that resolution is the place to change.
+
+## Changelog
+
 
 ## Endpoint map
 
@@ -66,12 +69,14 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/channels` | GET takes `?limit= ?offset=` |
-| GET | `/channels/{channel_id}/members` | `?limit= ?offset=` |
-| GET, POST | `/channels/{id}/messages` | GET: `?q=` search, `?limit= ?offset=`; new messages broadcast over WS |
-| PATCH, DELETE | `/messages/{id}` | |
-| POST | `/messages/{id}/reactions` | Toggle emoji reaction |
-| GET, POST | `/workspaces/{id}/dms` | Direct messages; GET takes `?limit= ?offset=` |
+| GET, POST | `/workspaces/{id}/channels` | POST validates `type` against `general/project/private` (422 otherwise; TA3-2) |
+| PATCH | `/channels/{id}` | Manager (admin or creator) only |
+| GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`) |
+| DELETE | `/channels/{id}/members/{user_id}` | Manager only |
+| GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`); POST `201` broadcasts over WS + creates notifications |
+| PATCH, DELETE | `/messages/{id}` | Author only |
+| POST | `/messages/{id}/reactions` | Body `{emoji}`; returns `[ReactionSummary]` |
+| GET, POST | `/workspaces/{id}/dms` | Direct messages; body `{user_id}` |
 
 ### Calendar events
 
@@ -86,8 +91,11 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/pages` | `?flat=`, `?search=`, `?recent=`, `?limit=` (recent/search only) |
-| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | Slug unique per workspace |
+| GET, POST | `/workspaces/{id}/pages` | GET: `?flat=true` tree-vs-flat, `?search=` substring filter (literal `%`/`_`, TA3-2), `?recent=true`, `?limit=` (default 10, max 100) |
+| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | POST/GET `201`; PATCH/DELETE admin+ or page creator; slug unique per workspace |
+| GET | `/workspaces/{id}/pages/{page_id}/backlinks` | Pages linking to this one |
+| GET | `/workspaces/{id}/pages/{page_id}/history` | Versions, newest first |
+| POST | `/workspaces/{id}/pages/{page_id}/restore/{version}` | Restore a version |
 
 ### Files
 
@@ -275,6 +283,8 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 - #148 `harden/nplus1-indexes` — N+1 elimination + FK index plan.
 - #149 `harden/observability` — slow-query logging, 5xx counter, `/readyz` readiness.
 - #159 `harden/pagination-contract` — uniform `limit`/`offset` on list endpoints.
-- `harden/ops-maintenance` — retention policy + safe purge + integrity check + `manage.py maintenance` CLI. No API change (CLI + `retention.py` only); runbook in `docs/OPS.md`.
 
 **Docs-only regeneration note**: this file was rewritten for main @ bca27ce. When a `harden/*` PR above merges, add its row here and drop it from the open list — that is the whole maintenance burden.
+### TA3-2 — ilike wildcard escaping + channels type validation
+- **Search filters now treat `%` and `_` as literal characters.** `GET /workspaces/{id}/pages?search=`, `GET /channels/{id}/messages?q=` and `GET /workspaces/{id}/audit-log?q=` previously interpolated the raw term into a `%...%` SQL LIKE pattern, so a user searching `50%` also matched `50 dollars` (wildcard `%`) and `A_B` matched `AxB` (wildcard `_`). A shared helper (`backend/query_utils.py`: `escape_like`/`contains_pattern` + `escape=LIKE_ESCAPE`) is now applied at every like/ilike site. Behavior change: searches containing `%`/`_` return exact literal matches on both SQLite and PostgreSQL; plain-text searches are unchanged (still case-insensitive).
+- **`POST /workspaces/{id}/channels` validates `type`** against the enum `general|project|private` at the schema layer — unknown types are rejected with 422 (FastAPI's standard validation error envelope) instead of being stored. Valid payloads and the `general` default are unchanged. (Covered by regression tests in `backend/test_query_escapes.py`.)
