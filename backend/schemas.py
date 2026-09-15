@@ -447,6 +447,8 @@ NotificationType = Literal[
     "task-assigned",
     "workspace-invite",
     "message",
+    "dm",
+    "thread",
     "other",
 ]
 

@@ -79,8 +79,8 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/channels` | POST validates `type` against `general/project/private` (422 otherwise; TA3-2) |
-| GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`); new messages broadcast over WS |
+| GET, POST | `/workspaces/{id}/channels` | |
+| GET, POST | `/channels/{id}/messages` | New messages broadcast over WS; POST fans out notifications (DM peer, @mentions, thread parent — TA4-1) |
 | PATCH, DELETE | `/messages/{id}` | |
 | POST | `/messages/{id}/reactions` | Toggle emoji reaction |
 | GET, POST | `/workspaces/{id}/dms` | Direct messages |
@@ -211,7 +211,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 ## Changelog
 
-### TA3-2 — ilike wildcard escaping + channels type validation
+### TA4-1 — message notification fan-out (additive)
 
-- **Search filters now treat `%` and `_` as literal characters.** `GET /workspaces/{id}/pages?search=`, `GET /channels/{id}/messages?q=` and `GET /workspaces/{id}/audit-log?q=` previously interpolated the raw term into a `%...%` SQL LIKE pattern, so a user searching `50%` also matched `50 dollars` (wildcard `%`) and `A_B` matched `AxB` (wildcard `_`). A shared helper (`backend/query_utils.py`: `escape_like`/`contains_pattern` + `escape=LIKE_ESCAPE`) is now applied at every like/ilike site. Behavior change: searches containing `%`/`_` return exact literal matches on both SQLite and PostgreSQL; plain-text searches are unchanged (still case-insensitive).
-- **`POST /workspaces/{id}/channels` validates `type`** against the enum `general|project|private` at the schema layer — unknown types are rejected with 422 (FastAPI's standard validation error envelope) instead of being stored. Valid payloads and the `general` default are unchanged. (Covered by regression tests in `backend/test_query_escapes.py`.)
+- `POST /channels/{id}/messages` now creates notifications for other users, using the existing `notify()` service and `NotificationOut` shape (no response-body changes): **DM peer** (type `dm`) when the channel is a DM; **@mentions** (type `mention`) parsed conservatively — a token matches only the FULL display name of a workspace member (no substring/prefix matches; non-members are never resolved); **thread parent author** (type `thread`) when `parent_id` is set. The author never self-notifies, and a user hit by several triggers in one message is notified exactly once (DM wins over mention wins over thread). New notification types `dm` and `thread` are added to `schemas.NotificationType` — additive enum widening; existing types and all payload shapes are unchanged.
+- There is no per-user quiet/DND state on the `Notification` model yet (only `read`), so quiet-hours suppression is intentionally out of scope here.
