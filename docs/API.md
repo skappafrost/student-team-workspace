@@ -99,8 +99,11 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/files` | Multipart upload; `?project_id=`/`?task_id=`/`?message_id=` filters on GET |
-| GET, PATCH, DELETE | `/files/{id}` | PATCH/DELETE admin+ or uploader; content served from `/uploads/...`; guests cannot upload |
+| GET, POST | `/workspaces/{id}/files` | Multipart upload; optional `project_id`/`task_id`/`message_id` links |
+| GET, PATCH, DELETE | `/files/{id}` | File metadata |
+| GET | `/uploads/{storage_key}` | File content download (member+ role; `attachment` disposition) |
+
+**Uploads are authenticated (Stage 2.2)**: `GET /uploads/{storage_key}` (the `url` field every file record returns) used to be a bare static mount — anyone on the network with a URL could read workspace bytes. It now runs the same access policy as `GET /files/{id}`: anonymous → 401, non-member → 403, guest → 403, revoked session → 401, unknown key → 404. The URL shape is unchanged, so the frontend `downloadFile` path keeps working as-is; curl users must send the session cookie / `Authorization` header.
 
 ### Notifications
 
