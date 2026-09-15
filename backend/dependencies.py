@@ -6,13 +6,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
-from fastapi import HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
 
 import models
 from config import settings
+from database import get_db
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
@@ -90,102 +91,18 @@ def revoke_all_sessions(db, user_id: str) -> int:
     return len(rows)
 
 
-def _revoke_family(db, family_id: str) -> int:
-    """Revoke every unrevoked row in a rotation family (TA1-1 replay guard)."""
-    import models
+def _is_jti_revoked(db, jti: str) -> bool:
+    """Revocation check against auth_sessions on the REQUEST's session.
 
-    rows = (
-        db.query(models.AuthSession)
-        .filter(models.AuthSession.family_id == family_id, models.AuthSession.revoked_at.is_(None))
-        .all()
-    )
-    for row in rows:
-        row.revoked_at = _utcnow()
-    db.flush()
-    return len(rows)
-
-
-def rotate_session(db, jti: str, user_id: str) -> tuple[str, str, bool] | None:
-    """Atomically rotate a refresh session into a fresh pair (TA1-1).
-
-    Returns ``(access_token, refresh_token, replayed)`` — ``replayed`` is
-    True when the presented token was already rotated (reuse detection):
-    in that case the whole family is revoked and nothing is issued, and the
-    caller MUST answer 401. Returns ``None`` when no live row exists for
-    ``jti`` (unknown/expired/revoked): also a 401 for the caller.
-
-    The claim is a conditional UPDATE (``revoked_at IS NULL AND rotated_at IS
-    NULL`` on the jti row) so two concurrent refreshes with the same token
-    cannot both win: exactly one rotates, the other sees the row already
-    rotated and triggers family invalidation.
+    Single DB session per request (TA1-3): the caller passes the injected
+    get_db session (or the WS handshake session), so the check shares the
+    request's transaction instead of opening a second connection.
+    Missing row counts as revoked.
     """
     import models
-    from sqlalchemy import update
 
-    row = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
-    if row is None:
-        return None
-    if row.user_id != user_id:
-        return None  # signed for another subject: never reveal state
-
-    if row.rotated:
-        # Reuse detection: this token was already rotated once. Reuse of a
-        # rotated token is the theft signal -> kill the entire family.
-        family = row.family_id or row.id
-        _revoke_family(db, family)
-        db.commit()
-        return ("", "", True)
-
-    if row.revoked_at is not None:
-        # Explicitly revoked (logout / logout-all / family kill), never
-        # rotated: plain 401, no family action.
-        return None
-
-    # Single-use claim: conditional UPDATE (id + still-live + not-yet-rotated)
-    # so two concurrent refreshes with the same token cannot both win —
-    # exactly one rotates; the loser re-reads, sees rotated=True above and
-    # triggers family invalidation.
-    claimed = (
-        update(models.AuthSession)
-        .where(
-            models.AuthSession.id == row.id,
-            models.AuthSession.revoked_at.is_(None),
-            models.AuthSession.rotated.is_(False),
-        )
-        .values(rotated=True, revoked_at=_utcnow())
-        .execution_options(synchronize_session=False)
-    )
-    result = db.execute(claimed)
-    if result.rowcount == 0:
-        # Lost the claim race to a concurrent refresh: treat as replay
-        # (reuse detection) and revoke the whole family.
-        db.rollback()
-        row = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
-        if row is not None and row.rotated:
-            family = row.family_id or row.id
-            _revoke_family(db, family)
-            db.commit()
-            return ("", "", True)
-        return None
-
-    # Won the claim: mint the successor row (same family, fresh jti).
-    family_id = row.family_id or row.id
-    access_token, refresh_token = create_session_pair(user_id, db, family_id)
-    db.commit()
-    return access_token, refresh_token, False
-
-
-def _is_jti_revoked(jti: str) -> bool:
-    """Revocation check against auth_sessions; missing row counts as revoked."""
-    import models
-    from database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        session = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
-        return session is None or session.revoked_at is not None
-    finally:
-        db.close()
+    session = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
+    return session is None or session.revoked_at is not None
 
 
 def create_refresh_token(subject: str, jti: str | None = None) -> str:
@@ -261,7 +178,12 @@ def _token_from_query(query: dict[str, str]) -> str | None:
     return query.get("session_token") or None
 
 
-def _decode_token(token: str) -> dict | None:
+def _decode_token(token: str, db) -> dict | None:
+    """Decode+verify an access token, checking jti revocation on ``db``.
+
+    ``db`` is the request's session (the same one the endpoint transacts
+    on), keeping one DB session per request (TA1-3).
+    """
     try:
         payload = jwt.decode(token, _get_secret(), algorithms=[ALGORITHM])
         if payload.get("type") != "access":
@@ -269,7 +191,7 @@ def _decode_token(token: str) -> dict | None:
         # Tokens minted via create_session carry a jti; revoked/unknown jti = dead.
         # Legacy jti-less tokens (tests) pass through.
         jti = payload.get("jti")
-        if jti and _is_jti_revoked(jti):
+        if jti and _is_jti_revoked(db, jti):
             return None
         return payload
     except JWTError:
@@ -304,13 +226,17 @@ def _warn_test_auth_once() -> None:
     )
 
 
-def get_current_user(request: Request) -> dict:
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> dict:
     """Return the currently authenticated user from JWT session cookie.
 
     Falls back to the legacy X-Test-User-* headers ONLY when the test-only
     bypass is explicitly enabled (STW_TEST_AUTH=1 + ENVIRONMENT test/dev, T003).
     The bypass is never active in normal/CI runs; the suite authenticates with
     real JWTs.
+
+    The get_db dependency is what makes the jti revocation check share the
+    request's session (TA1-3): FastAPI resolves it once per request, ahead
+    of any endpoint Depends(get_db), so both see the SAME session.
     """
     from authorization import Role
 
@@ -328,7 +254,7 @@ def get_current_user(request: Request) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    payload = _decode_token(token)
+    payload = _decode_token(token, db)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
@@ -341,10 +267,10 @@ def get_current_user(request: Request) -> dict:
     return {"id": user_id, "name": "", "email": "", "role": Role.MEMBER.value}
 
 
-def _ws_user_from_token(token: str) -> dict:
+def _ws_user_from_token(token: str, db) -> dict:
     from authorization import Role
 
-    payload = _decode_token(token)
+    payload = _decode_token(token, db)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     user_id = payload.get("sub")
