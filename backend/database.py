@@ -3,6 +3,7 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+import logging_mw
 from config import settings
 
 DATABASE_URL = settings.database_url
@@ -25,6 +26,9 @@ def _make_engine(url: str):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
+    # TA6-1: every engine the app builds (including test rebinds via
+    # set_db_url) gets slow-query logging; see logging_mw for the events.
+    logging_mw.attach_slow_query_logging(engine)
     return engine
 
 
