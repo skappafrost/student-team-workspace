@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi import File as FileParam
-from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
@@ -302,6 +302,34 @@ def _validate_link_targets(
             raise HTTPException(status_code=422, detail="Message is not in this workspace")
 
 
+def _enforce_workspace_storage_quota(db: Session, workspace_id: str, incoming_size: int) -> None:
+    """Reject uploads that would push a workspace over its storage quota (TA2-3).
+
+    Counts stored bytes as SUM(files.size_bytes) for the workspace — i.e. what
+    the API tracks, not raw disk usage. Orphaned bytes (no row) do not count
+    until `python -m maintenance purge-orphans` reclaims them (see the quota
+    section in docs/API.md). Enforced before any bytes hit disk.
+    """
+    quota_mb = settings.max_workspace_storage_mb
+    if quota_mb <= 0:
+        return
+    quota_bytes = quota_mb * 1024 * 1024
+    used = (
+        db.query(func.sum(models.File.size_bytes))
+        .filter(models.File.workspace_id == workspace_id)
+        .scalar()
+    ) or 0
+    if used + incoming_size > quota_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Workspace storage quota exceeded: this upload ({incoming_size} bytes) "
+                f"would bring the workspace to {used + incoming_size} bytes, over the "
+                f"{quota_mb} MB limit. Delete files to free space."
+            ),
+        )
+
+
 @router.post(
     "/workspaces/{workspace_id}/files",
     status_code=201,
@@ -344,6 +372,8 @@ async def upload_file(
         raise HTTPException(status_code=422, detail="File is empty")
     # 4) reject executable magic signatures behind allowed extensions
     _check_not_executable(content)
+
+    _enforce_workspace_storage_quota(db, workspace_id, size)
 
     mime_type = (
         file.content_type or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
