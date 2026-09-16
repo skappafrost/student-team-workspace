@@ -17,12 +17,19 @@ from database import get_db
 from dependencies import (
     _get_channel_or_404,
     _get_workspace_or_404,
-    _token_from_cookies,
-    _token_from_query,
-    _ws_user_from_token,
+    _ws_resolve_user,
     get_current_user,
 )
-from ws import _ws_broadcast, _ws_room_join, _ws_room_leave
+from ws import (
+    WS_FORBIDDEN,
+    WS_NOT_FOUND,
+    WS_SUBPROTOCOL,
+    _ws_broadcast_channel,
+    _ws_room_join,
+    _ws_room_key_channel,
+    _ws_room_key_user,
+    _ws_room_leave,
+)
 
 router = APIRouter()
 
@@ -216,42 +223,55 @@ async def list_dms(
 
 @router.websocket("/ws/channels/{channel_id}")
 async def channel_websocket(websocket: WebSocket, channel_id: str):
-    await websocket.accept()
+    """Authenticated channel socket: chat frames in, broadcast frames out.
 
-    # Authenticate using cookie or query param.
-    token = _token_from_cookies(websocket.cookies) or _token_from_query(websocket.query_params)
-    if not token:
-        await websocket.close(code=1008, reason="Missing session_token")
+    Handshake order matters: every rejection happens BEFORE ``accept()`` so
+    the client observes a refused upgrade with a documented 4xxx code
+    (see docs/API.md) instead of a session that opens and instantly dies.
+
+    Auth precedence: negotiated ``stw-ws.<ticket>`` subprotocol (one-shot
+    ticket from ``POST /auth/ws-ticket``, never in a URL) > ``session_token``
+    cookie (browser default) > ``?session_token=`` query (test/legacy).
+    """
+    user, close_code, close_reason, subproto = _ws_resolve_user(websocket)
+    if user is None:
+        await websocket.close(code=close_code, reason=close_reason or "")
         return
 
-    # Single DB session for the whole handshake (TA1-3): token revocation
-    # check and membership lookups share one session, closed before the
-    # long-lived receive loop starts.
+    # Validate channel + membership BEFORE joining any room.
     db = next(get_db())
     try:
         try:
-            user = _ws_user_from_token(token, db)
-        except HTTPException:
-            await websocket.close(code=1008, reason="Invalid session_token")
+            channel = _get_channel_or_404(db, channel_id)
+        except HTTPException as exc:
+            # 404 -> not found; anything else (impossible here) -> forbidden.
+            await websocket.close(
+                code=WS_NOT_FOUND if exc.status_code == 404 else WS_FORBIDDEN,
+                reason="Channel not found",
+            )
             return
-
-        # Validate channel membership.
-        channel = _get_channel_or_404(db, channel_id)
         membership = _require_member(channel.workspace_id, user["id"], db)
         user_role = (
             Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
         )
         if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
-            await websocket.close(code=1008, reason="Guests cannot join channel")
+            await websocket.close(code=WS_FORBIDDEN, reason="Guests cannot join channel")
             return
         if not _is_private_channel_member(channel, user["id"], db):
-            await websocket.close(code=1008, reason="Not allowed to join this channel")
+            await websocket.close(code=WS_FORBIDDEN, reason="Not allowed to join this channel")
             return
         db_user = db.get(models.User, user["id"])
         user_name = db_user.display_name if db_user else "Someone"
     finally:
         db.close()
-    _ws_room_join(channel_id, websocket)
+
+    await websocket.accept(subprotocol=subproto or WS_SUBPROTOCOL)
+
+    chan_key = _ws_room_key_channel(channel_id)
+    user_key = _ws_room_key_user(user["id"])
+    _ws_room_join(chan_key, websocket)
+    _ws_room_join(user_key, websocket)
+
     try:
         while True:
             raw = await websocket.receive_text()
@@ -264,7 +284,7 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
                 except ValueError:
                     continue
                 if frame.get("type") == "typing":
-                    await _ws_broadcast(
+                    await _ws_broadcast_channel(
                         channel_id,
                         {
                             "type": "typing",
@@ -280,7 +300,11 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        _ws_room_leave(channel_id, websocket)
+        # Both rooms: leaving one without the other would strand the socket
+        # in the user room (leaked delivery slot) or the channel room
+        # (phantom broadcast target).
+        _ws_room_leave(chan_key, websocket)
+        _ws_room_leave(user_key, websocket)
 
 
 @router.post(

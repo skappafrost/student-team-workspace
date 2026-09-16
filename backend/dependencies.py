@@ -2,6 +2,9 @@
 
 import logging
 import os
+import secrets
+import threading
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -13,7 +16,11 @@ from sqlalchemy.orm import Session, selectinload
 
 import models
 from config import settings
-from database import get_db
+from ws import (
+    WS_SUBPROTOCOL,
+    WS_UNAUTHENTICATED,
+    _ws_parse_ticket,
+)
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
@@ -178,12 +185,86 @@ def _token_from_query(query: dict[str, str]) -> str | None:
     return query.get("session_token") or None
 
 
-def _decode_token(token: str, db) -> dict | None:
-    """Decode+verify an access token, checking jti revocation on ``db``.
+# ---------------------------------------------------------------------------
+# Short-lived WebSocket handshake tickets (TA4-2)
+# ---------------------------------------------------------------------------
+#
+# A browser cannot attach headers to a WebSocket handshake, and query-string
+# tokens land in access logs. The negotiated path is therefore a one-shot
+# ticket minted by an authenticated REST call (``POST /auth/ws-ticket``),
+# offered as the ``Sec-WebSocket-Protocol`` value ``stw-ws.<ticket>`` so it
+# never appears in a URL. The cookie path stays as a fallback for the
+# browser client and for tests.
+#
+# The store is process-local: tickets are only useful to the process that
+# will serve the socket, and the TTL is short enough that a restart is not
+# a support burden. A horizontal-scale deployment would swap this for a
+# shared TTL store; the API below is the contract to keep.
 
-    ``db`` is the request's session (the same one the endpoint transacts
-    on), keeping one DB session per request (TA1-3).
+_WS_TICKET_TTL_SECONDS = 60
+_ws_ticket_store: dict[str, tuple[str, float]] = {}
+_ws_ticket_lock = threading.Lock()
+
+
+def _ws_ticket_is_enabled() -> bool:
+    """Tickets are optional in dev/test (cookie fallback covers tests).
+
+    Enabled by default in any deployment that is not explicitly test/dev,
+    mirroring the JWT-secret governance rule: the safer mode is the default.
     """
+    if os.getenv("STW_TEST_AUTH", "").strip() == "1":
+        return False
+    return os.getenv("ENVIRONMENT", "").strip().lower() not in {"test", "dev"}
+
+
+def _ws_ticket_prune(now: float | None = None) -> None:
+    """Drop expired tickets (cheap: called on mint and on read miss)."""
+    cutoff = time.time() if now is None else now
+    with _ws_ticket_lock:
+        for key in [k for k, (_, exp) in _ws_ticket_store.items() if exp <= cutoff]:
+            _ws_ticket_store.pop(key, None)
+
+
+def create_ws_ticket(user_id: str) -> str | None:
+    """Mint a one-shot ticket binding ``user_id`` for the next WS handshake.
+
+    Returns None when tickets are disabled (dev/test), in which case the WS
+    endpoint falls back to the session cookie.
+    """
+    if not user_id:
+        return None
+    if not _ws_ticket_is_enabled():
+        return None
+    _ws_ticket_prune()
+    ticket = secrets.token_urlsafe(24)
+    with _ws_ticket_lock:
+        # One live ticket per user: a new mint replaces the old one.
+        for key in [k for k, (uid, _) in _ws_ticket_store.items() if uid == user_id]:
+            _ws_ticket_store.pop(key, None)
+        _ws_ticket_store[ticket] = (user_id, time.time() + _WS_TICKET_TTL_SECONDS)
+    return ticket
+
+
+def _user_from_ws_ticket(ticket: str | None) -> str | None:
+    """Consume a ticket; returns the user_id, or None if invalid/expired.
+
+    Tickets are single-use: a replay attempt does not authenticate, and a
+    consumed ticket is removed from the store either way.
+    """
+    if not ticket or not _ws_ticket_is_enabled():
+        return None
+    _ws_ticket_prune()
+    with _ws_ticket_lock:
+        entry = _ws_ticket_store.pop(ticket, None)
+    if entry is None:
+        return None
+    user_id, expires_at = entry
+    if time.time() >= expires_at:
+        return None
+    return user_id
+
+
+def _decode_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(token, _get_secret(), algorithms=[ALGORITHM])
         if payload.get("type") != "access":
@@ -277,6 +358,42 @@ def _ws_user_from_token(token: str, db) -> dict:
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
     return {"id": user_id, "name": "", "email": "", "role": Role.MEMBER.value}
+
+
+def _ws_resolve_user(websocket) -> tuple[dict | None, int | None, str | None, str | None]:
+    """Resolve the WS handshake identity: ticket first, then cookie/query.
+
+    Returns ``(user, close_code, close_reason, accepted_subprotocol)``.
+    ``user is None`` means the handshake must be rejected with ``close_code``
+    BEFORE ``websocket.accept()``, so the client sees a refused upgrade
+    carrying a documented 4xxx code instead of a session that opens then
+    immediately dies with an ambiguous 1008.
+    """
+    from authorization import Role
+
+    raw_subprotocol = websocket.headers.get("sec-websocket-protocol")
+    ticket = _ws_parse_ticket(raw_subprotocol)
+    ticket_user_id = _user_from_ws_ticket(ticket)
+    if ticket_user_id is not None:
+        # Ticket path: the REST mint call already proved the JWT. The ticket
+        # is single-use and now consumed; no token is decoded again here.
+        return (
+            {"id": ticket_user_id, "name": "", "email": "", "role": Role.MEMBER.value},
+            None,
+            None,
+            WS_SUBPROTOCOL,
+        )
+
+    token = _token_from_cookies(websocket.cookies) or _token_from_query(
+        websocket.query_params
+    )
+    if not token:
+        return (None, WS_UNAUTHENTICATED, "Missing session_token", None)
+    try:
+        user = _ws_user_from_token(token)
+    except HTTPException:
+        return (None, WS_UNAUTHENTICATED, "Invalid session_token", None)
+    return (user, None, None, None)
 
 
 # ---------------------------------------------------------------------------

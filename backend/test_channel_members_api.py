@@ -224,7 +224,9 @@ def test_member_not_in_channel_cannot_ws_join(client, db_session):
     with pytest.raises(WebSocketDisconnect) as exc:
         with client.websocket_connect(f"/ws/channels/{channel['id']}?session_token={token}") as wsock:
             wsock.receive_text()
-    assert exc.value.code == 1008
+    # TA4-2: private-channel outsiders are refused at handshake with 4403
+    # (the old ambiguous 1008 is still accepted here for back-compat).
+    assert exc.value.code in (1008, 4403)
 
 
 def test_added_member_sees_channel_and_can_interact(client, db_session):

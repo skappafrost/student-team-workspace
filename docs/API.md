@@ -43,9 +43,9 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 |---|---|---|
 | POST | `/auth/register` | Creates user + session cookie |
 | POST | `/auth/login` | Session cookie + tokens |
-| POST | `/auth/refresh` | Rotates a refresh token into a fresh pair (single-use; replay revokes the family) |
 | POST | `/auth/logout` | Revokes current session |
 | POST | `/auth/logout-all` | Revokes all sessions (sign out everywhere) |
+| POST | `/auth/ws-ticket` | One-shot WS handshake ticket (TA4-2) |
 | GET | `/auth/me` | Current user |
 | GET | `/users/me/tasks` | My tasks across workspaces; `?due=overdue\|today\|week\|later\|none`, `?status=` |
 | GET | `/users/me/export` | JSON download of all my data (attachment) |
@@ -150,14 +150,65 @@ Each workspace has a storage quota enforced at upload time on `POST /workspaces/
 
 ## WebSocket
 
-`GET /ws/channels/{channel_id}?session_token=<token>` — real-time chat. Auth is the same JWT (query param because browsers can't set headers on WS handshakes); the cookie is also accepted. Rejected handshakes close with code `1008` and one of these reasons: `Missing session_token`, `Invalid session_token`, `Guests cannot join channel`, `Not allowed to join this channel`. Revoked sessions are rejected.
+`GET /ws/channels/{channel_id}` — real-time chat socket. One room per channel
+plus one room per user, so a socket receives channel frames (messages,
+typing, reactions) and its own `notification_created` frames.
 
-Frames:
-- plain text → heartbeat, server replies `{"type": "pong", "channel_id": ...}`
-- `{"type": "typing"}` → broadcast `{"type": "typing", "channel_id", "user_id", "user_name"}` to the room (excluding sender)
-- new messages broadcast `{"type": "new_message", "message": {...}}`
+### Authentication (TA4-2)
 
-Rooms are in-memory, so run exactly one uvicorn worker.
+Precedence, safest first:
+
+1. **Ticket subprotocol (recommended)** — `POST /auth/ws-ticket` (auth'd)
+   returns `{"subprotocol": "stw-ws.<ticket>", "expires_in_seconds": 60}`.
+   Offer that value as the `Sec-WebSocket-Protocol` header. The ticket is
+   one-shot and never appears in a URL or access log. It binds the user the
+   REST call authenticated; the WS endpoint does not decode the JWT again.
+2. **`session_token` cookie** — the browser default; same JWT as REST.
+3. **`?session_token=<token>` query param** — test/legacy fallback. Works,
+   but the token lands in server logs, so prefer the ticket in production.
+
+Tickets are enabled unless `ENVIRONMENT` is `test`/`dev` (or
+`STW_TEST_AUTH=1`); in those modes the ticket endpoint returns a benign
+`stw-ws` value and the cookie path authenticates.
+
+### Handshake rejection codes
+
+Every rejection happens **before** the upgrade is accepted, so the client
+sees a refused handshake with a documented code (not an ambiguous 1008):
+
+| Code | Meaning |
+|---|---|
+| 4400 | Malformed handshake (bad subprotocol format) |
+| 4401 | No credential, or invalid/expired/revoked token |
+| 4403 | Authenticated but not allowed: not a workspace member, guest role, or no private-channel access |
+| 4404 | Channel does not exist |
+
+Revoked sessions (S02) fail with 4401 — the token decode returns None once
+the `jti` is revoked.
+
+### Frames
+
+Client -> server:
+
+- plain text (e.g. `ping`) -> server replies `{"type": "pong", "channel_id": ...}`
+- `{"type": "typing"}` -> broadcast to the channel room, excluding the sender
+
+Server -> client:
+
+- `{"type": "new_message", "message": MessageOut}` — on `POST /channels/{id}/messages`
+- `{"type": "reaction_update", "message_id": ..., "reactions": [...]}` — on reaction toggle
+- `{"type": "typing", "channel_id": ..., "user_id": ..., "user_name": ...}`
+- `{"type": "notification_created", "notification": NotificationOut}` — pushed to
+  the user's own sockets when a message fan-out creates their notification
+  (DM peer, thread parent author). Same shape as `GET /notifications`, so a
+  client can merge it without a second request.
+
+### Connection semantics
+
+On disconnect the socket leaves **both** the channel room and the user room
+in the endpoint's `finally`; broadcasts additionally evict any socket whose
+send fails, so a client that dies before its cleanup still cannot keep a
+phantom delivery slot.
 
 ## Health, readiness & observability
 

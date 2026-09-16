@@ -227,3 +227,30 @@ async def logout_all(
     db.commit()
     _clear_session_cookie(response)
     return {"ok": True, "revoked": revoked}
+
+
+class WSTicketOut(BaseModel):
+    subprotocol: str
+    expires_in_seconds: int
+
+
+@router.post("/auth/ws-ticket", response_model=WSTicketOut)
+async def mint_ws_ticket(current_user: dict = Depends(get_current_user)):
+    """Mint a one-shot ticket for the next WebSocket handshake (TA4-2).
+
+    Offer the returned value as the ``Sec-WebSocket-Protocol`` header so the
+    credential never appears in a URL or access log. See docs/API.md.
+    """
+    from dependencies import WS_SUBPROTOCOL, _ws_ticket_is_enabled, create_ws_ticket
+
+    if not _ws_ticket_is_enabled():
+        # Dev/test: tickets are disabled and the WS endpoint authenticates
+        # with the session cookie. Return a benign empty ticket so a client
+        # that always sends the subprotocol still connects.
+        return WSTicketOut(subprotocol=WS_SUBPROTOCOL, expires_in_seconds=0)
+
+    ticket = create_ws_ticket(current_user["id"])
+    return WSTicketOut(
+        subprotocol=f"{WS_SUBPROTOCOL}.{ticket}",
+        expires_in_seconds=60,
+    )
