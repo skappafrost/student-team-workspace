@@ -1,6 +1,12 @@
-"""Tests for recurring events expansion (F08)."""
+"""Tests for recurring events expansion (F08).
+
+Runs against whatever dialect ``DATABASE_URL`` selects: SQLite locally and
+Postgres on the ``backend-pg`` CI job (TA5-2). The fixtures therefore build
+their engine from the process DATABASE_URL instead of hard-coding sqlite.
+"""
 
 import datetime
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,12 +14,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import Base, Role, app, create_access_token
+from database import get_db
 from models import User
+
+# The suite honors the CI-provided DATABASE_URL (Postgres on backend-pg) and
+# only falls back to the historical SQLite file when unset. Previously the
+# engine was hard-coded to sqlite:///./test_stw_recurrence.db, which meant the
+# recurring-event paths never actually ran on Postgres in CI.
+_TEST_DB_URL = os.environ.get("DATABASE_URL", "sqlite:///./test_stw_recurrence.db")
 
 
 @pytest.fixture(scope="function")
 def db_session():
-    engine = create_engine("sqlite:///./test_stw_recurrence.db", echo=False)
+    engine = create_engine(_TEST_DB_URL, echo=False)
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
@@ -22,14 +35,13 @@ def db_session():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+        engine.dispose()
 
 
 @pytest.fixture(scope="function")
 def client(db_session):
     def _get_db_override():
         return db_session
-
-    from database import get_db
 
     app.dependency_overrides[get_db] = _get_db_override
     _client = TestClient(app)

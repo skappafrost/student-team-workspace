@@ -1,7 +1,7 @@
 """Pydantic schemas for workspace API."""
 
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
@@ -164,6 +164,28 @@ class EventOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _naive_utc_timestamps(cls, data):
+        """Normalize event timestamps to naive UTC (TA5-2).
+
+        ``DateTime(timezone=True)`` round-trips tz-aware values on Postgres
+        and naive ones on SQLite. Pydantic serializes the two differently
+        ("2026-08-28T09:00:00Z" vs "2026-08-28T09:00:00"), so the event
+        contract would differ per dialect without this normalization. Dropping
+        the offset (already UTC, never a wall-clock local time) keeps the wire
+        format identical on both engines.
+        """
+        for attr in ("start_at", "end_at", "created_at", "updated_at"):
+            value = getattr(data, attr, None) if not isinstance(data, dict) else data.get(attr)
+            if isinstance(value, datetime) and value.tzinfo is not None:
+                normalized = value.astimezone(UTC).replace(tzinfo=None)
+                if isinstance(data, dict):
+                    data[attr] = normalized
+                else:
+                    setattr(data, attr, normalized)
+        return data
+
 
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -201,9 +223,9 @@ class ChannelCreate(BaseModel):
 
 
 class ChannelUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    topic: Optional[str] = Field(default=None, max_length=2000)
-    type: Optional[ChannelType] = None
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    topic: str | None = Field(default=None, max_length=2000)
+    type: ChannelType | None = None
 
 
 class ChannelMemberAdd(BaseModel):
@@ -213,9 +235,9 @@ class ChannelMemberAdd(BaseModel):
 class ChannelMemberOut(BaseModel):
     channel_id: str
     user_id: str
-    display_name: Optional[str] = None
-    email: Optional[str] = None
-    joined_at: Optional[datetime] = None
+    display_name: str | None = None
+    email: str | None = None
+    joined_at: datetime | None = None
 
 
 class ChannelOut(BaseModel):
