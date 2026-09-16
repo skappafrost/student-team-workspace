@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 import models
+import pagination as pagination_lib
 import schemas
 from authorization import Role, _require_member, require_permission
 from database import get_db
@@ -78,20 +79,26 @@ async def get_workspace(
 @router.get("/workspaces/{workspace_id}/activity", response_model=list[schemas.ActivityOut])
 async def list_workspace_activity(
     workspace_id: str,
-    limit: int = 50,
+    limit: int | None = pagination_lib.limit_query(
+        "Maximum number of activity entries to return (default 50, max 100)."
+    ),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Recent activity feed for a workspace (members only), newest first."""
+    """Recent activity feed for a workspace (members only), newest first.
+
+    Pagination: ``limit`` (default 50, max 100), no offset (feed is newest-first
+    and was always bounded; offset is intentionally not offered here).
+    """
     _get_workspace_or_404(db, workspace_id)
     _require_member(workspace_id, current_user["id"], db)
-    limit = max(1, min(limit, 100))
+    _limit, _ = pagination_lib.parse_list_params(limit, None, default=50, max_limit=100)
     rows = (
         db.query(models.Activity, models.User.display_name)
         .join(models.User, models.User.id == models.Activity.actor_id)
         .filter(models.Activity.workspace_id == workspace_id)
         .order_by(models.Activity.created_at.desc())
-        .limit(limit)
+        .limit(_limit)
         .all()
     )
     return [
@@ -119,15 +126,19 @@ async def list_audit_log(
     target_type: str | None = None,
     actor_id: str | None = None,
     q: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = pagination_lib.limit_query(
+        "Maximum number of audit entries to return (default 100, max 500)."
+    ),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(require_permission("workspace.view_audit_log")),
     db: Session = Depends(get_db),
 ):
-    """Admin audit log: full activity history with filters. Admin or higher only."""
+    """Admin audit log: full activity history with filters. Admin or higher only.
+
+    Pagination: ``limit`` (default 100, max 500), ``offset`` (default 0).
+    """
     _get_workspace_or_404(db, workspace_id)
-    limit = max(1, min(limit, 500))
-    offset = max(0, offset)
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset, default=100, max_limit=500)
     query = (
         db.query(models.Activity, models.User.display_name)
         .join(models.User, models.User.id == models.Activity.actor_id)
@@ -146,7 +157,7 @@ async def list_audit_log(
             )
         )
     rows = (
-        query.order_by(models.Activity.created_at.desc()).offset(offset).limit(limit).all()
+        query.order_by(models.Activity.created_at.desc()).offset(_offset).limit(_limit).all()
     )
     return [
         schemas.ActivityOut(

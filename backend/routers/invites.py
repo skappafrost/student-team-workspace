@@ -1,11 +1,12 @@
 """Workspace invitation endpoints."""
 
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 import models
+import pagination as pagination_lib
 import schemas
 from authorization import Role, require_permission
 from database import get_db
@@ -83,7 +84,7 @@ async def accept_invite(
     # code runs on both dialects (previously: TypeError -> 500 on Postgres).
     expires_at = invite.expires_at
     if expires_at.tzinfo is not None:
-        expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+        expires_at = expires_at.astimezone(UTC).replace(tzinfo=None)
     if expires_at < _utcnow():
         raise HTTPException(status_code=410, detail="Invite expired")
 
@@ -121,11 +122,18 @@ async def accept_invite(
 @router.get("/workspaces/{workspace_id}/invites", response_model=list[schemas.InviteOut])
 async def list_workspace_invites(
     workspace_id: str,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(require_permission("workspace.invite")),
     db: Session = Depends(get_db),
 ):
-    """List all pending invitations for a workspace. Requires admin or higher role."""
+    """List all pending invitations for a workspace. Requires admin or higher role.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     _get_workspace_or_404(db, workspace_id)
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     invites = (
         db.query(models.WorkspaceInvite)
         .filter(
@@ -133,6 +141,9 @@ async def list_workspace_invites(
             models.WorkspaceInvite.accepted_at.is_(None),
             models.WorkspaceInvite.expires_at > _utcnow(),
         )
+        .order_by(models.WorkspaceInvite.created_at.asc())
+        .offset(_offset)
+        .limit(_limit)
         .all()
     )
     return invites

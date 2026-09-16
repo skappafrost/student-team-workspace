@@ -10,20 +10,8 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 - **Login**: `POST /auth/login` `{email, password}` → `200` + `session_token` httpOnly cookie + `TokenOut` body (`access_token`, `refresh_token`, `token_type`, `user`).
 - **Every request** after that sends the cookie. Browsers do this automatically; `fetch` from the Next.js app goes through `/api/*` BFF route handlers, which read the cookie and forward it as `Cookie: session_token=...` to the backend.
 - **Sessions are revocable (S02)**: each login creates an `auth_sessions` row keyed by the JWT `jti`. `POST /auth/logout` revokes the current session; `POST /auth/logout-all` revokes all of the user's sessions. A revoked token gets `401` everywhere, including WebSocket auth.
-- **Refresh tokens are revocable + single-use (TA1-1)**: the refresh token returned by register/login shares the same `auth_sessions` row as the access token, so logout/logout-all also kill the refresh token. `POST /auth/refresh` rotates it into a fresh pair; replaying an already-rotated refresh token revokes the whole rotation family (reuse = theft signal).
 - `GET /auth/me` → current user profile.
-- Tests can bypass JWT with `X-Test-User-Id` / `X-Test-User-Role` headers (test-only path).
-
-### JWT secret governance (TA1-2)
-
-The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo), so the backend **refuses to start** outside `ENVIRONMENT=test/dev` while the secret is still the default or blank — startup aborts with a `RuntimeError` instead of silently signing forgeable tokens. A deployment simply sets `ENVIRONMENT=production` (or leaves it unset) + a strong `JWT_SECRET_KEY`.
-
-**Rotating the secret** (e.g. after a leak, or periodically):
-
-1. Generate a new value: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-2. Update `JWT_SECRET_KEY` in the backend environment/`.env` and restart. There is a single signing key (no keyring), so restart applies it immediately.
-3. What it invalidates: **every existing access token and refresh token** stops validating (they were signed with the old key) — all users are effectively logged out and simply log in again. `auth_sessions` rows and revocations (S02) are keyed by `jti` and survive the rotation, so previously revoked tokens stay revoked.
-4. Optional cleanup: rows in `auth_sessions` whose tokens can no longer validate are inert; `POST /auth/logout-all` from each account or the existing maintenance script can prune them if desired.
+- Tests can also bypass JWT with `X-Test-User-Id` / `X-Test-User-Role` headers, but only when `STW_TEST_AUTH=1` is set in a test/dev environment (off by default).
 
 ## Conventions
 
@@ -32,8 +20,7 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 - **Error envelope**: FastAPI default — `{"detail": "human-readable message"}` with the right status code (400 validation, 401 unauthenticated, 403 forbidden, 404 missing, 409 conflict, 422 bad payload, 429 rate-limited with `Retry-After`). Validation errors use `{"detail": [{"loc": [...], "msg": ..., "type": ...}]}`.
 - **Rate limiting**: login 10/min per IP + 5/min per email; register 5/hour; upload 20/hour; AI 30/hour; all other write routes 120/min per identity (sliding window; `429` + `Retry-After`). Set `RATELIMIT_ENABLED=0` to disable.
 - **IDs**: UUID strings. Timestamps: ISO-8601 UTC.
-- **Pagination**: list endpoints currently return full arrays; activity feed takes `?limit=` (default 50, max 100).
-- **Search semantics (TA3-2)**: the `?search=`/`?q=` substring filters (`/pages?search=`, `/channels/{id}/messages?q=`, `/workspaces/{id}/audit-log?q=`) treat `%` and `_` in the query as LITERAL characters, not SQL wildcards — searching `50%` finds titles containing exactly `50%` and never matches `50 dollars`; case-insensitive on both SQLite and PostgreSQL.
+- **Pagination**: collection endpoints accept `?limit=` and `?offset=` (see [Pagination](#pagination)).
 
 ## Endpoint map
 
@@ -47,43 +34,44 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 | POST | `/auth/logout` | Revokes current session |
 | POST | `/auth/logout-all` | Revokes all sessions (sign out everywhere) |
 | GET | `/auth/me` | Current user |
-| GET | `/users/me/tasks` | My tasks across workspaces; `?due=overdue\|today\|week\|later\|none`, `?status=` |
-| GET | `/users/me/export` | JSON download of all my data (attachment) |
-| DELETE | `/users/me` | Body `{password}`; 403 on wrong password; anonymizes + purges private data |
+| GET | `/users/me/tasks` | My tasks across workspaces; `?due=overdue|today|week|later|none`, `?status=`, `?limit= ?offset=` |
+| GET | `/users/me/export` | JSON download of all my data (S03) |
+| DELETE | `/users/me` | Delete account; body `{password}`; anonymizes, purges private data |
 
 ### Workspaces, members, invites
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces` | List mine / create (`201`). POST accepts an optional `?workspace_id=` query param |
-| GET, PATCH, DELETE | `/workspaces/{id}` | PATCH admin+ (`workspace.update`); DELETE owner only (`workspace.delete`) |
-| GET | `/workspaces/{id}/members` | |
-| PATCH, DELETE | `/workspaces/{id}/members/{user_id}` | Change role / remove (admin+) |
-| GET, POST | `/workspaces/{id}/invites` | Admin+ to create |
+| GET | `/workspaces/{id}/audit-log` | Admin+; `?verb= ?target_type= ?actor_id= ?q= ?limit= ?offset=` (default 100, max 500) |
+| GET, POST | `/workspaces` | List mine / create |
+| GET, PATCH, DELETE | `/workspaces/{id}` | |
+| GET | `/workspaces/{id}/members` | Admin+; `?limit= ?offset=` |
+| PATCH, DELETE | `/workspaces/{id}/members/{user_id}` | Change role / remove |
+| GET, POST | `/workspaces/{id}/invites` | GET takes `?limit= ?offset=` (admin+) |
 | PATCH, DELETE | `/workspaces/{id}/invites/{invite_id}` | |
 | POST | `/invites/accept` | `201`; accept by token |
 | POST | `/workspaces/{id}/transfer-ownership` | Owner only |
-| GET | `/workspaces/{id}/activity?limit=` | Activity feed, members only; `limit` default 50 cap 100 |
-| GET | `/workspaces/{id}/audit-log` | Admin+ only; filters `?verb=&target_type=&actor_id=&q=&limit=&offset=` |
+| GET | `/workspaces/{id}/activity?limit=` | Activity feed (R03): actor, verb, target, ts. Default/max 100 |
 
 ### Projects & tasks
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/projects` | |
-| GET, PATCH, DELETE | `/projects/{id}` | PATCH admin+ or project creator; DELETE admin+ or creator |
-| GET, POST | `/projects/{id}/tasks` | `?status=` filter on GET; POST `201`; any member creates |
-| PATCH, DELETE | `/tasks/{id}` | PATCH any member; DELETE admin+ or assignee/project owner |
+| GET, POST | `/workspaces/{id}/projects` | GET takes `?limit= ?offset=` |
+| GET, PATCH, DELETE | `/projects/{id}` | |
+| GET, POST | `/projects/{id}/tasks` | `?status=` filter on GET; `?limit= ?offset=` |
+| PATCH, DELETE | `/tasks/{id}` | Assigning a task notifies the assignee (R03) |
 
 ### Channels & messages
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/channels` | |
-| GET, POST | `/channels/{id}/messages` | New messages broadcast over WS; POST fans out notifications (DM peer, @mentions, thread parent — TA4-1) |
+| GET, POST | `/workspaces/{id}/channels` | GET takes `?limit= ?offset=` |
+| GET | `/channels/{channel_id}/members` | `?limit= ?offset=` |
+| GET, POST | `/channels/{id}/messages` | GET: `?q=` search, `?limit= ?offset=`; new messages broadcast over WS |
 | PATCH, DELETE | `/messages/{id}` | |
 | POST | `/messages/{id}/reactions` | Toggle emoji reaction |
-| GET, POST | `/workspaces/{id}/dms` | Direct messages |
+| GET, POST | `/workspaces/{id}/dms` | Direct messages; GET takes `?limit= ?offset=` |
 
 ### Calendar events
 
@@ -98,26 +86,15 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/pages` | `?parent_id=` etc.; `?search=` substring filter (literal `%`/`_`, TA3-2) |
+| GET, POST | `/workspaces/{id}/pages` | `?flat=`, `?search=`, `?recent=`, `?limit=` (recent/search only) |
 | GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | Slug unique per workspace |
 
 ### Files
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/files` | Multipart upload; optional `project_id`/`task_id`/`message_id` links |
-| GET, PATCH, DELETE | `/files/{id}` | File metadata |
-| GET | `/uploads/{storage_key}` | File content download (member+ role; `attachment` disposition) |
-
-**Uploads are authenticated (Stage 2.2)**: `GET /uploads/{storage_key}` (the `url` field every file record returns) used to be a bare static mount — anyone on the network with a URL could read workspace bytes. It now runs the same access policy as `GET /files/{id}`: anonymous → 401, non-member → 403, guest → 403, revoked session → 401, unknown key → 404. The URL shape is unchanged, so the frontend `downloadFile` path keeps working as-is; curl users must send the session cookie / `Authorization` header.
-
-Upload ingress rules (TA2-1), enforced server-side on `POST /workspaces/{id}/files`:
-- **Name sanitization** — traversal (`../`, `..\`, absolute paths) collapses to a flat, ASCII-safe storage key (the on-disk name never contains separators or `..`); control/format characters (ESC, RTL overrides, NUL, CRLF) are stripped from the stored name; Unicode display names (e.g. Vietnamese `Báo cáo.pdf`) are preserved as `name` and NFC-normalized. Very long names are truncated with the extension kept.
-- **Size cap** — uploads larger than `MAX_UPLOAD_MB` (default 25 MB, configurable via env following `config.py` pydantic-settings conventions) are rejected with `413` while streaming, before anything is written to disk.
-- **Extension allow-list** — images (png/jpg/gif/webp/bmp/heic), documents (pdf/txt/md/csv/rtf/office/odf), media (mp4/mov/webm/mp3/wav/...), archives (zip/tar/gz/7z), data/code artifacts (json/yaml/toml/py/js/ts/.../ipynb). `svg`/`html` are deliberately excluded (stored-XSS via the same-origin `/uploads` static mount); executables/scripts and macro documents are rejected with `415`. A missing extension is also rejected.
-- **Content sniffing** — PE (`MZ`), ELF, Mach-O and Java-class magic signatures are rejected with `415` even when the extension/content-type claims otherwise (renamed-executable spoofing).
-- **Duplicates** — same content uploaded twice is stored independently (two rows, two blobs, distinct ids). Dedupe-by-content-hash was considered and deferred: file rows support independent rename/relink/delete lifecycles, and refcounted blobs would ripple through delete in three places plus the orphan sweeper — worth a dedicated follow-up if storage cost matters.
-- Error codes follow the project envelope: `422` empty file/invalid name, `413` oversize, `415` disallowed type.
+| GET, POST | `/workspaces/{id}/files` | GET: `?project_id= ?task_id= ?message_id= ?limit= ?offset=`; POST is multipart upload |
+| GET, PATCH, DELETE | `/files/{id}` | File content served from `/uploads/...` |
 
 #### Storage quota (TA2-3)
 
@@ -131,8 +108,8 @@ Each workspace has a storage quota enforced at upload time on `POST /workspaces/
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/notifications` | GET `?unread_only=true`; POST creates one (`201`) |
-| GET, PATCH, DELETE | `/notifications/{id}` | PATCH `{read: bool}`; DELETE `204` |
+| GET, POST | `/notifications` | GET: `?unread_only=true`, `?limit= ?offset=` |
+| GET, PATCH, DELETE | `/notifications/{id}` | PATCH `{read: bool}` |
 
 ### AI
 
@@ -147,6 +124,16 @@ Each workspace has a storage quota enforced at upload time on `POST /workspaces/
 |---|---|---|
 | GET | `/health` | `{"status": "ok"}` |
 | GET | `/healthz` | `{"status": "ok", "db_latency_ms": <float>}` |
+
+## Pagination
+
+All collection (list) endpoints share one contract — the helper lives in `backend/pagination.py`, new endpoints should reuse it:
+
+- Query params: `?limit=` (1..1000) and `?offset=` (>= 0). Omitted `limit` uses the endpoint's default, which for every paginated list equals the 1000 cap — i.e. the full collection (the BFF clients rely on that); omitted `offset` is 0.
+- Hard cap: `limit` above **1000** is rejected with `422` (validation), never silently truncated. Two endpoints keep stricter caps they shipped with: `GET /workspaces/{id}/activity` (default/max 100) and `GET /workspaces/{id}/audit-log` (default 100, max 500).
+- Responses stay **bare JSON arrays** (shape frozen — no `{items,total}` envelopes); pages are read with `limit`/`offset` windows over the same ordering each endpoint already uses.
+- Ordering is explicit and stable on every paginated list (creation/join time or position), so windows are disjoint and deterministic.
+- Endpoints without a collection shape (`/ai/search`, `/users/me/export`, tree-mode `/pages` without `recent`/`search`) are not paginated.
 
 ## WebSocket
 

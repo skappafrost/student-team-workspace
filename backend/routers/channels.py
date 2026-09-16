@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 import channel_access
 import models
+import pagination as pagination_lib
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
@@ -194,12 +195,19 @@ async def create_dm(
 @router.get("/workspaces/{workspace_id}/dms", response_model=list[schemas.DMChannelOut])
 async def list_dms(
     workspace_id: str,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List the current user's DM channels in a workspace."""
+    """List the current user's DM channels in a workspace.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     _get_workspace_or_404(db, workspace_id)
     _require_member(workspace_id, current_user["id"], db)
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     channels = (
         db.query(models.Channel)
         .join(models.ChannelMember, models.ChannelMember.channel_id == models.Channel.id)
@@ -208,6 +216,9 @@ async def list_dms(
             models.Channel.type == "dm",
             models.ChannelMember.user_id == current_user["id"],
         )
+        .order_by(models.Channel.created_at.asc())
+        .offset(_offset)
+        .limit(_limit)
         .all()
     )
     peers = _dm_peers(db, channels, current_user["id"])
@@ -326,6 +337,8 @@ async def create_channel(
 @router.get("/workspaces/{workspace_id}/channels", response_model=list[schemas.ChannelOut])
 async def list_workspace_channels(
     workspace_id: str,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -334,18 +347,25 @@ async def list_workspace_channels(
     DM channels are never listed here (they live under /dms). Admins/owners
     see every other channel; regular members see public channels plus private
     channels they created or hold a channel_members row for.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
     """
     _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
     is_admin_plus = ROLE_HIERARCHY[user_role] >= ROLE_HIERARCHY[Role.ADMIN]
 
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     channels = (
         db.query(models.Channel)
         .filter(
             models.Channel.workspace_id == workspace_id,
             models.Channel.type != "dm",
         )
+        .order_by(models.Channel.created_at.asc())
+        .offset(_offset)
+        .limit(_limit)
         .all()
     )
     if not is_admin_plus:
@@ -404,6 +424,8 @@ async def update_channel(
 @router.get("/channels/{channel_id}/members", response_model=list[schemas.ChannelMemberOut])
 async def list_channel_members(
     channel_id: str,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -411,11 +433,16 @@ async def list_channel_members(
 
     Private channels: users with an explicit membership row. Public channels:
     all workspace members (membership is implicit).
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
     """
     channel = _get_channel_or_404(db, channel_id)
     _require_member(channel.workspace_id, current_user["id"], db)
     if not _is_private_channel_member(channel, current_user["id"], db):
         raise HTTPException(status_code=403, detail="Not allowed to view this channel")
+
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
 
     if not channel.is_private:
         rows = (
@@ -423,6 +450,8 @@ async def list_channel_members(
             .filter(models.WorkspaceMember.workspace_id == channel.workspace_id)
             .options(selectinload(models.WorkspaceMember.user))
             .order_by(models.WorkspaceMember.joined_at.asc())
+            .offset(_offset)
+            .limit(_limit)
             .all()
         )
         return [
@@ -441,6 +470,8 @@ async def list_channel_members(
         .filter(models.ChannelMember.channel_id == channel_id)
         .options(selectinload(models.ChannelMember.user))
         .order_by(models.ChannelMember.joined_at.asc())
+        .offset(_offset)
+        .limit(_limit)
         .all()
     )
     return [_channel_member_out(cm) for cm in rows]

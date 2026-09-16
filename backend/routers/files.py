@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
+import pagination as pagination_lib
 import rate_limit
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
@@ -435,10 +436,16 @@ async def list_workspace_files(
     project_id: str | None = None,
     task_id: str | None = None,
     message_id: str | None = None,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List files in a workspace, optionally filtered by linked resource."""
+    """List files in a workspace, optionally filtered by linked resource.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     _get_workspace_or_404(db, workspace_id)
     membership = _require_member(workspace_id, current_user["id"], db)
 
@@ -453,7 +460,10 @@ async def list_workspace_files(
         query = query.filter(models.File.task_id == task_id)
     if message_id is not None:
         query = query.filter(models.File.message_id == message_id)
-    files = query.order_by(models.File.created_at.desc()).all()
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
+    files = (
+        query.order_by(models.File.created_at.desc()).offset(_offset).limit(_limit).all()
+    )
     return [_file_out(f) for f in files]
 
 
