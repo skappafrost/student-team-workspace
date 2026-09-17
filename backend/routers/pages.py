@@ -4,7 +4,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 import models
 import schemas
@@ -150,10 +150,25 @@ async def list_workspace_pages(
     if recent:
         return query.order_by(models.Page.updated_at.desc()).limit(limit).all()
 
-    pages = query.order_by(models.Page.created_at.asc()).all()
+    # Tree + flat views both serialize ``PageTreeItem.children`` for every
+    # returned page, so eager-load one level of children per parent
+    # (additive perf fix, TA6-2). Without this the response_model
+    # serialization touches ``page.children`` on every row, issuing one
+    # SELECT per row (N+1): the bench harness measured 304 statements for
+    # 300 tree pages and 105 for 100 flat pages (see docs/PERF-BASELINE.md).
+    # ``selectinload`` batches all children of the loaded pages into one
+    # extra SELECT per parent level, so the statement count is constant in
+    # the number of pages. Response shape (nested children arrays) is
+    # unchanged.
+    query = (
+        query.order_by(models.Page.created_at.asc())
+        .options(selectinload(models.Page.children))
+    )
 
     if flat:
-        return pages
+        return query.all()
+
+    pages = query.all()
 
     # Build tree: only root pages with nested children loaded lazily; build recursively
     root_pages = [p for p in pages if p.parent_id is None]

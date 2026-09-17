@@ -19,6 +19,10 @@ dist/
 *.db-journal
 *.sqlite3
 
+# Benchmark artifacts (regenerated locally; results are committed)
+bench_stw.db
+backend/bench/uploads/
+
 # Logs
 *.log
 
