@@ -8,6 +8,7 @@ import schemas
 from authorization import Role, _require_member, require_permission
 from database import get_db
 from dependencies import _get_workspace_or_404, get_current_user
+from query_utils import LIKE_ESCAPE, contains_pattern
 
 router = APIRouter()
 
@@ -139,7 +140,11 @@ async def list_audit_log(
     if actor_id:
         query = query.filter(models.Activity.actor_id == actor_id)
     if q:
-        query = query.filter(models.Activity.target_label.ilike(f"%{q}%"))
+        query = query.filter(
+            models.Activity.target_label.ilike(
+                contains_pattern(q), escape=LIKE_ESCAPE
+            )
+        )
     rows = (
         query.order_by(models.Activity.created_at.desc()).offset(offset).limit(limit).all()
     )

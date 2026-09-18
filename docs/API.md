@@ -32,8 +32,8 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 - **Error envelope**: FastAPI default — `{"detail": "human-readable message"}` with the right status code (400 validation, 401 unauthenticated, 403 forbidden, 404 missing, 409 conflict, 422 bad payload, 429 rate-limited with `Retry-After`). Validation errors use `{"detail": [{"loc": [...], "msg": ..., "type": ...}]}`.
 - **Rate limiting**: login 10/min per IP + 5/min per email; register 5/hour; upload 20/hour; AI 30/hour; all other write routes 120/min per identity (sliding window; `429` + `Retry-After`). Set `RATELIMIT_ENABLED=0` to disable.
 - **IDs**: UUID strings. Timestamps: ISO-8601 UTC.
-- **Pagination**: list endpoints return full arrays by default. `GET /workspaces/{id}/audit-log` takes `limit` (default 100, cap 500) + `offset`; `GET /workspaces/{id}/activity` takes `limit` (default 50, cap 100); `GET /workspaces/{id}/pages` takes `limit` (default 10, cap 100) for `recent`/`search` modes.
-- **Health**: `GET /health` → `{"status": "ok"}`; `GET /healthz` → `{"status": "ok", "db_latency_ms": <float>}`.
+- **Pagination**: list endpoints currently return full arrays; activity feed takes `?limit=` (default 50, max 100).
+- **Search semantics (TA3-2)**: the `?search=`/`?q=` substring filters (`/pages?search=`, `/channels/{id}/messages?q=`, `/workspaces/{id}/audit-log?q=`) treat `%` and `_` in the query as LITERAL characters, not SQL wildcards — searching `50%` finds titles containing exactly `50%` and never matches `50 dollars`; case-insensitive on both SQLite and PostgreSQL.
 
 ## Endpoint map
 
@@ -79,14 +79,11 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/channels` | `type` validated against `general\|project\|private` |
-| PATCH | `/channels/{id}` | Manager (admin or creator) only |
-| GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`) |
-| DELETE | `/channels/{id}/members/{user_id}` | Manager only |
-| GET, POST | `/channels/{id}/messages` | POST `201`; broadcasts over WS + creates notifications |
-| PATCH, DELETE | `/messages/{id}` | Author only |
-| POST | `/messages/{id}/reactions` | Body `{emoji}`; returns `[ReactionSummary]` |
-| GET, POST | `/workspaces/{id}/dms` | Direct messages; body `{user_id}` |
+| GET, POST | `/workspaces/{id}/channels` | POST validates `type` against `general/project/private` (422 otherwise; TA3-2) |
+| GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`); new messages broadcast over WS |
+| PATCH, DELETE | `/messages/{id}` | |
+| POST | `/messages/{id}/reactions` | Toggle emoji reaction |
+| GET, POST | `/workspaces/{id}/dms` | Direct messages |
 
 ### Calendar events
 
@@ -101,11 +98,8 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/pages` | GET: `?flat=true` tree-vs-flat, `?search=`, `?recent=true`, `?limit=` (default 10, max 100) |
-| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | POST/GET `201`; PATCH/DELETE admin+ or page creator; slug unique per workspace |
-| GET | `/workspaces/{id}/pages/{page_id}/backlinks` | Pages linking to this one |
-| GET | `/workspaces/{id}/pages/{page_id}/history` | Versions, newest first |
-| POST | `/workspaces/{id}/pages/{page_id}/restore/{version}` | Restore a version |
+| GET, POST | `/workspaces/{id}/pages` | `?parent_id=` etc.; `?search=` substring filter (literal `%`/`_`, TA3-2) |
+| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | Slug unique per workspace |
 
 ### Files
 
@@ -215,19 +209,9 @@ The Next.js app never calls the backend directly from the browser. `app/src/app/
 
 The BFF resolves "current workspace" as the first entry of `GET /workspaces` — if you add multi-workspace switching, that resolution is the place to change.
 
-## Token refresh (TA1-1)
-
-`POST /auth/refresh` with JSON body `{"refresh_token": "<jwt>"}` → same shape as login: `{access_token, refresh_token, token_type: "bearer", user}` (+ rotated `session_token` httpOnly cookie).
-
-Rotation policy:
-
-- **Bound sessions**: a refresh token carries the same `jti` as the access token minted by the same login/register, both backed by one `auth_sessions` row. Consequence: `POST /auth/logout`, `POST /auth/logout-all` and account deletion revoke the refresh token too. Refresh tokens no longer survive logout.
-- **Single use**: each successful `/auth/refresh` marks the old row rotated+revoked and mints a successor row with a fresh `jti`, chained to the same `family_id`. The presented refresh token can never be used twice.
-- **Reuse detection / family invalidation**: replaying an already-rotated refresh token is treated as token theft — the entire rotation family (every successor row, every access+refresh pair minted from that login) is revoked and the request gets `401`. A concurrent double-spend of the same refresh token can only ever let one request win; the loser triggers the family kill.
-- **Plain 401, no family action**: expired, malformed, cross-user (signed `sub` ≠ row owner), unknown `jti`, revoked-but-not-rotated tokens, and pre-TA1-1 jti-less refresh tokens. An access token presented as a refresh token is likewise `401` (the `type` claim must be `refresh`).
-- Response shapes of existing endpoints are unchanged; `/auth/refresh` is a new endpoint and defines its own shape (deliberately identical to login's `TokenOut`).
-
 ## Changelog
 
-- **TA1-1 (harden/auth-refresh)**: added `POST /auth/refresh` with single-use rotation and family invalidation on replay; refresh tokens now share the session row (`jti`) with their access token, so logout/logout-all revoke them; new `auth_sessions.family_id` + `auth_sessions.rotated` columns (migration `a1f1_refresh_rotation`). No existing endpoint changed shape.
+### TA3-2 — ilike wildcard escaping + channels type validation
 
+- **Search filters now treat `%` and `_` as literal characters.** `GET /workspaces/{id}/pages?search=`, `GET /channels/{id}/messages?q=` and `GET /workspaces/{id}/audit-log?q=` previously interpolated the raw term into a `%...%` SQL LIKE pattern, so a user searching `50%` also matched `50 dollars` (wildcard `%`) and `A_B` matched `AxB` (wildcard `_`). A shared helper (`backend/query_utils.py`: `escape_like`/`contains_pattern` + `escape=LIKE_ESCAPE`) is now applied at every like/ilike site. Behavior change: searches containing `%`/`_` return exact literal matches on both SQLite and PostgreSQL; plain-text searches are unchanged (still case-insensitive).
+- **`POST /workspaces/{id}/channels` validates `type`** against the enum `general|project|private` at the schema layer — unknown types are rejected with 422 (FastAPI's standard validation error envelope) instead of being stored. Valid payloads and the `general` default are unchanged. (Covered by regression tests in `backend/test_query_escapes.py`.)

@@ -11,6 +11,7 @@ import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
 from dependencies import _get_page_or_404, _get_workspace_or_404, get_current_user
+from query_utils import LIKE_ESCAPE, contains_pattern
 from services import log_activity
 
 router = APIRouter()
@@ -141,9 +142,12 @@ async def list_workspace_pages(
         term = search.strip()
         if not term:
             return []
-        like_term = f"%{term}%"
+        like_term = contains_pattern(term)
         query = query.filter(
-            or_(models.Page.title.ilike(like_term), models.Page.content.ilike(like_term))
+            or_(
+                models.Page.title.ilike(like_term, escape=LIKE_ESCAPE),
+                models.Page.content.ilike(like_term, escape=LIKE_ESCAPE),
+            )
         ).order_by(models.Page.updated_at.desc())
         return query.all()
 
