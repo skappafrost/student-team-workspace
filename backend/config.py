@@ -36,9 +36,13 @@ class Settings(BaseSettings):
         """Server-side upload cap in bytes (MAX_UPLOAD_MB, default 25 MB)."""
         return int(self.max_upload_mb * 1024 * 1024)
 
-    # Per-workspace storage quota (TA2-3): max stored bytes per workspace,
-    # in megabytes. 0 disables the check. Counts File.size_bytes only.
-    max_workspace_storage_mb: int = 512
+    # Maintenance / retention (see retention.py):
+    # upload_retention_days bounds the whole File lifecycle (row + bytes).
+    # 0 = no age-based deletion. Retention is opt-in: retention_enabled must
+    # be set for purge-by-retention to run at all.
+    upload_retention_days: int = 0
+    orphan_min_age_hours: float = 24.0
+    retention_enabled: bool = False
 
     # AI assistant
     ai_provider_api_key: str | None = None

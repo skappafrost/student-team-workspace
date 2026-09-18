@@ -5,6 +5,9 @@ Usage (run from the backend/ directory):
     python manage.py create-user --email EMAIL --password PASSWORD [--name NAME] [--db-url URL]
     python manage.py reset-password --email EMAIL --password NEW_PASSWORD [--db-url URL]
     python manage.py db-status [--db-url URL]
+    python manage.py maintenance [--purge] [--apply] [--dry-run]
+        [--retention-days N] [--min-age-hours H] [--upload-dir PATH] [--db-url URL]
+    python manage.py maintenance integrity-check [--upload-dir PATH] [--db-url URL]
 
 Only the standard library plus the project's existing dependencies
 (SQLAlchemy, alembic, ``app``/``models``/``database``) are used.
@@ -13,6 +16,11 @@ No new dependencies are introduced.
 ``--db-url`` overrides ``DATABASE_URL`` for a single run. A local engine is
 built for the override; the global ``database.engine`` is never rebound, so
 this module is also safe to drive in-process (tests, REPL).
+
+``maintenance`` wraps :mod:`maintenance` (upload orphan sweeper + retention).
+Default is a non-destructive dry-run; ``--purge --apply`` is required for any
+deletion. Retention-based deletion is additionally opt-in via the
+RETENTION_ENABLED setting (see :mod:`retention`).
 """
 
 from __future__ import annotations
@@ -320,7 +328,101 @@ def build_parser() -> argparse.ArgumentParser:
     reset.add_argument("--password", required=True, help="New password.")
 
     sub.add_parser("db-status", parents=[common], help="Show alembic head + per-table row counts.")
+
+    _add_maintenance_subparser(sub, common)
     return parser
+
+
+# ---------------------------------------------------------------------------
+# maintenance subcommand (delegates to maintenance.py, never reimplements)
+# ---------------------------------------------------------------------------
+
+def _add_maintenance_subparser(sub, common) -> None:
+    """``python manage.py maintenance ...`` — wraps the maintenance sweeper."""
+    maint = sub.add_parser(
+        "maintenance",
+        parents=[common],
+        help="Upload orphan sweeper + retention (dry-run by default).",
+    )
+    mode = maint.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--purge",
+        action="store_true",
+        help="Scan for orphans (dry-run report unless --apply is also given).",
+    )
+    mode.add_argument(
+        "--integrity-check",
+        action="store_true",
+        help="Read-only reconciliation of File rows vs bytes on disk.",
+    )
+    maint.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the purge (destructive). Default is dry-run (report only).",
+    )
+    maint.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Explicit dry-run flag (default; kept for readability).",
+    )
+    maint.add_argument(
+        "--retention-days",
+        type=float,
+        default=None,
+        help=(
+            "Also drop File rows (row + bytes) older than this many days for "
+            "this run. 0 disables age-based deletion. Default: the "
+            "UPLOAD_RETENTION_DAYS / RETENTION_ENABLED settings (off)."
+        ),
+    )
+    maint.add_argument(
+        "--min-age-hours",
+        type=float,
+        default=None,
+        help="Orphan file age threshold in hours (default: 24).",
+    )
+    maint.add_argument(
+        "--upload-dir",
+        default=None,
+        help="Upload directory to scan (default: app.UPLOAD_DIR).",
+    )
+
+
+def cmd_maintenance(args: argparse.Namespace) -> int:
+    """Delegate to maintenance.py without reimplementing the sweeper."""
+    import maintenance
+
+    if args.integrity_check:
+        return maintenance.main(_maintenance_argv("integrity-check", args))
+
+    # Default and --purge both run purge-orphans; --apply selects the mode.
+    argv = ["purge-orphans"]
+    if args.apply and not args.purge:
+        # --apply without --purge is ambiguous: default to the safe report.
+        print(
+            "--apply requires --purge (the report-only run is the default). "
+            "Re-run with --purge --apply to apply the sweep.",
+            file=sys.stderr,
+        )
+        return 2
+    return maintenance.main(_maintenance_argv("purge-orphans", args))
+
+
+def _maintenance_argv(command: str, args: argparse.Namespace) -> List[str]:
+    """Translate manage.py maintenance flags into maintenance.main() argv."""
+    argv = [command]
+    if command == "purge-orphans":
+        if args.apply:
+            argv.append("--apply")
+        if args.min_age_hours is not None:
+            argv += ["--min-age-hours", str(args.min_age_hours)]
+        if args.retention_days is not None:
+            argv += ["--retention-days", str(args.retention_days)]
+    if args.upload_dir is not None:
+        argv += ["--upload-dir", str(args.upload_dir)]
+    if args.db_url is not None:
+        argv += ["--db-url", str(args.db_url)]
+    return argv
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -333,6 +435,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_reset_password(args)
     if args.command == "db-status":
         return cmd_db_status(args)
+    if args.command == "maintenance":
+        return cmd_maintenance(args)
     return 2
 
 

@@ -251,5 +251,30 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 ### TA4-1 — message notification fan-out (additive)
 
-- `POST /channels/{id}/messages` now creates notifications for other users, using the existing `notify()` service and `NotificationOut` shape (no response-body changes): **DM peer** (type `dm`) when the channel is a DM; **@mentions** (type `mention`) parsed conservatively — a token matches only the FULL display name of a workspace member (no substring/prefix matches; non-members are never resolved); **thread parent author** (type `thread`) when `parent_id` is set. The author never self-notifies, and a user hit by several triggers in one message is notified exactly once (DM wins over mention wins over thread). New notification types `dm` and `thread` are added to `schemas.NotificationType` — additive enum widening; existing types and all payload shapes are unchanged.
-- There is no per-user quiet/DND state on the `Notification` model yet (only `read`), so quiet-hours suppression is intentionally out of scope here.
+**Landed on `main`** (squash-merged, in the 45-path surface above):
+- **Role matrix + RBAC** (T002, #5) — cross-workspace escalation fixed; `require_permission` map in `authorization.py`.
+- **Private channels** (T012, #8) — real `channel_members` gate on private channels (messages, reactions, WS join).
+- **SQLite FK enforcement** (T014, #9) — `PRAGMA foreign_keys=ON`.
+- **File delete + orphan sweeper** (T040, #7) — delete removes blob + row; `maintenance.py purge-orphans` dry-run sweeper.
+- **bcrypt 72-byte** (T009, #6) — passwords over 72 bytes rejected with 422 instead of silent truncation.
+- **Test-auth gate** (T003, #1) — `X-Test-User-*` bypass confined to test/dev envs; test fixtures moved to real JWT (T004, #2).
+- **Rate limiting** (T3-B02, #78) — sliding window, per-route limiters + fallback write cap.
+- **Request logging + healthz** (T3-B03, #79) — request ids, user ids, token-scrubbed logs, `GET /healthz` with db latency.
+- **Postgres CI** (T4-E2, #88) — `backend-pg` job; SQLite/PG parity enforced.
+- **Audit log** — `GET /workspaces/{id}/audit-log`, admin+, with filters.
+
+**Open `harden/*` PRs** (not yet on `main`; endpoints they add are documented above **only** where the branch is listed as merged — treat the rest as pending):
+- #123 `harden/auth-refresh` — `POST /auth/refresh` with single-use rotation + family invalidation.
+- #124 `harden/jwt-secret-governance` — refuse startup with the default JWT secret outside dev/test.
+- #126 `harden/jti-request-session` — jti revocation routed through the request DB session.
+- #128 `harden/upload-ingress` — sanitize, size cap, allow-list, executable sniffing on uploads.
+- #130 `harden/uploads-read-auth` — authenticated `/uploads` read path.
+- #132 `harden/storage-quota` — per-workspace storage quota at upload time.
+- #134 `harden/like-escape-channels-enum` — LIKE wildcard escaping; channel `type` validated.
+- #138 `harden/message-fanout` — notification fan-out on message create (DM peer, @mentions, thread replies).
+- #148 `harden/nplus1-indexes` — N+1 elimination + FK index plan.
+- #149 `harden/observability` — slow-query logging, 5xx counter, `/readyz` readiness.
+- #159 `harden/pagination-contract` — uniform `limit`/`offset` on list endpoints.
+- `harden/ops-maintenance` — retention policy + safe purge + integrity check + `manage.py maintenance` CLI. No API change (CLI + `retention.py` only); runbook in `docs/OPS.md`.
+
+**Docs-only regeneration note**: this file was rewritten for main @ bca27ce. When a `harden/*` PR above merges, add its row here and drop it from the open list — that is the whole maintenance burden.
