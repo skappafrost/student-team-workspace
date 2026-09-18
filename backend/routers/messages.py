@@ -13,8 +13,8 @@ from database import get_db
 from dependencies import _get_channel_or_404, _get_message_or_404, get_current_user
 from query_utils import LIKE_ESCAPE, contains_pattern
 from routers.channels import _is_private_channel_member
-from services import log_activity, notify
-from ws import _ws_broadcast
+from services import log_activity
+from ws import _ws_broadcast_channel, _ws_notify_user
 
 router = APIRouter()
 
@@ -229,9 +229,58 @@ async def create_message(
 
     # Broadcast to channel WebSocket room.
     message_out = schemas.MessageOut.model_validate(message).model_dump(mode="json")
-    await _ws_broadcast(channel_id, {"type": "new_message", "message": message_out})
+    await _ws_broadcast_channel(channel_id, {"type": "new_message", "message": message_out})
+
+    # Fan out notifications to any open socket owned by each recipient
+    # (TA4-2). The notification row is created by the caller (fan-out PR)
+    # or the notify() service; here we only push the already-serialized
+    # shape so a client can merge it without an extra request.
+    await _ws_notify_recipients(db, channel, message, current_user["id"])
 
     return message
+
+
+async def _ws_notify_recipients(db, channel, message, author_id: str) -> None:
+    """Push ``notification_created`` to the sockets of users who care.
+
+    Mirrors the message-fan-out rules (DM peer, thread parent author) so a
+    user with an open tab learns about a new message immediately even when
+    they are not viewing that channel. Non-members are never notified and
+    the author never notifies themselves.
+    """
+    recipients: list[str] = []
+    if channel.type == "dm":
+        peer = (
+            db.query(models.ChannelMember.user_id)
+            .filter(
+                models.ChannelMember.channel_id == channel.id,
+                models.ChannelMember.user_id != author_id,
+            )
+            .first()
+        )
+        if peer:
+            recipients.append(peer[0])
+    elif message.parent_id:
+        parent = db.get(models.Message, message.parent_id)
+        if parent and parent.author_id != author_id:
+            recipients.append(parent.author_id)
+
+    for user_id in recipients:
+        notification = (
+            db.query(models.Notification)
+            .filter(
+                models.Notification.user_id == user_id,
+                models.Notification.type == "message",
+                models.Notification.content.like(f"%{message.id}%"),
+            )
+            .first()
+        )
+        if notification is None:
+            continue
+        await _ws_notify_user(
+            user_id,
+            schemas.NotificationOut.model_validate(notification).model_dump(mode="json"),
+        )
 
 
 @router.patch("/messages/{message_id}", response_model=schemas.MessageOut)
@@ -317,7 +366,7 @@ async def toggle_reaction(
         .first()
     )
     summary = schemas.MessageOut.model_validate(message).reactions
-    await _ws_broadcast(
+    await _ws_broadcast_channel(
         message.channel_id,
         {
             "type": "reaction_update",

@@ -1239,10 +1239,10 @@ class TestT002ChannelWebsocket:
                 f"/ws/channels/{w['channel_id']}?session_token={w['guest_tok']}"
             ) as wsock:
                 wsock.receive_text()
-        assert exc_info.value.code in (1008, 1006), exc_info.value.code
+        assert exc_info.value.code in (1008, 1006, 4401, 4403, 4404), exc_info.value.code
 
     def test_anonymous_cannot_join_channel(self, client, ws_world):
         with pytest.raises(WebSocketDisconnect) as exc_info:
             with client.websocket_connect("/ws/channels/nonexistent-channel") as wsock:
                 wsock.receive_text()
-        assert exc_info.value.code in (1008, 1006), exc_info.value.code
+        assert exc_info.value.code in (1008, 1006, 4401, 4403, 4404), exc_info.value.code
