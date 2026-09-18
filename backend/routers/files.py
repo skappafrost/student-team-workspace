@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi import File as FileParam
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 import models
@@ -225,6 +226,56 @@ def _can_modify_file(
     if ROLE_HIERARCHY[user_role] >= ROLE_HIERARCHY[Role.ADMIN]:
         return True
     return file.uploader_id == current_user["id"]
+
+
+def _is_safe_storage_key(storage_key: str) -> bool:
+    """A storage key must be a flat filename, never a traversal path.
+
+    Keys are server-generated as ``{uuid}_{original filename}`` — the
+    filename part may legally contain unicode (Vietnamese team files) and
+    spaces on main; Stage 2.1 (TA2-1) additionally flattens new uploads to
+    ASCII. What must NEVER pass: path separators (raw or escaped), control
+    characters, a leading dot, or anything that escapes the upload dir.
+    """
+    if not storage_key or storage_key.startswith("."):
+        return False
+    if "/" in storage_key or "\\" in storage_key or "\x00" in storage_key:
+        return False
+    return all(ord(ch) >= 0x20 for ch in storage_key)
+
+
+def _resolve_read_file(storage_key: str, db: Session, current_user: dict) -> tuple[models.File, Path]:
+    """Shared read-side resolution for ``/uploads/{storage_key}``.
+
+    Mirrors the ``GET /files/{id}`` policy: must be a workspace member with
+    role >= MEMBER (guests are members but cannot read file bytes). The
+    storage key must be a flat, safe filename — never a traversal path —
+    and the resolved path must stay inside the upload dir.
+    """
+    if not _is_safe_storage_key(storage_key):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    upload_dir = _upload_dir().resolve()
+    path = (upload_dir / storage_key).resolve()
+    if upload_dir not in path.parents:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    row = db.query(models.File).filter(models.File.storage_key == storage_key).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    membership = _require_member(row.workspace_id, current_user["id"], db)
+    user_role_value = membership.role
+    user_role = (
+        Role(user_role_value) if user_role_value in [r.value for r in Role] else Role.GUEST
+    )
+    if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
+        raise HTTPException(status_code=403, detail="Guests cannot view files")
+
+    if not path.is_file():
+        # T008: missing bytes read as 404, never 500.
+        raise HTTPException(status_code=404, detail="File not found")
+    return row, path
 
 
 def _validate_link_targets(
@@ -453,3 +504,24 @@ async def delete_file(
         # row is already gone; the maintenance purge reaps orphan bytes later.
         logging.getLogger(__name__).warning("Failed to unlink %s", storage_path, exc_info=True)
     return None
+
+
+@router.get("/uploads/{storage_key}")
+async def read_uploaded_file(
+    storage_key: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Serve uploaded file bytes to members only (Stage 2.2, TA2-2).
+
+    Replaces the unauthenticated StaticFiles mount: same URL shape the
+    frontend already uses (``file.url`` = ``/uploads/{storage_key}``),
+    but now with the ``GET /files/{id}`` access policy — anonymous 401,
+    non-member 403, guest 403, revoked session 401, unknown key 404.
+    """
+    row, path = _resolve_read_file(storage_key, db, current_user)
+    return FileResponse(
+        path,
+        media_type=row.mime_type or "application/octet-stream",
+        filename=row.original_name,
+    )

@@ -111,8 +111,11 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/files` | Multipart upload; `?project_id=`/`?task_id=`/`?message_id=` filters on GET |
-| GET, PATCH, DELETE | `/files/{id}` | PATCH/DELETE admin+ or uploader; content served from `/uploads/...`; guests cannot upload |
+| GET, POST | `/workspaces/{id}/files` | Multipart upload; optional `project_id`/`task_id`/`message_id` links |
+| GET, PATCH, DELETE | `/files/{id}` | File metadata |
+| GET | `/uploads/{storage_key}` | File content download (member+ role; `attachment` disposition) |
+
+**Uploads are authenticated (Stage 2.2)**: `GET /uploads/{storage_key}` (the `url` field every file record returns) used to be a bare static mount — anyone on the network with a URL could read workspace bytes. It now runs the same access policy as `GET /files/{id}`: anonymous → 401, non-member → 403, guest → 403, revoked session → 401, unknown key → 404. The URL shape is unchanged, so the frontend `downloadFile` path keeps working as-is; curl users must send the session cookie / `Authorization` header.
 
 Upload ingress rules (TA2-1), enforced server-side on `POST /workspaces/{id}/files`:
 - **Name sanitization** — traversal (`../`, `..\`, absolute paths) collapses to a flat, ASCII-safe storage key (the on-disk name never contains separators or `..`); control/format characters (ESC, RTL overrides, NUL, CRLF) are stripped from the stored name; Unicode display names (e.g. Vietnamese `Báo cáo.pdf`) are preserved as `name` and NFC-normalized. Very long names are truncated with the extension kept.

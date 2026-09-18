@@ -11,7 +11,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 import logging_mw
 import rate_limit
@@ -132,5 +131,6 @@ for _r in (
 UPLOAD_DIR = Path(settings.upload_dir)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Static file serving for uploads
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+# Uploads are NOT mounted as static files: routers/files.py serves
+# ``GET /uploads/{storage_key}`` with workspace-membership auth (Stage 2.2,
+# TA2-2) so a bare URL on the LAN can no longer read workspace bytes.
