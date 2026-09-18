@@ -790,11 +790,27 @@ class TestFileUploadAbuse:
         assert r.status_code == 201
         assert r.json()["type"] == "document"
 
-    def test_filename_path_traversal_is_not_honored(self, client, two_workspaces):
-        """``../../etc/passwd`` in the filename must not escape UPLOAD_DIR."""
-        from pathlib import Path
+    def test_filename_path_traversal_is_not_honored(self, client, two_workspaces, tmp_path, monkeypatch):
+        """``../../evil-traversal`` in the filename must not escape UPLOAD_DIR.
 
+        Runs against an isolated tmp upload dir (the same hook
+        ``test_maintenance`` uses) so the probe never touches a real repo
+        directory and no stray blob can reach git status.
+        """
+        from fastapi.staticfiles import StaticFiles
+
+        import app as app_module
         from routers.files import _upload_dir
+
+        d = tmp_path / "uploads"
+        d.mkdir()
+        monkeypatch.setattr(app_module, "UPLOAD_DIR", d)
+        # The static mount captured the default ./uploads dir at import time,
+        # so swap the route to serve from the tmp dir instead.
+        app_module.app.router.routes[:] = [
+            r for r in app_module.app.router.routes if getattr(r, "name", None) != "uploads"
+        ]
+        app_module.app.mount("/uploads", StaticFiles(directory=str(d)), name="uploads")
 
         as_user(client, "userA")
         evil = "../../evil-traversal"
@@ -804,15 +820,34 @@ class TestFileUploadAbuse:
 
         # The stored key must resolve INSIDE the upload dir.
         resolved = (_upload_dir() / storage_key).resolve()
-        assert _upload_dir().resolve() in resolved.parents
+        from pathlib import Path
+
+        assert Path(d).resolve() in resolved.parents
 
         # And no file may have escaped to the parent of the upload dir.
-        escaped = (Path(_upload_dir()).parent / "evil-traversal").resolve()
+        escaped = (d / ".." / "evil-traversal").resolve()
         assert not escaped.exists()
 
-        # Cleanup so the stray blob does not leak into git status.
-        with __import__("contextlib").suppress(OSError):
-            resolved.unlink()
+    def test_uploaded_filename_round_trip(self, client, two_workspaces, tmp_path, monkeypatch):
+        """Whatever storage key is used, the recorded original name survives
+        and the bytes are retrievable via the returned url (no corruption)."""
+        from fastapi.staticfiles import StaticFiles
+
+        import app as app_module
+
+        d = tmp_path / "uploads"
+        d.mkdir()
+        monkeypatch.setattr(app_module, "UPLOAD_DIR", d)
+        app_module.app.router.routes[:] = [
+            r for r in app_module.app.router.routes if getattr(r, "name", None) != "uploads"
+        ]
+        app_module.app.mount("/uploads", StaticFiles(directory=str(d)), name="uploads")
+
+        as_user(client, "userA")
+        r = _upload(client, two_workspaces["ws_a"]["id"], "weird name.pdf", b"payload-bytes")
+        assert r.status_code == 201
+        assert r.json()["name"] == "weird name.pdf"
+        assert client.get(r.json()["url"]).status_code == 200
 
     def test_cross_workspace_link_target_rejected(self, client, two_workspaces):
         as_user(client, "userB")
@@ -877,16 +912,31 @@ class TestPrivacyEdges:
         ).status_code == 403
         assert client.delete(f"/notifications/{n.id}").status_code == 403
 
-    def test_static_uploads_served_outside_auth(self, client, two_workspaces):
-        """/uploads is public static — documented, not a regression vector.
-
-        The regression guarantee is that the FILE ROW and its storage key are
-        only ever disclosed to workspace members (covered above). We pin that
-        the static route exists and serves bytes so a future change that
-        accidentally requires auth on it is caught.
+    def test_uploaded_bytes_downloadable_via_url(self, client, tmp_path, monkeypatch):
+        """/uploads is public static by design — the protected surface is the
+        file ROW and its storage-key disclosure (Section 1 pins that only
+        workspace members ever see the key). This test pins that the static
+        route exists and serves the real bytes, so a future change that
+        accidentally breaks the download path is caught.
         """
+        from fastapi.staticfiles import StaticFiles
+
+        import app as app_module
+
+        d = tmp_path / "uploads"
+        d.mkdir()
+        monkeypatch.setattr(app_module, "UPLOAD_DIR", d)
+        # The static mount captured the default ./uploads dir at import time,
+        # so swap the route to serve from the tmp dir instead.
+        app_module.app.router.routes[:] = [
+            r for r in app_module.app.router.routes if getattr(r, "name", None) != "uploads"
+        ]
+        app_module.app.mount("/uploads", StaticFiles(directory=str(d)), name="uploads")
+
         as_user(client, "userA")
-        url = two_workspaces["file_a"]["url"]
-        r = client.get(url)
-        assert r.status_code == 200
-        assert r.content == b"bw-bytes"
+        ws = client.post("/workspaces", json={"name": "WS", "slug": "wsdl", "description": "x"})
+        assert ws.status_code == 201
+        up = _upload(client, ws.json()["id"], "doc.pdf", b"dl-bytes").json()
+        dl = client.get(up["url"])
+        assert dl.status_code == 200
+        assert dl.content == b"dl-bytes"
