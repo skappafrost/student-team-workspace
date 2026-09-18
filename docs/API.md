@@ -14,6 +14,17 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 - `GET /auth/me` → current user profile.
 - Tests can bypass JWT with `X-Test-User-Id` / `X-Test-User-Role` headers (test-only path).
 
+### JWT secret governance (TA1-2)
+
+The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo), so the backend **refuses to start** outside `ENVIRONMENT=test/dev` while the secret is still the default or blank — startup aborts with a `RuntimeError` instead of silently signing forgeable tokens. A deployment simply sets `ENVIRONMENT=production` (or leaves it unset) + a strong `JWT_SECRET_KEY`.
+
+**Rotating the secret** (e.g. after a leak, or periodically):
+
+1. Generate a new value: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+2. Update `JWT_SECRET_KEY` in the backend environment/`.env` and restart. There is a single signing key (no keyring), so restart applies it immediately.
+3. What it invalidates: **every existing access token and refresh token** stops validating (they were signed with the old key) — all users are effectively logged out and simply log in again. `auth_sessions` rows and revocations (S02) are keyed by `jti` and survive the rotation, so previously revoked tokens stay revoked.
+4. Optional cleanup: rows in `auth_sessions` whose tokens can no longer validate are inert; `POST /auth/logout-all` from each account or the existing maintenance script can prune them if desired.
+
 ## Conventions
 
 - **Workspace scoping**: almost every resource lives under `/workspaces/{workspace_id}/...`. Membership is checked per request (`403` if you're not a member, `404` if the thing doesn't exist). Guests (role `guest`) can read but not create messages/events/pages/files.
