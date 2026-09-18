@@ -36,6 +36,10 @@ class Settings(BaseSettings):
         """Server-side upload cap in bytes (MAX_UPLOAD_MB, default 25 MB)."""
         return int(self.max_upload_mb * 1024 * 1024)
 
+    # Per-workspace storage quota (TA2-3): max stored bytes per workspace,
+    # in megabytes. 0 disables the check. Counts File.size_bytes only.
+    max_workspace_storage_mb: int = 512
+
     # AI assistant
     ai_provider_api_key: str | None = None
     ai_provider_base_url: str | None = None

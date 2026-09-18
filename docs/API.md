@@ -125,6 +125,14 @@ Upload ingress rules (TA2-1), enforced server-side on `POST /workspaces/{id}/fil
 - **Duplicates** — same content uploaded twice is stored independently (two rows, two blobs, distinct ids). Dedupe-by-content-hash was considered and deferred: file rows support independent rename/relink/delete lifecycles, and refcounted blobs would ripple through delete in three places plus the orphan sweeper — worth a dedicated follow-up if storage cost matters.
 - Error codes follow the project envelope: `422` empty file/invalid name, `413` oversize, `415` disallowed type.
 
+#### Storage quota (TA2-3)
+
+Each workspace has a storage quota enforced at upload time on `POST /workspaces/{id}/files`: if the workspace's stored bytes (SUM of `files.size_bytes` for that workspace) plus the incoming upload would exceed the limit, the request is rejected with `413` and a `detail` message naming the quota — no row is created, no bytes are written. The check runs before any bytes hit disk. Deleting a file frees its bytes against the quota immediately (the row goes first, bytes unlink best-effort).
+
+- Config: `MAX_WORKSPACE_STORAGE_MB` (default `512`; `0` disables the check). Conventional `Settings` field `max_workspace_storage_mb`, validated by pydantic-settings.
+- Quota is **per workspace**: usage in one workspace never blocks uploads to another.
+- **Orphaned bytes do not count.** Usage is computed from `files.size_bytes` rows, not raw disk usage. If a delete leaves bytes on disk (Windows lock, crash), those bytes are invisible to the quota until `python -m maintenance purge-orphans --apply` unlinks them — quota enforcement and orphan purging are therefore complementary: the quota caps what the API tracks, the sweeper reclaims what it doesn't.
+
 ### Notifications
 
 | Method | Path | Notes |
