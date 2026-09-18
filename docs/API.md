@@ -114,6 +114,14 @@ The shipped `JWT_SECRET_KEY` default is public knowledge (it lives in the repo),
 | GET, POST | `/workspaces/{id}/files` | Multipart upload; `?project_id=`/`?task_id=`/`?message_id=` filters on GET |
 | GET, PATCH, DELETE | `/files/{id}` | PATCH/DELETE admin+ or uploader; content served from `/uploads/...`; guests cannot upload |
 
+Upload ingress rules (TA2-1), enforced server-side on `POST /workspaces/{id}/files`:
+- **Name sanitization** — traversal (`../`, `..\`, absolute paths) collapses to a flat, ASCII-safe storage key (the on-disk name never contains separators or `..`); control/format characters (ESC, RTL overrides, NUL, CRLF) are stripped from the stored name; Unicode display names (e.g. Vietnamese `Báo cáo.pdf`) are preserved as `name` and NFC-normalized. Very long names are truncated with the extension kept.
+- **Size cap** — uploads larger than `MAX_UPLOAD_MB` (default 25 MB, configurable via env following `config.py` pydantic-settings conventions) are rejected with `413` while streaming, before anything is written to disk.
+- **Extension allow-list** — images (png/jpg/gif/webp/bmp/heic), documents (pdf/txt/md/csv/rtf/office/odf), media (mp4/mov/webm/mp3/wav/...), archives (zip/tar/gz/7z), data/code artifacts (json/yaml/toml/py/js/ts/.../ipynb). `svg`/`html` are deliberately excluded (stored-XSS via the same-origin `/uploads` static mount); executables/scripts and macro documents are rejected with `415`. A missing extension is also rejected.
+- **Content sniffing** — PE (`MZ`), ELF, Mach-O and Java-class magic signatures are rejected with `415` even when the extension/content-type claims otherwise (renamed-executable spoofing).
+- **Duplicates** — same content uploaded twice is stored independently (two rows, two blobs, distinct ids). Dedupe-by-content-hash was considered and deferred: file rows support independent rename/relink/delete lifecycles, and refcounted blobs would ripple through delete in three places plus the orphan sweeper — worth a dedicated follow-up if storage cost matters.
+- Error codes follow the project envelope: `422` empty file/invalid name, `413` oversize, `415` disallowed type.
+
 ### Notifications
 
 | Method | Path | Notes |

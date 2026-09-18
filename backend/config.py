@@ -29,6 +29,12 @@ class Settings(BaseSettings):
 
     # File uploads
     upload_dir: str = "./uploads"
+    max_upload_mb: float = 25.0
+
+    @property
+    def max_upload_bytes(self) -> int:
+        """Server-side upload cap in bytes (MAX_UPLOAD_MB, default 25 MB)."""
+        return int(self.max_upload_mb * 1024 * 1024)
 
     # AI assistant
     ai_provider_api_key: str | None = None
