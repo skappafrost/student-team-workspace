@@ -114,6 +114,15 @@ class AuthSession(Base):
     revoked_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    #: Rotation family (TA1-1): rows minted by rotating the same original
+    #: login session share one family id, so replaying an already-rotated
+    #: refresh token can revoke the whole lineage. Null on rows that have
+    #: never been rotated (and on rows minted before this column existed).
+    family_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    #: True once this row has been rotated into a successor row (TA1-1).
+    #: Distinguishes "revoked because rotated" (replay = theft signal ->
+    #: family invalidation) from "revoked by logout" (plain 401).
+    rotated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     user: Mapped[User] = relationship("User")
 

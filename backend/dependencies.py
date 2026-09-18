@@ -46,15 +46,25 @@ def create_access_token(
     return jwt.encode(payload, _get_secret(), algorithm=ALGORITHM)
 
 
-def create_session(user_id: str, db) -> str:
-    """Mint an access token backed by a revocable auth_sessions row (S02)."""
+def create_session_pair(user_id: str, db, family_id: str | None = None) -> tuple[str, str]:
+    """Mint a revocable session and its access+refresh token pair (TA1-1).
+
+    Both tokens share one ``auth_sessions`` row (same ``jti``) so that
+    ``/auth/logout``, ``/auth/logout-all`` and account deletion revoke the
+    refresh token together with the access token. The refresh token carries
+    the same ``jti`` and ``type: refresh`` so the access-token path can never
+    accept it. ``family_id`` chains rotation successors back to the original
+    login session for family invalidation.
+    """
     import models
 
     jti = str(uuid.uuid4())
     expires_at = _utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    db.add(models.AuthSession(user_id=user_id, jti=jti, expires_at=expires_at))
+    db.add(
+        models.AuthSession(user_id=user_id, jti=jti, expires_at=expires_at, family_id=family_id)
+    )
     db.flush()
-    return create_access_token(user_id, jti=jti)
+    return create_access_token(user_id, jti=jti), create_refresh_token(user_id, jti=jti)
 
 
 def revoke_session(db, jti: str) -> None:
@@ -80,6 +90,91 @@ def revoke_all_sessions(db, user_id: str) -> int:
     return len(rows)
 
 
+def _revoke_family(db, family_id: str) -> int:
+    """Revoke every unrevoked row in a rotation family (TA1-1 replay guard)."""
+    import models
+
+    rows = (
+        db.query(models.AuthSession)
+        .filter(models.AuthSession.family_id == family_id, models.AuthSession.revoked_at.is_(None))
+        .all()
+    )
+    for row in rows:
+        row.revoked_at = _utcnow()
+    db.flush()
+    return len(rows)
+
+
+def rotate_session(db, jti: str, user_id: str) -> tuple[str, str, bool] | None:
+    """Atomically rotate a refresh session into a fresh pair (TA1-1).
+
+    Returns ``(access_token, refresh_token, replayed)`` — ``replayed`` is
+    True when the presented token was already rotated (reuse detection):
+    in that case the whole family is revoked and nothing is issued, and the
+    caller MUST answer 401. Returns ``None`` when no live row exists for
+    ``jti`` (unknown/expired/revoked): also a 401 for the caller.
+
+    The claim is a conditional UPDATE (``revoked_at IS NULL AND rotated_at IS
+    NULL`` on the jti row) so two concurrent refreshes with the same token
+    cannot both win: exactly one rotates, the other sees the row already
+    rotated and triggers family invalidation.
+    """
+    import models
+    from sqlalchemy import update
+
+    row = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
+    if row is None:
+        return None
+    if row.user_id != user_id:
+        return None  # signed for another subject: never reveal state
+
+    if row.rotated:
+        # Reuse detection: this token was already rotated once. Reuse of a
+        # rotated token is the theft signal -> kill the entire family.
+        family = row.family_id or row.id
+        _revoke_family(db, family)
+        db.commit()
+        return ("", "", True)
+
+    if row.revoked_at is not None:
+        # Explicitly revoked (logout / logout-all / family kill), never
+        # rotated: plain 401, no family action.
+        return None
+
+    # Single-use claim: conditional UPDATE (id + still-live + not-yet-rotated)
+    # so two concurrent refreshes with the same token cannot both win —
+    # exactly one rotates; the loser re-reads, sees rotated=True above and
+    # triggers family invalidation.
+    claimed = (
+        update(models.AuthSession)
+        .where(
+            models.AuthSession.id == row.id,
+            models.AuthSession.revoked_at.is_(None),
+            models.AuthSession.rotated.is_(False),
+        )
+        .values(rotated=True, revoked_at=_utcnow())
+        .execution_options(synchronize_session=False)
+    )
+    result = db.execute(claimed)
+    if result.rowcount == 0:
+        # Lost the claim race to a concurrent refresh: treat as replay
+        # (reuse detection) and revoke the whole family.
+        db.rollback()
+        row = db.query(models.AuthSession).filter(models.AuthSession.jti == jti).first()
+        if row is not None and row.rotated:
+            family = row.family_id or row.id
+            _revoke_family(db, family)
+            db.commit()
+            return ("", "", True)
+        return None
+
+    # Won the claim: mint the successor row (same family, fresh jti).
+    family_id = row.family_id or row.id
+    access_token, refresh_token = create_session_pair(user_id, db, family_id)
+    db.commit()
+    return access_token, refresh_token, False
+
+
 def _is_jti_revoked(jti: str) -> bool:
     """Revocation check against auth_sessions; missing row counts as revoked."""
     import models
@@ -93,9 +188,11 @@ def _is_jti_revoked(jti: str) -> bool:
         db.close()
 
 
-def create_refresh_token(subject: str) -> str:
+def create_refresh_token(subject: str, jti: str | None = None) -> str:
     expire = datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": subject, "exp": expire, "type": "refresh"}
+    if jti:
+        payload["jti"] = jti
     return jwt.encode(payload, _get_secret(), algorithm=ALGORITHM)
 
 
