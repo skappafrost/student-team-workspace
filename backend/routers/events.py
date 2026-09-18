@@ -1,7 +1,7 @@
 """Calendar event CRUD."""
 
 import calendar
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
@@ -78,6 +78,21 @@ async def create_event(
     return event
 
 
+def _naive_utc(value: datetime) -> datetime:
+    """Normalize a possibly tz-aware DB timestamp to naive UTC.
+
+    ``DateTime(timezone=True)`` round-trips values WITHOUT tzinfo on SQLite
+    (plain TEXT) and WITH tzinfo on Postgres (timestamptz). Any comparison
+    between a DB-loaded timestamp and the range bounds parsed from the query
+    string (always naive) must first drop the offset, otherwise Postgres raises
+    ``TypeError: can't compare offset-naive and offset-aware datetimes`` (a
+    500 on every recurring-event list with a date range).
+    """
+    if value.tzinfo is not None:
+        return value.astimezone(UTC).replace(tzinfo=None)
+    return value
+
+
 def _add_months(dt: datetime, months: int) -> datetime:
     month = dt.month - 1 + months
     year = dt.year + month // 12
@@ -95,12 +110,21 @@ def _expand_occurrences(
     """Expand a recurring event into concrete occurrences intersecting the range.
 
     RRULE-lite: daily / weekly / monthly steps from the base start_at.
+
+    The event's timestamps and the range bounds are both normalized to naive
+    UTC before stepping, because the two come from different sources with
+    different tz-awareness depending on the dialect (see ``_naive_utc``).
     """
     base = schemas.EventOut.model_validate(event)
     if event.recurrence in (None, "none") or range_start is None or range_end is None:
         return [base]
 
-    duration = (event.end_at - event.start_at) if event.end_at else None
+    start = _naive_utc(event.start_at)
+    end = _naive_utc(event.end_at) if event.end_at else None
+    rs = _naive_utc(range_start)
+    re_ = _naive_utc(range_end)
+
+    duration = (end - start) if end else None
 
     def step(dt: datetime) -> datetime:
         if event.recurrence == "daily":
@@ -110,10 +134,16 @@ def _expand_occurrences(
         return _add_months(dt, 1)
 
     out: list[schemas.EventOut] = []
-    start_at = event.start_at
-    while start_at <= range_end and len(out) < cap:
+    start_at = start
+    while start_at <= re_ and len(out) < cap:
         occ_end = start_at + duration if duration else None
-        if (occ_end is None or occ_end >= range_start) and start_at >= range_start or start_at < range_start and occ_end is not None and occ_end >= range_start:
+        if (
+            (occ_end is None or occ_end >= rs)
+            and start_at >= rs
+            or start_at < rs
+            and occ_end is not None
+            and occ_end >= rs
+        ):
             out.append(
                 base.model_copy(
                     update={

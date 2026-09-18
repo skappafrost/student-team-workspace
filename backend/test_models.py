@@ -1,15 +1,15 @@
 """Database roundtrip tests for SQLAlchemy models and Alembic migration."""
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
+from alembic import command
 from database import Base
 from models import (
     Channel,
@@ -27,7 +27,7 @@ from models import (
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @pytest.fixture(scope="function")
@@ -58,7 +58,13 @@ def test_models_roundtrip_one_row_per_table(db_session):
         description="Project one",
         status="active",
     )
-    channel = Channel(workspace_id=workspace.id, name="general", is_private=False, created_by=user.id, type="general")
+    channel = Channel(
+        workspace_id=workspace.id,
+        name="general",
+        is_private=False,
+        created_by=user.id,
+        type="general",
+    )
     document = Document(
         workspace_id=workspace.id,
         project_id=None,
@@ -121,13 +127,29 @@ def test_models_roundtrip_one_row_per_table(db_session):
 
 
 def test_alembic_migration_creates_all_tables(db_session):
-    """Ensure Alembic-style schema contains every expected table."""
-    engine = db_session.bind
-    tables = {"users", "workspaces", "workspace_members", "projects", "tasks",
-              "task_comments", "channels", "messages", "documents", "files", "events"}
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
-        existing = {row[0] for row in result}
+    """Ensure Alembic-style schema contains every expected table.
+
+    The system-catalog query is dialect-specific (sqlite_master vs
+    information_schema), so the spelling is picked from the engine in use —
+    otherwise this assertion could only ever run on SQLite.
+    """
+    from sqlalchemy import inspect
+
+    inspector = inspect(db_session.bind)
+    existing = {t.lower() for t in inspector.get_table_names()}
+    tables = {
+        "users",
+        "workspaces",
+        "workspace_members",
+        "projects",
+        "tasks",
+        "task_comments",
+        "channels",
+        "messages",
+        "documents",
+        "files",
+        "events",
+    }
     assert tables.issubset(existing)
 
 
@@ -177,21 +199,23 @@ def test_migration_dedupes_and_enforces_unique():
         # 2) Seed users/workspace plus duplicate memberships.
         engine = create_engine(db_url)
         with engine.begin() as conn:
-            conn.execute(text(
-                "INSERT INTO users (id, email, display_name, is_active) VALUES "
-                "('u1', 'a@example.com', 'A', 1), ('u2', 'b@example.com', 'B', 1)"
-            ))
-            conn.execute(text(
-                "INSERT INTO workspaces (id, name, slug) VALUES ('w1', 'WS', 'ws1')"
-            ))
-            conn.execute(text(
-                "INSERT INTO workspace_members (id, workspace_id, user_id, role, joined_at) VALUES "
-                "('m1', 'w1', 'u1', 'member', '2026-01-01 10:00:00'), "
-                "('m2', 'w1', 'u1', 'member', '2026-02-01 10:00:00'), "
-                "('m3', 'w1', 'u1', 'admin',  '2026-03-01 10:00:00'), "
-                "('m4', 'w1', 'u2', 'member', '2026-01-01 10:00:00'), "
-                "('m5', 'w1', 'u2', 'member', '2026-02-01 10:00:00')"
-            ))
+            conn.execute(
+                text(
+                    "INSERT INTO users (id, email, display_name, is_active) VALUES "
+                    "('u1', 'a@example.com', 'A', 1), ('u2', 'b@example.com', 'B', 1)"
+                )
+            )
+            conn.execute(text("INSERT INTO workspaces (id, name, slug) VALUES ('w1', 'WS', 'ws1')"))
+            conn.execute(
+                text(
+                    "INSERT INTO workspace_members (id, workspace_id, user_id, role, joined_at) VALUES "
+                    "('m1', 'w1', 'u1', 'member', '2026-01-01 10:00:00'), "
+                    "('m2', 'w1', 'u1', 'member', '2026-02-01 10:00:00'), "
+                    "('m3', 'w1', 'u1', 'admin',  '2026-03-01 10:00:00'), "
+                    "('m4', 'w1', 'u2', 'member', '2026-01-01 10:00:00'), "
+                    "('m5', 'w1', 'u2', 'member', '2026-02-01 10:00:00')"
+                )
+            )
 
         # 3) Upgrade to head — dedupe then add the unique constraint.
         command.upgrade(cfg, "head")
@@ -199,9 +223,9 @@ def test_migration_dedupes_and_enforces_unique():
         # 4) Dedupe kept the most privileged role (u1 -> admin, latest join)
         #    and the earliest joined_at among equal roles (u2 -> 2026-01-01).
         with engine.connect() as conn:
-            rows = conn.execute(text(
-                "SELECT user_id, role, joined_at FROM workspace_members ORDER BY user_id"
-            )).fetchall()
+            rows = conn.execute(
+                text("SELECT user_id, role, joined_at FROM workspace_members ORDER BY user_id")
+            ).fetchall()
         assert [(r.user_id, r.role, str(r.joined_at)[:19]) for r in rows] == [
             ("u1", "admin", "2026-03-01 10:00:00"),
             ("u2", "member", "2026-01-01 10:00:00"),
@@ -210,10 +234,12 @@ def test_migration_dedupes_and_enforces_unique():
         # 5) Unique constraint is now enforced at the DB level.
         with pytest.raises(IntegrityError):
             with engine.begin() as conn:
-                conn.execute(text(
-                    "INSERT INTO workspace_members (id, workspace_id, user_id, role, joined_at) "
-                    "VALUES ('m6', 'w1', 'u1', 'guest', '2026-04-01 10:00:00')"
-                ))
+                conn.execute(
+                    text(
+                        "INSERT INTO workspace_members (id, workspace_id, user_id, role, joined_at) "
+                        "VALUES ('m6', 'w1', 'u1', 'guest', '2026-04-01 10:00:00')"
+                    )
+                )
 
         # 6) Alembic round-trip: downgrade below the constraint and back up.
         command.downgrade(cfg, "101f600f1926")
@@ -235,4 +261,5 @@ def test_migration_dedupes_and_enforces_unique():
                 break
             except PermissionError:
                 import time
+
                 time.sleep(0.2)
