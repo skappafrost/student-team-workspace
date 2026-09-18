@@ -12,7 +12,7 @@ else
 BACKEND_PY := .venv/Scripts/python.exe
 endif
 
-.PHONY: dev test seed
+.PHONY: dev test seed bench
 
 dev:
 	docker compose -f backend/docker-compose.yml up -d postgres
@@ -25,3 +25,6 @@ test:
 
 seed:
 	@echo "TODO wired to T045 manage.py"
+
+bench:
+	cd backend && $(BACKEND_PY) bench/run_bench.py
