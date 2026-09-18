@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     ai_provider_base_url: str | None = None
     ai_provider_model: str = "gpt-4o-mini"
 
+    # Observability (TA6-1): statements at/over this many ms get a
+    # ``slow_query`` WARNING (fingerprint only, never params).
+    slow_query_threshold_ms: float = 200.0
+
     def cors_origin_list(self) -> list[str]:
         if self.cors_origins:
             return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

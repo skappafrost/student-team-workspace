@@ -157,6 +157,21 @@ Frames:
 
 Rooms are in-memory, so run exactly one uvicorn worker.
 
+## Health, readiness & observability
+
+| Endpoint | Meaning | Status codes |
+|---|---|---|
+| `GET /health` | Legacy liveness, body frozen: `{"status": "ok"}` | always 200 |
+| `GET /healthz` | Liveness + cheap DB latency readout: `{status, db_latency_ms, errors_5xx}` | always 200 (`db_latency_ms` may be `null`) |
+| `GET /readyz` | Deployment gate: DB answers `SELECT 1` **and** `alembic_version` equals the single declared migration head. Body: `{status, db, db_latency_ms, schema_current, alembic_heads, alembic_applied}` | 200 ready / 503 not ready |
+
+`/readyz` never leaks exception text, connection strings or credentials — only booleans, latencies and revision ids.
+
+Logging (stdlib `logging`, no extra deps):
+
+- Every request logs one line `METHOD path status ms user=<jwt-sub> req=<X-Request-Id>` on logger `stw.requests` (5xx lines are WARNING and carry a running `err5xx=<n>` counter; also exposed on `/healthz` as `errors_5xx`). Query strings, headers and cookies are never logged.
+- Statements slower than `SLOW_QUERY_THRESHOLD_MS` (env, default `200`) log `slow_query <ms>ms stmt=<fingerprint>` on logger `stw.db` at WARNING. Fingerprints are whitespace-collapsed, literal-masked and truncated — bound parameters never appear.
+
 ## Frontend BFF mapping
 
 The Next.js app never calls the backend directly from the browser. `app/src/app/api/*/route.ts` handlers proxy to the backend with the session cookie. "Current workspace" = first entry of `GET /workspaces` (resolved server-side) — if you add multi-workspace switching, that resolution is the place to change.
