@@ -224,15 +224,18 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
         await websocket.close(code=1008, reason="Missing session_token")
         return
 
-    try:
-        user = _ws_user_from_token(token)
-    except HTTPException:
-        await websocket.close(code=1008, reason="Invalid session_token")
-        return
-
-    # Validate channel membership.
+    # Single DB session for the whole handshake (TA1-3): token revocation
+    # check and membership lookups share one session, closed before the
+    # long-lived receive loop starts.
     db = next(get_db())
     try:
+        try:
+            user = _ws_user_from_token(token, db)
+        except HTTPException:
+            await websocket.close(code=1008, reason="Invalid session_token")
+            return
+
+        # Validate channel membership.
         channel = _get_channel_or_404(db, channel_id)
         membership = _require_member(channel.workspace_id, user["id"], db)
         user_role = (

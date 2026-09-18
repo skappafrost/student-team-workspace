@@ -36,8 +36,12 @@ def client(db_session):
 
 @pytest.fixture(autouse=True)
 def _restore_db_url():
-    """_decode_token's revocation check reads the module-level SessionLocal;
-    rebind it to the test DB per test, restore the configured URL after."""
+    """Keep the module-level engine pointed at this module's test DB.
+
+    Since TA1-3 the revocation check runs on the injected request session,
+    so this rebinding is belt-and-suspenders for any code path that still
+    reads the module-level SessionLocal.
+    """
     import database
     from config import settings
 

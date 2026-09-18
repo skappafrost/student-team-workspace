@@ -118,7 +118,7 @@ async def me(request: Request, db: Session = Depends(get_db)):
     token = _token_from_request(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    payload = _decode_token(token)
+    payload = _decode_token(token, db)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
@@ -197,7 +197,7 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     """Revoke the current session (jti blocklist) and clear the cookie."""
     token = _token_from_request(request)
     if token:
-        payload = _decode_token(token)
+        payload = _decode_token(token, db)
         # _decode_token returns None once revoked; decode raw to still allow
         # idempotent logout on an already-dead token.
         if payload is None:

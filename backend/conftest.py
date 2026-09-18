@@ -132,7 +132,7 @@ class _EnsuringClient(TestClient):
             if token:
                 try:
                     from app import _decode_token as _dec
-                    payload = _dec(token)
+                    payload = _dec(token, self._db)
                     uid = (payload or {}).get("sub")
                     if uid and self._db.get(User, uid) is None:
                         self._db.add(User(
