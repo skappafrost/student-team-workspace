@@ -88,15 +88,12 @@ def _channel_member_out(cm: models.ChannelMember) -> dict:
 
 
 def _dm_out(channel: models.Channel, user_id: str, db: Session) -> schemas.DMChannelOut:
-    peer = (
-        db.query(models.User)
-        .join(models.ChannelMember, models.ChannelMember.user_id == models.User.id)
-        .filter(
-            models.ChannelMember.channel_id == channel.id,
-            models.ChannelMember.user_id != user_id,
-        )
-        .first()
-    )
+    return _dm_out_with_peer(channel, _dm_peers(db, [channel], user_id).get(channel.id))
+
+
+def _dm_out_with_peer(
+    channel: models.Channel, peer: models.User | None
+) -> schemas.DMChannelOut:
     return schemas.DMChannelOut(
         id=channel.id,
         workspace_id=channel.workspace_id,
@@ -108,6 +105,30 @@ def _dm_out(channel: models.Channel, user_id: str, db: Session) -> schemas.DMCha
         peer_id=peer.id if peer else None,
         peer_name=peer.display_name if peer else None,
     )
+
+
+def _dm_peers(db: Session, channels: list[models.Channel], user_id: str) -> dict[str, models.User]:
+    """Batched peer lookup: one query for every channel instead of one per row.
+
+    Returns {channel_id: peer User} — the first non-``user_id`` member of each
+    channel, matching what the per-row ``.first()`` query produced (DM channels
+    hold exactly two members by construction).
+    """
+    if not channels:
+        return {}
+    rows = (
+        db.query(models.ChannelMember.channel_id, models.User)
+        .join(models.User, models.User.id == models.ChannelMember.user_id)
+        .filter(
+            models.ChannelMember.channel_id.in_([c.id for c in channels]),
+            models.ChannelMember.user_id != user_id,
+        )
+        .all()
+    )
+    peers: dict[str, models.User] = {}
+    for channel_id, peer in rows:
+        peers.setdefault(channel_id, peer)
+    return peers
 
 
 @router.post(
@@ -136,15 +157,19 @@ async def create_dm(
         )
         .all()
     )
-    for channel in candidates:
-        member_ids = {
-            m.user_id
-            for m in db.query(models.ChannelMember)
-            .filter(models.ChannelMember.channel_id == channel.id)
+    if candidates:
+        # One batched query for every candidate's members (was 1 per channel).
+        member_rows = (
+            db.query(models.ChannelMember.channel_id, models.ChannelMember.user_id)
+            .filter(models.ChannelMember.channel_id.in_([c.id for c in candidates]))
             .all()
-        }
-        if member_ids == set(pair):
-            return _dm_out(channel, current_user["id"], db)
+        )
+        members_by_channel: dict[str, set[str]] = {}
+        for channel_id, member_user_id in member_rows:
+            members_by_channel.setdefault(channel_id, set()).add(member_user_id)
+        for channel in candidates:
+            if members_by_channel.get(channel.id, set()) == set(pair):
+                return _dm_out(channel, current_user["id"], db)
 
     channel = models.Channel(
         workspace_id=workspace_id,
@@ -185,7 +210,8 @@ async def list_dms(
         )
         .all()
     )
-    return [_dm_out(c, current_user["id"], db) for c in channels]
+    peers = _dm_peers(db, channels, current_user["id"])
+    return [_dm_out_with_peer(c, peers.get(c.id)) for c in channels]
 
 
 @router.websocket("/ws/channels/{channel_id}")

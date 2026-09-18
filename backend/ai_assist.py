@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 import models
 import channel_access
@@ -224,6 +224,8 @@ def search_workspace(
             db.query(models.Task)
             .join(models.Project, models.Task.project_id == models.Project.id)
             .filter(models.Project.workspace_id.in_(workspace_ids))
+            # task.project is read per row below — eager-load it (TA5-1: was N+1).
+            .options(selectinload(models.Task.project))
             .all()
         )
         for task in tasks:
@@ -261,6 +263,8 @@ def search_workspace(
             db.query(models.Message)
             .join(models.Channel, models.Message.channel_id == models.Channel.id)
             .filter(models.Channel.workspace_id.in_(workspace_ids))
+            # message.channel is read per row below — eager-load it (TA5-1: was N+1).
+            .options(selectinload(models.Message.channel))
             .all()
         )
         # Private channels must not leak into search results for non-members.
