@@ -54,25 +54,6 @@ def _require_min_role(current_user: dict, required_role: Role) -> None:
         )
 
 
-def _require_min_role_in_workspace(
-    workspace_id: str, user_id: str, required_role: Role, db: Session
-) -> models.WorkspaceMembership:
-    membership = _require_member(workspace_id, user_id, db)
-    user_role_value = membership.role
-    try:
-        user_role = Role(user_role_value)
-    except ValueError:
-        user_role = Role.GUEST
-    user_level = ROLE_HIERARCHY[user_role]
-    required_level = ROLE_HIERARCHY[required_role]
-    if user_level < required_level:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Role '{user_role.value}' is insufficient. Requires '{required_role.value}'.",
-        )
-    return membership
-
-
 def require_role(required_role: Role):
     """Dependency factory that requires a minimum workspace role."""
 

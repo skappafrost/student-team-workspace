@@ -283,6 +283,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 - #148 `harden/nplus1-indexes` — N+1 elimination + FK index plan.
 - #149 `harden/observability` — slow-query logging, 5xx counter, `/readyz` readiness.
 - #159 `harden/pagination-contract` — uniform `limit`/`offset` on list endpoints.
+- `harden/coverage-floor` (TA6-3) — CI runs `pytest --cov` on both DB jobs and enforces a `fail_under` floor; adds regression tests for the RBAC core. Not endpoint-facing. Internal-only note: the unused private helper `authorization._require_min_role_in_workspace` was removed (no callers in the repo, public RBAC surface unchanged).
 
 **Docs-only regeneration note**: this file was rewritten for main @ bca27ce. When a `harden/*` PR above merges, add its row here and drop it from the open list — that is the whole maintenance burden.
 ### TA3-2 — ilike wildcard escaping + channels type validation

@@ -50,3 +50,8 @@ e2e-debug*.mjs
 test_stw*.db
 test-results/
 playwright-report/
+
+# Coverage artifacts (TA6-3): produced by pytest --cov in CI and locally.
+.coverage
+coverage.xml
+htmlcov/

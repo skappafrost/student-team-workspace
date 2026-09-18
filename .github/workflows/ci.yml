@@ -24,9 +24,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run pytest
-        run: pytest -q
+        run: pytest -q --cov=. --cov-report=term --cov-report=xml
         env:
           ENVIRONMENT: test
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          fail_ci_if_error: false
 
   backend-pg:
     runs-on: ubuntu-latest
@@ -56,10 +61,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run pytest (Postgres)
-        run: pytest -q
+        run: pytest -q --cov=. --cov-report=term --cov-report=xml
         env:
           ENVIRONMENT: test
           DATABASE_URL: postgresql://stw_test:stw_test@localhost:5432/stw_test
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          fail_ci_if_error: false
 
   frontend:
     runs-on: ubuntu-latest
