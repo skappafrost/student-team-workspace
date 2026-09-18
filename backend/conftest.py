@@ -28,8 +28,18 @@ os.environ.setdefault("ENVIRONMENT", "test")
 
 # Import the app AFTER pinning DATABASE_URL so its engine targets the test DB.
 from app import app, create_access_token  # noqa: E402
-from database import engine, get_db, Base  # noqa: E402
+from database import Base, engine, get_db  # noqa: E402
 from models import User  # noqa: E402
+
+
+def is_postgres() -> bool:
+    """True when the suite is running against the Postgres backend-pg job.
+
+    ``DateTime(timezone=True)`` round-trips tz-aware values on Postgres
+    (timestamptz) and naive ones on SQLite, so a handful of assertions have to
+    account for the engine. Importable from any test module.
+    """
+    return os.environ.get("DATABASE_URL", "").startswith(("postgres", "postgresql"))
 
 
 # ---------------------------------------------------------------------------
