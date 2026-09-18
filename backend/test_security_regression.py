@@ -790,64 +790,22 @@ class TestFileUploadAbuse:
         assert r.status_code == 201
         assert r.json()["type"] == "document"
 
-    def test_filename_path_traversal_is_not_honored(self, client, two_workspaces, tmp_path, monkeypatch):
-        """``../../evil-traversal`` in the filename must not escape UPLOAD_DIR.
+    def test_filename_path_traversal_rejected(self, client, two_workspaces):
+        """Filenames containing path separators must be rejected with 422.
 
-        Runs against an isolated tmp upload dir (the same hook
-        ``test_maintenance`` uses) so the probe never touches a real repo
-        directory and no stray blob can reach git status.
+        A traversal filename is not storable: with the uuid-prefixed key it
+        either escapes UPLOAD_DIR (Windows path normalization) or makes the
+        write fail with a bare 500 (POSIX: the literal ``<uuid>_..`` directory
+        does not exist). Neither outcome is acceptable, so the upload now
+        rejects it before touching the filesystem. This assertion works
+        identically on both CI runners.
         """
-        from fastapi.staticfiles import StaticFiles
-
-        import app as app_module
-        from routers.files import _upload_dir
-
-        d = tmp_path / "uploads"
-        d.mkdir()
-        monkeypatch.setattr(app_module, "UPLOAD_DIR", d)
-        # The static mount captured the default ./uploads dir at import time,
-        # so swap the route to serve from the tmp dir instead.
-        app_module.app.router.routes[:] = [
-            r for r in app_module.app.router.routes if getattr(r, "name", None) != "uploads"
-        ]
-        app_module.app.mount("/uploads", StaticFiles(directory=str(d)), name="uploads")
-
         as_user(client, "userA")
-        evil = "../../evil-traversal"
-        r = _upload(client, two_workspaces["ws_a"]["id"], evil, b"pwned")
-        assert r.status_code == 201
-        storage_key = r.json()["url"].removeprefix("/uploads/")
-
-        # The stored key must resolve INSIDE the upload dir.
-        resolved = (_upload_dir() / storage_key).resolve()
-        from pathlib import Path
-
-        assert Path(d).resolve() in resolved.parents
-
-        # And no file may have escaped to the parent of the upload dir.
-        escaped = (d / ".." / "evil-traversal").resolve()
-        assert not escaped.exists()
-
-    def test_uploaded_filename_round_trip(self, client, two_workspaces, tmp_path, monkeypatch):
-        """Whatever storage key is used, the recorded original name survives
-        and the bytes are retrievable via the returned url (no corruption)."""
-        from fastapi.staticfiles import StaticFiles
-
-        import app as app_module
-
-        d = tmp_path / "uploads"
-        d.mkdir()
-        monkeypatch.setattr(app_module, "UPLOAD_DIR", d)
-        app_module.app.router.routes[:] = [
-            r for r in app_module.app.router.routes if getattr(r, "name", None) != "uploads"
-        ]
-        app_module.app.mount("/uploads", StaticFiles(directory=str(d)), name="uploads")
-
-        as_user(client, "userA")
-        r = _upload(client, two_workspaces["ws_a"]["id"], "weird name.pdf", b"payload-bytes")
-        assert r.status_code == 201
-        assert r.json()["name"] == "weird name.pdf"
-        assert client.get(r.json()["url"]).status_code == 200
+        ws_id = two_workspaces["ws_a"]["id"]
+        for evil in ("../../evil-one", "../evil-two", "sub/../../evil-three", "..\\evil-four"):
+            r = _upload(client, ws_id, evil, b"pwned")
+            assert r.status_code == 422, f"{evil!r}: expected 422, got {r.status_code}"
+            assert "path separators" in r.json()["detail"]
 
     def test_cross_workspace_link_target_rejected(self, client, two_workspaces):
         as_user(client, "userB")

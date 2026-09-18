@@ -2,8 +2,7 @@
 
 import logging
 import mimetypes
-import re
-import unicodedata
+import os
 import uuid
 from pathlib import Path
 
@@ -326,6 +325,13 @@ async def upload_file(
 
     if not file.filename:
         raise HTTPException(status_code=422, detail="File name is required")
+
+    # A filename containing path separators or traversal components cannot be
+    # stored safely: with a uuid-prefixed key it either escapes UPLOAD_DIR or,
+    # when the intermediate directory does not exist, the write fails with a
+    # bare 500. Reject it cleanly before touching the filesystem (F02-abuse).
+    if file.filename and (os.sep in file.filename or "/" in file.filename or "\\" in file.filename):
+        raise HTTPException(status_code=422, detail="File name must not contain path separators")
 
     _validate_link_targets(db, workspace_id, project_id, task_id, message_id)
 
