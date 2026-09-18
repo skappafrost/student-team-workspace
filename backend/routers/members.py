@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
 import models
+import pagination as pagination_lib
 import schemas
 from authorization import Role, require_permission
 from database import get_db
@@ -15,16 +16,26 @@ router = APIRouter()
 @router.get("/workspaces/{workspace_id}/members", response_model=list[schemas.WorkspaceMemberOut])
 async def list_workspace_members(
     workspace_id: str,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(require_permission("workspace.manage_members")),
     db: Session = Depends(get_db),
 ):
-    """List all members of a workspace. Requires admin or higher role."""
+    """List all members of a workspace. Requires admin or higher role.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     # RBAC enforced by require_permission dependency
     _get_workspace_or_404(db, workspace_id)
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     members = (
         db.query(models.WorkspaceMembership)
         .options(selectinload(models.WorkspaceMembership.user))
         .filter(models.WorkspaceMembership.workspace_id == workspace_id)
+        .order_by(models.WorkspaceMembership.joined_at.asc())
+        .offset(_offset)
+        .limit(_limit)
         .all()
     )
     return members

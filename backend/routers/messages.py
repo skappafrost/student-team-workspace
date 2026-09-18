@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
 import models
+import pagination as pagination_lib
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
@@ -140,11 +141,19 @@ def _notify_message_fanout(
 async def list_channel_messages(
     channel_id: str,
     q: str | None = None,
+    limit: int | None = pagination_lib.limit_query(
+        "Maximum number of messages to return (default = the 1000 cap)."
+    ),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """List messages in a channel, optionally filtered by a case-insensitive
-    content substring (`q`). Requires workspace membership and channel access."""
+    content substring (`q`). Requires workspace membership and channel access.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     channel = _get_channel_or_404(db, channel_id)
     _require_member(channel.workspace_id, current_user["id"], db)
     if not _is_private_channel_member(channel, current_user["id"], db):
@@ -152,14 +161,13 @@ async def list_channel_messages(
 
     query = db.query(models.Message).filter(models.Message.channel_id == channel_id)
     if q and q.strip():
-        query = query.filter(
-            models.Message.content.ilike(
-                contains_pattern(q.strip()), escape=LIKE_ESCAPE
-            )
-        )
+        query = query.filter(models.Message.content.ilike(f"%{q.strip()}%"))
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     messages = (
         query.order_by(models.Message.created_at.asc())
         .options(selectinload(models.Message.author), selectinload(models.Message.reactions))
+        .offset(_offset)
+        .limit(_limit)
         .all()
     )
     return messages

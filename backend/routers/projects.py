@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 import models
+import pagination as pagination_lib
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member, require_permission
 from database import get_db
@@ -39,13 +40,27 @@ async def create_project(
 @router.get("/workspaces/{workspace_id}/projects", response_model=list[schemas.ProjectOut])
 async def list_workspace_projects(
     workspace_id: str,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List all projects in a workspace."""
+    """List all projects in a workspace.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     _get_workspace_or_404(db, workspace_id)
     _require_member(workspace_id, current_user["id"], db)
-    projects = db.query(models.Project).filter(models.Project.workspace_id == workspace_id).all()
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
+    projects = (
+        db.query(models.Project)
+        .filter(models.Project.workspace_id == workspace_id)
+        .order_by(models.Project.created_at.asc())
+        .offset(_offset)
+        .limit(_limit)
+        .all()
+    )
     return projects
 
 

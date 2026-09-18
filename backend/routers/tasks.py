@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 import models
+import pagination as pagination_lib
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
@@ -22,10 +23,18 @@ async def list_my_tasks(
         description="Due-date bucket: overdue | today | week | later | none",
     ),
     status: str | None = None,
+    limit: int | None = pagination_lib.limit_query(
+        "Maximum number of tasks to return (default = the 1000 cap)."
+    ),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """All tasks assigned to the current user across every workspace they belong to."""
+    """All tasks assigned to the current user across every workspace they belong to.
+
+    Pagination: ``limit`` (1..1000, default = cap), ``offset`` (default 0) applied
+    after the due-bucket filter (the buckets are computed in Python).
+    """
     rows = (
         db.query(models.Task, models.Project, models.Workspace)
         .join(models.Project, models.Task.project_id == models.Project.id)
@@ -69,6 +78,11 @@ async def list_my_tasks(
         results.append(out)
 
     results.sort(key=lambda t: (t.due_at is None, t.due_at or datetime.datetime.max.replace(tzinfo=datetime.UTC)))
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
+    if _offset:
+        results = results[_offset:]
+    if _limit is not None:
+        results = results[:_limit]
     return results
 
 
@@ -122,17 +136,29 @@ async def create_task(
 async def list_project_tasks(
     project_id: str,
     status: str | None = None,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List tasks in a project, optionally filtered by status."""
+    """List tasks in a project, optionally filtered by status.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     project = _get_project_or_404(db, project_id)
     _require_member(project.workspace_id, current_user["id"], db)
 
     query = db.query(models.Task).filter(models.Task.project_id == project_id)
     if status:
         query = query.filter(models.Task.status == status)
-    tasks = query.order_by(models.Task.position.asc(), models.Task.created_at.asc()).all()
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
+    tasks = (
+        query.order_by(models.Task.position.asc(), models.Task.created_at.asc())
+        .offset(_offset)
+        .limit(_limit)
+        .all()
+    )
     return tasks
 
 

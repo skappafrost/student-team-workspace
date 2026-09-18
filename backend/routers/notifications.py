@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 import models
+import pagination as pagination_lib
 import schemas
 from database import get_db
 from dependencies import _get_notification_or_404, get_current_user
@@ -38,14 +39,26 @@ async def create_notification(
 @router.get("/notifications", response_model=list[schemas.NotificationOut])
 async def list_notifications(
     unread_only: bool = False,
+    limit: int | None = pagination_lib.limit_query(),
+    offset: int | None = pagination_lib.offset_query(),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List notifications for the current user."""
+    """List notifications for the current user.
+
+    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+    collection), ``offset`` (default 0).
+    """
     query = db.query(models.Notification).filter(models.Notification.user_id == current_user["id"])
     if unread_only:
         query = query.filter(models.Notification.read.is_(False))
-    notifications = query.order_by(models.Notification.created_at.desc()).all()
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
+    notifications = (
+        query.order_by(models.Notification.created_at.desc())
+        .offset(_offset)
+        .limit(_limit)
+        .all()
+    )
     return notifications
 
 
