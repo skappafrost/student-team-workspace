@@ -1,5 +1,7 @@
 """Message CRUD with WebSocket broadcast."""
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
@@ -10,10 +12,128 @@ from database import get_db
 from dependencies import _get_channel_or_404, _get_message_or_404, get_current_user
 from query_utils import LIKE_ESCAPE, contains_pattern
 from routers.channels import _is_private_channel_member
-from services import log_activity
+from services import log_activity, notify
 from ws import _ws_broadcast
 
 router = APIRouter()
+
+
+def _resolve_mentions(db: Session, workspace_id: str, content: str) -> list[str]:
+    """Resolve @mention tokens in message content to workspace member ids.
+
+    Conservative by design (TA4-1): a token only matches when the text after
+    ``@`` is the FULL display name of exactly one workspace member (matching
+    is case-insensitive; names that collide modulo case are skipped as
+    ambiguous). Substring or prefix matches are ignored, and users who are
+    not members of the workspace are never notified.
+    """
+    if "@" not in content:
+        return []
+    members = (
+        db.query(models.WorkspaceMember)
+        .filter(models.WorkspaceMember.workspace_id == workspace_id)
+        .all()
+    )
+    if not members:
+        return []
+    # Map case-folded full display names to user ids. A name claimed by two
+    # different members becomes None (ambiguous) and is never resolved.
+    by_name: dict[str, str | None] = {}
+    for membership in members:
+        user = membership.user
+        if user is None or not user.display_name:
+            continue
+        name = user.display_name.strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in by_name and by_name[key] != membership.user_id:
+            by_name[key] = None
+        else:
+            by_name[key] = membership.user_id
+    resolved: list[str] = []
+    # Longest names are matched first so "@Alice Bob" prefers the full name
+    # over the prefix "Alice".
+    for key in sorted(by_name, key=len, reverse=True):
+        user_id = by_name[key]
+        if user_id is None:
+            continue
+        # The name must not be followed by another word character, so a
+        # mention of "@AliceBlueprint" never resolves to "Alice".
+        pattern = re.compile(rf"@{re.escape(key)}(?![\w])", re.IGNORECASE)
+        match = pattern.search(content)
+        if match:
+            resolved.append(user_id)
+            # Mask the matched span so a shorter name that is a prefix of
+            # this one ("Alice" inside "@Alice Bob") cannot match it again.
+            content = (
+                content[: match.start()]
+                + " " * (match.end() - match.start())
+                + content[match.end() :]
+            )
+    return resolved
+
+
+def _notify_message_fanout(
+    db: Session,
+    *,
+    channel: models.Channel,
+    message: models.Message,
+    author_id: str,
+) -> None:
+    """Create notifications for a freshly created message (TA4-1).
+
+    Fan-out rules:
+    - DM channels: notify the peer (the channel member who is not the author).
+    - @mentions: notify members whose full display name appears as a token.
+    - Thread replies: notify the parent message's author.
+    Dedupe: each user is notified at most once per message, and the author
+    never notifies themselves. Notification types reuse the existing
+    ``NotificationType`` vocabulary: "dm", "mention", "thread".
+    """
+    recipients: dict[str, str] = {}  # user_id -> notification type
+
+    if channel.type == "dm":
+        members = (
+            db.query(models.ChannelMember)
+            .filter(models.ChannelMember.channel_id == channel.id)
+            .all()
+        )
+        for member_row in members:
+            if member_row.user_id != author_id:
+                recipients[member_row.user_id] = "dm"
+
+    for user_id in _resolve_mentions(db, channel.workspace_id, message.content):
+        recipients.setdefault(user_id, "mention")
+
+    if message.parent_id is not None:  # thread reply
+        parent = db.get(models.Message, message.parent_id)
+        if parent is not None and parent.author_id != author_id:
+            recipients.setdefault(parent.author_id, "thread")
+
+    recipients.pop(author_id, None)
+
+    author = db.get(models.User, author_id)
+    author_name = author.display_name if author else "Someone"
+    link = f"/dashboard/chat?channel={channel.id}"
+    for user_id, note_type in recipients.items():
+        if note_type == "dm":
+            title = f"New message from {author_name}"
+            content = f"{author_name} sent you a direct message."
+        elif note_type == "thread":
+            title = f"New reply from {author_name}"
+            content = f"{author_name} replied to your message."
+        else:
+            title = f"{author_name} mentioned you"
+            content = f"{author_name} mentioned you in #{channel.name}."
+        notify(
+            db,
+            user_id=user_id,
+            type=note_type,
+            title=title,
+            content=content,
+            link=link,
+        )
 
 
 @router.get("/channels/{channel_id}/messages", response_model=list[schemas.MessageOut])
@@ -84,6 +204,9 @@ async def create_message(
         target_type="channel",
         target_id=channel.id,
         target_label=f"#{channel.name}",
+    )
+    _notify_message_fanout(
+        db, channel=channel, message=message, author_id=current_user["id"]
     )
     db.commit()
     db.refresh(message)
