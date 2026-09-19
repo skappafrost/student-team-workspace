@@ -6,6 +6,8 @@ import { Icons } from '@/components/icons';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { PresenceDot } from '@/components/ui/presence-dot';
+import { usePresence } from '@/features/presence/hooks/use-presence';
 import { cn } from '@/lib/utils';
 import { Channel, DMChannel } from '../api/types';
 
@@ -27,6 +29,8 @@ export function ChannelList({
   dmAction
 }: ChannelListProps) {
   const [search, setSearch] = useState('');
+  const { byUser, hidden: presenceHidden } = usePresence();
+  const showPresence = !presenceHidden;
 
   const filtered = useMemo(() => {
     if (!search.trim()) return channels;
@@ -139,6 +143,7 @@ export function ChannelList({
                 filteredDms.map((dm) => {
                   const isActive = dm.id === selectedId;
                   const label = dm.peer_name ?? 'Unknown user';
+                  const peerStatus = dm.peer_id ? byUser.get(dm.peer_id)?.status : undefined;
                   return (
                     <motion.button
                       key={dm.id}
@@ -158,6 +163,7 @@ export function ChannelList({
                         <AvatarFallback className='bg-primary/15 text-primary rounded-full text-sm font-medium'>
                           {label.slice(0, 2).toUpperCase()}
                         </AvatarFallback>
+                        {showPresence && peerStatus ? <PresenceDot status={peerStatus} /> : null}
                       </Avatar>
                       <div className='min-w-0 flex-1 text-left'>
                         <p className='text-foreground truncate text-sm font-semibold'>{label}</p>

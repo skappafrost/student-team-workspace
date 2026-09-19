@@ -111,6 +111,14 @@ jobs:
       # because v4 drops an unregistered utility silently instead of erroring.
       - name: Build
         run: bun run build
+      # The silent failure this catches: with the token missing from an
+      # `@theme` block, the class stays in the DOM, no build error is raised, and
+      # the dot renders transparent. Path is `.next/static` rather than
+      # `.next/static/css` because the emitted location differs by bundler.
+      - name: Presence utilities reached the compiled CSS
+        run: |
+          grep -rq '\.bg-presence-online' .next/static/
+          grep -rq '\.bg-presence-offline' .next/static/
 
   frontend-e2e:
     needs: frontend

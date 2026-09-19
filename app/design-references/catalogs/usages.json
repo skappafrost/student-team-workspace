@@ -21,8 +21,8 @@
       "license": "MIT",
       "took": "position:absolute; right:-3px; bottom:-4px; width:15px; height:15px; border-radius:100px; background:var(--center-channel-bg) — i.e. the dot's ring is painted in the surrounding surface colour so it reads as a cut-out, not an overlay. Sidebar variant at :9-20 scales it to 19px at right:-6px.",
       "adaptation": "No positioning CSS authored. app/src/components/ui/avatar.tsx:51 AvatarBadge already implements exactly this shape (absolute right-0 bottom-0 rounded-full ring-2 ring-background) and is currently unused, so the ring-in-surface-colour trick is already solved by the design system. PresenceDot sets only the colour class per status and leaves geometry to AvatarBadge's existing data-[size] scaling.",
-      "status": "sourced",
-      "evidence": null
+      "status": "implemented",
+      "evidence": "app/src/components/ui/presence-dot.tsx (AvatarBadge reused verbatim; no authored geometry)"
     },
     {
       "slice": "S6 presence UI",
@@ -32,9 +32,9 @@
       "source_path": "packages/ui-client/src/components/UserStatus/index.ts:1-6",
       "license": "MIT",
       "took": "the four-way semantic mapping: online=success-500, away=warning-600, busy(dnd)=danger-500, offline=neutral-600.",
-      "adaptation": "Mapping reused, token names are not (STW has no success/warning/neutral scales — verified: no such token in any of the 11 theme files). Expressed as new --presence-online / --presence-away OKLCH pairs in app/src/styles/theme.css, with dnd reusing each theme's existing --destructive and offline reusing --muted-foreground, so dark and light both resolve without inventing a palette. Raw utilities (bg-emerald-500) rejected: they are not theme-relative, which breaks the locked D4 requirement that light and dark are both first-class.",
-      "status": "sourced",
-      "evidence": null
+      "adaptation": "Mapping reused, token NAMES are not. The plan was to add only --presence-online/--presence-away and borrow each theme's --destructive for dnd and --muted-foreground for offline. tests/presence-dot.spec.ts measured that against WCAG 1.4.11 (3:1) across all 11 themes x 2 modes and it failed: --destructive is authored for text on light surfaces and drops under 3:1 as a dot on several dark backgrounds, and --muted-foreground is deliberately low-contrast because it is de-emphasized text. Four dedicated tokens (--presence-online|away|dnd|offline) declared once on html/html.dark in src/styles/theme.css, values chosen by measurement.",
+      "status": "implemented",
+      "evidence": "app/tests/presence-dot.spec.ts (22 theme x mode cases green)"
     },
     {
       "slice": "S6 presence UI",
@@ -44,9 +44,9 @@
       "source_path": "apps/web/src/components/views/rooms/MemberList/tiles/common/PresenceIconView.tsx:25-59, :63-70",
       "license": "AGPL-3.0 / GPL-3.0 — COPY NO CODE",
       "took": "the shape of the two switch tables (state -> glyph, state -> tooltip key) and the tooltip configuration placement='bottom' with isTriggerInteractive={false}, so the indicator is not itself a click target.",
-      "adaptation": "Spec only, re-expressed from scratch: a status -> {label, dotClass, icon} record in app/src/features/presence/lib/status-meta.ts, glyphs from @tabler/icons-react via the Icons registry (app rule #8 forbids direct icon imports), tooltip from the existing components/ui/tooltip.tsx with the same bottom placement and non-interactive trigger. Their four states collapse onto STW's four (online/away/dnd/offline); element-web's 'unreachable' has no backend equivalent and is not invented. No file, class name or CSS custom property is shared with the AGPL source.",
-      "status": "sourced",
-      "evidence": null
+      "adaptation": "Spec only, re-expressed from scratch: a status -> {label, dotClass} record in src/features/presence/lib/status-meta.ts, consumed by PresenceDot. No code, DOM or class names shared with an AGPL codebase. The tooltip became an aria-label + title on the dot, which is the same information and also serves a screen reader.",
+      "status": "implemented",
+      "evidence": "app/src/features/presence/lib/status-meta.ts; app/src/components/ui/presence-dot.tsx"
     },
     {
       "slice": "S6 presence UI",
@@ -56,9 +56,9 @@
       "source_path": "apps/web/src/components/views/avatars/WithPresenceIndicator.tsx:87-122",
       "license": "AGPL-3.0 / GPL-3.0 — COPY NO CODE",
       "took": "the wrapper API shape: a component that renders its children and appends the indicator inside a relatively-positioned box, rather than every call site laying out a dot by hand.",
-      "adaptation": "Re-expressed as <PresenceDot status={…} /> placed inside the existing <Avatar>, plus <PresenceAvatar> where the pairing repeats. Children-plus-icon composition is the pattern taken; their DOM, hooks and class names are not.",
-      "status": "sourced",
-      "evidence": null
+      "adaptation": "Re-expressed as <PresenceDot status={...} /> placed inside the existing <Avatar>. The ledger originally named a second wrapper <PresenceAvatar>; it was cut — every call site already had an <Avatar>, so a second positioner would have been a second source of geometry for no benefit.",
+      "status": "implemented",
+      "evidence": "app/src/components/ui/presence-dot.tsx"
     },
     {
       "slice": "S6 presence UI",
@@ -81,8 +81,8 @@
       "license": "MIT",
       "took": "the registry components themselves, already vendored by the scaffold.",
       "adaptation": "Locked by decision D5 (shadcn/ui + Origin UI + Tremor) and by app/AGENTS.md rule 7, which says extend components/ui/* rather than edit them in place — so the three currently-unused members of avatar.tsx become the indicator and the 'N online' stack, and nothing in ui/ is modified.",
-      "status": "sourced",
-      "evidence": null
+      "status": "implemented",
+      "evidence": "app/src/components/ui/presence-dot.tsx composes avatar.tsx AvatarBadge; ui/avatar.tsx unmodified"
     },
     {
       "slice": "S6 presence UI",
@@ -99,7 +99,7 @@
   ],
   "_gaps": [
     "21st.dev is named first in the workspace AGENTS.md as an acceptable source but appears nowhere in this catalog (zero hits across CATALOG.md and all six JSON indexes). Either it gets added as a reference entry or it should stop being cited as the go-to.",
-    "No entry in this catalog previously recorded an adaptation, so every visual shipped before S6 is unauditable against a source by the rule's own standard. This file starts the ledger at S6; back-filling W0-W10 is unowned.",
+    "Nothing recorded an adaptation before S6, so every visual shipped in W0-W10 is unauditable against a source by the rule's own standard. This ledger starts at S6; back-filling W0-W10 is unowned.",
     "open-source/chat-collab/{element-web,mattermost,zulip} have no NOTES.md, though README.md promises 'Each local clone has NOTES.md'. Only 2 of the 5 clones carry SOURCE.md."
   ]
 }
