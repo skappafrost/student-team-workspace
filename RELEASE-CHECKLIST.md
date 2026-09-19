@@ -12,7 +12,7 @@
 |------|-------|--------|------------------|
 | W0 | Design decisions & tooling | ✅ Done | `design-references/catalogs/DECISIONS.md` locked (outside this repo, in `Team-workspace/`) |
 | W1 | App shell & theme | ✅ Done | Dark default theme, SSR mode cookie, Linear-style sidebar with 7 nav sections, motion D6 spec |
-| W2 | Auth, workspace, route guard | ✅ Done | JWT client, sign-in/up, workspace settings, proxy guard, e2e pass |
+| W2 | Auth, workspace, route guard | ✅ Done | JWT client, sign-in/up, workspace settings, proxy guard, `app/tests/middleware.auth.spec.ts` (runs in CI job `frontend-e2e`) |
 | W3 | Projects + Kanban | ✅ Done | Projects CRUD wired to backend, kanban dnd + optimistic UI + task detail |
 | W4 | Calendar + kanban polish | ✅ Done | Calendar page, task detail panel, kanban cookie-domain fix |
 | W5 | Chat + realtime | ✅ Done | Channels/messages API, chat UI page, WebSocket broadcast, chat QA gate |
@@ -99,7 +99,7 @@ Required evidence per task type:
 | Type | Evidence |
 |------|----------|
 | Backend | `pytest` pass count, migration head applied, `/health` 200 |
-| Frontend UI | Screenshot, typecheck/build pass, E2E pass |
+| Frontend UI | Screenshot, `bunx oxlint --deny-warnings src` + typecheck + build pass, `bunx playwright test` pass |
 | Integration | End-to-end test result JSON, register/login flow works |
 | Docs | Commit hash, file path, no secrets |
 
@@ -114,5 +114,5 @@ Required evidence per task type:
 - [ ] `bun run dev:webpack` starts the app at http://localhost:3000 (`--webpack` is mandatory — Turbopack is broken on this PC).
 - [ ] `make realtime` passes: it starts both servers itself and asserts a message sent by one browser renders in a second browser's channel. A `/ws/...` line in the uvicorn log is **not** this proof — `[accepted]` only means the application accepted.
 - [ ] Register and login flows complete successfully (`cd app && node e2e-auth-flow.mjs`).
-- [ ] `bun run typecheck` passes; backend `python -m pytest -q` passes — 770 collected on main, re-run to confirm.
+- [ ] `bun run typecheck`, `bunx oxlint --deny-warnings src` and `bun run build` pass; backend `python -m pytest -q` fully green (re-run, don't quote a stored count); `bunx playwright test` green.
 - [ ] No secrets committed in docs or `.env` files.

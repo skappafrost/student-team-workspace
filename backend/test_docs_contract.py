@@ -9,11 +9,14 @@ part of that contract:
 1. every HTTP route is a row in the endpoint map,
 2. every WebSocket route is described in the realtime section,
 3. the file has exactly one Changelog, and its stated route count is the count
-   of rows it actually contains.
+   of rows it actually contains,
+4. every `bun run <script>` named anywhere in the docs is a real key in
+   `app/package.json` (see `test_documented_bun_scripts_exist`).
 
-Prose accuracy stays a review duty; path coverage does not.
+Prose accuracy stays a review duty; path coverage and command existence do not.
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -161,4 +164,34 @@ def test_stated_route_count_matches_the_table(doc_text, live_http_routes):
     assert int(stated.group(1)) == len(live_paths) == len(covered), (
         f"header claims {stated.group(1)} paths; the app exposes {len(live_paths)} "
         f"and the tables cover {len(covered)}"
+    )
+
+
+#: Docs a command name can be promised in. `bun run <script>` is the shape this
+#: checks, because a script that is not in package.json is a claim no reader can
+#: execute — `audit:themes` was cited as "the WCAG AA contrast gate" for weeks
+#: while no such script, or any contrast machinery, existed.
+DOC_FILES = (
+    "README.md",
+    "CONTRIBUTING.md",
+    "RELEASE-CHECKLIST.md",
+    "PROJECT-STATUS.md",
+    "docs/API.md",
+    "app/README.md",
+    "app/AGENTS.md",
+)
+
+
+def test_documented_bun_scripts_exist():
+    root = DOC_PATH.parents[1]
+    scripts = set(json.loads((root / "app" / "package.json").read_text(encoding="utf-8"))["scripts"])
+    named = set()
+    for rel in DOC_FILES:
+        text = (root / rel).read_text(encoding="utf-8")
+        named.update(re.findall(r"bun run ([a-z][a-z0-9:_-]*)", text))
+    assert named, "the scan found no `bun run …` mentions at all; the regex or the docs moved"
+    missing = sorted(named - scripts)
+    assert not missing, (
+        "docs promise `bun run` scripts that package.json does not define: "
+        f"{missing}. Delete the sentence or add the script — do not leave it."
     )

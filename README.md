@@ -91,8 +91,8 @@ A local-first team workspace that keeps **context connected**: the message that 
 | **Frontend** | Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui (Base UI) · TanStack Query/Table/Form/Virtual · dnd-kit · Recharts · kbar · nuqs · motion · sonner |
 | **Backend** | FastAPI · SQLAlchemy 2.0 · Alembic · pydantic-settings · JWT (jti-revocable) · bcrypt · WebSocket rooms · in-memory sliding-window rate limiter |
 | **Database** | SQLite (local default) · PostgreSQL 16 (Docker Compose + CI) — both must pass CI |
-| **Quality** | pytest (backend) · Vitest + Playwright (client) · oxlint/oxfmt · ruff · GitHub Actions |
-| **Design** | 11 sourced themes · WCAG AA contrast gate · token-only color policy |
+| **Quality** | pytest (backend) · Playwright on Chromium (client, in CI) · oxlint/oxfmt · ruff · GitHub Actions |
+| **Design** | 11 sourced themes · token-only color policy · light/dark contrast reviewed from `app/qa-evidence/` screenshots |
 
 ## Repository layout
 
@@ -106,12 +106,12 @@ stw/
 │   │   ├── components/themes/  # theme selector, mode toggle, font config
 │   │   ├── styles/themes/      # 11 theme token sheets (OKLCH)
 │   │   └── lib/                # api-client, server-workspace, i18n, query-client
-│   ├── tests/                  # Playwright e2e + capture suites
-│   ├── scripts/                # theme contrast audit/fix/attribution
-│   ├── design-references/      # Zero Native Design Rule catalog
+│   ├── tests/                  # 4 Playwright specs + shared seeding helpers (CI `frontend-e2e`)
+│   ├── scripts/                # cleanup.js, gen-api.mjs
+│   ├── design-references/      # Zero Native Design Rule adaptation ledger
 │   └── qa-evidence/            # UI screenshots (policy-governed)
 ├── backend/                    # FastAPI + Alembic
-│   ├── routers/                # 14 domain routers (57 endpoints)
+│   ├── routers/                # 15 routers — 51 HTTP paths + 2 WS routes (count is CI-checked)
 │   ├── alembic/versions/       # single-head migration chain
 │   ├── authorization.py        # Role hierarchy + permission checks
 │   ├── channel_access.py       # private-channel predicate
@@ -257,13 +257,10 @@ Detailed: [`CONTRIBUTING.md`](CONTRIBUTING.md) · API reference: [`docs/API.md`]
 
 Enforcement, not aspiration:
 
-- `app/design-references/` — the catalog: one row per visual (source URL/id + adaptation note)
-- `Source:` / `Design source:` attribution comment in every implementing file
-- `bun run audit:themes` — WCAG AA 4.5:1 contrast gate across all 11 themes, light + dark
+- `app/design-references/catalogs/usages.json` — one record per visual: source id, license, what was taken, and the exact adaptation made. A PR that adds a visual with no record here is flagged in review.
 - Token-only colors (`var(--*)`); no hardcoded hex outside the allow-listed semantic accents
+- Contrast is reviewed per PR from the light + dark screenshots in `app/qa-evidence/`. There is **no** automated WCAG gate and no `audit:themes` script — don't cite one.
 - Code review flags any visual without a reference entry — when in doubt, **remove the effect and use a sourced one**
-
-The catalog ships with the client-experience program (PR #137, currently in review) — until it merges, reference entries live in that branch.
 
 ## Known limitations
 
