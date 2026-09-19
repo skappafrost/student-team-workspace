@@ -38,6 +38,7 @@ from routers import (
     messages,
     notifications,
     pages,
+    presence,
     projects,
     tasks,
     workspaces,
@@ -120,6 +121,7 @@ for _r in (
     pages.router,
     files.router,
     notifications.router,
+    presence.router,
     ai.router,
     account.router,
 ):
