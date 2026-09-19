@@ -1,0 +1,21 @@
+{
+  "stamp": 1789814568881,
+  "mode": "guard",
+  "results": [
+    {
+      "name": "seed-two-member-workspace",
+      "status": "PASS",
+      "detail": "channel=room-1789814568881"
+    },
+    {
+      "name": "guard-logged-named-error",
+      "status": "PASS",
+      "detail": "[stw-realtime] not connecting to ws://127.0.0.1:8000/ws/channels/c976460e-efe8-4880-a07f-1a19df798f76: the page is served from 'localhost', so the session_token cookie will not be attached and the han"
+    },
+    {
+      "name": "no-backend-socket-opened",
+      "status": "PASS",
+      "detail": "backend sockets=0"
+    }
+  ]
+}
