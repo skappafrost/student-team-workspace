@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -125,6 +126,49 @@ class AuthSession(Base):
     rotated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     user: Mapped[User] = relationship("User")
+
+
+# ---------------------------------------------------------------------------
+# PresenceState (Task LVT Phase 2 — realtime presence)
+# ---------------------------------------------------------------------------
+class PresenceState(Base):
+    """Per-user, per-workspace realtime presence: one row per member.
+
+    ``status`` is a small enum (online / away / dnd / offline) kept as a
+    ``String(50)`` with no CHECK constraint — the same convention as the
+    ``role`` columns, validated in the service layer so adding a status is a
+    code change, not a migration. ``last_seen`` is written from
+    ``dependencies._utcnow`` (naive UTC: SQLite round-trips naive, Postgres
+    stores as timestamptz), and drives the idle→away/offline TTL.
+    """
+
+    __tablename__ = "presence_state"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(50), default="offline", server_default="offline", nullable=False
+    )
+    status_message: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_seen: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", name="uq_presence_state_workspace_user"
+        ),
+        # Presence lists filter a workspace by status ("who's online").
+        Index("ix_presence_state_workspace_status", "workspace_id", "status"),
+    )
+
+    user: Mapped[User] = relationship("User")
+    workspace: Mapped[Workspace] = relationship("Workspace")
 
 
 # ---------------------------------------------------------------------------
