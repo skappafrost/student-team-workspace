@@ -3,7 +3,7 @@
 > **Ngày cập nhật:** 19/09/2026 (GMT+7)
 > **Trạng thái:** 🟢 W0–W10 + UI redesign + toàn bộ T-wave/TA-wave (hardening) đã merge trên `main`; đang chạy S-wave (realtime presence)
 > **Repo:** `skappafrost/student-team-workspace`, public, GitHub Flow (`feat/*` + `harden/*` branches → draft PR → Skappa squash-merge)
-> **Verified on:** `pytest -q` **757 passed** (SQLite, `backend/.venv`) · `alembic heads` = 1 (`prs01_presence_state`) · coverage **91%** với floor `fail_under = 90` (`backend/pyproject.toml:50`) · CI **4 jobs** (`backend`, `backend-pg`, `frontend`, `demo-pack`) — tất cả số này đo trực tiếp trên `main` @ `40ada4d` ngày 19/09; chạy lại lệnh trước khi quote.
+> **Verified on:** `pytest -q` **770 tests collected / 769 passed** (SQLite, `backend/.venv`; the one local failure is the known Windows tmp-file-lock flake — passes in isolation, green on Linux CI) · `alembic heads` = 1 (`prs01_presence_state`) · coverage **91.48%** với floor `fail_under = 90` (`backend/pyproject.toml:50`) · CI **5 jobs** (`ruff`, `backend`, `backend-pg`, `frontend`, `demo-pack`) — đo trực tiếp trên `main` @ `21bc04c` ngày 19/09; chạy lại lệnh trước khi quote.
 
 ---
 
@@ -61,11 +61,11 @@ Từ notes của anh trên gallery (`design-reference-my-notes.json`, 51 favorit
 | Recovery | Sửa các wiring mà squash-merge làm rơi ở #123/#126/#130/#148/#159/#161/#163 + bỏ `except Exception: pass` trong `conftest.py` từng che hỏng hóc | ✅ #185, #188 |
 | S-wave | Realtime presence: S3 single-head, S4 `PresenceState` model, S5 service + HTTP set/list + WS fan-out, **S6 presence UI (frontend)** | 🔄 S3–S5 đã merge (#188, #189); **S6 chưa làm** |
 
-**Merged trên `main` (mới nhất trước):** #189 presence service + WS (S5) · #188 Alembic single-head + `PresenceState` (S3/S4) · #185 restore baseline · #175 security regression pack (TA7-1) · #174 coverage floor + RBAC edge tests (TA6-3) · #164 load/perf baseline (TA6-2) · #163 ops maintenance (TA5-3) · #162 SQLite/PG dialect parity (TA5-2) · #161 WS auth + semantics (TA4-2) · #160 docs rewrite (TA3-3) · #159 pagination contract (TA3-1) · #149 observability + `/readyz` (TA6-1) · #148 N+1 + indexes (TA5-1) · #138 notification fan-out (TA4-1) · #134 LIKE escape + channel type enum (TA3-2) · #132 storage quota (TA2-3) · #130 authenticated `/uploads` read (TA2-2) · #128 upload ingress (TA2-1) · #126 jti request-scoped session (TA1-3) · #124 JWT secret governance (TA1-2) · #123 `/auth/refresh` (TA1-1) · #102 kanban guard · #101/#100/#99 rate-limit fallback + app README + demo-pack CI · #88 Postgres CI · #87 manage.py tests · #80 lifespan · #79 request log + healthz · #78 rate limiting · #28 UI redesign · Dependabot #81–#86.
+**Merged trên `main` (mới nhất trước):** #201 WS transport fix · #200 status docs refresh · #199 presence docs + `test_docs_contract.py` gate · #198 worktree ignore + e2e evidence path · #197 API.md contract repairs · #196 presence socket refcount · #195 ruff debt 170→0 + CI `ruff` job · #189 presence service + WS (S5) · #188 Alembic single-head + `PresenceState` (S3/S4) · #185 restore baseline · #175 security regression pack (TA7-1) · #174 coverage floor + RBAC edge tests (TA6-3) · #164 load/perf baseline (TA6-2) · #163 ops maintenance (TA5-3) · #162 SQLite/PG dialect parity (TA5-2) · #161 WS auth + semantics (TA4-2) · #160 docs rewrite (TA3-3) · #159 pagination contract (TA3-1) · #149 observability + `/readyz` (TA6-1) · #148 N+1 + indexes (TA5-1) · #138 notification fan-out (TA4-1) · #134 LIKE escape + channel type enum (TA3-2) · #132 storage quota (TA2-3) · #130 authenticated `/uploads` read (TA2-2) · #128 upload ingress (TA2-1) · #126 jti request-scoped session (TA1-3) · #124 JWT secret governance (TA1-2) · #123 `/auth/refresh` (TA1-1) · #102 kanban guard · #101/#100/#99 rate-limit fallback + app README + demo-pack CI · #88 Postgres CI · #87 manage.py tests · #80 lifespan · #79 request log + healthz · #78 rate limiting · #28 UI redesign · Dependabot #81–#86.
 
 > ⚠️ **Caveat khi verify bằng `git log`:** repo merge theo kiểu squash, nên **commit hash ≠ merge commit của PR**. Muốn biết PR nào đã landing, dùng `gh pr view <N> --json number,state,mergeCommit` — đừng kết luận từ `git log --oneline`. Chính hiểu nhầm này làm tài liệu cũ ghi sai trạng thái #123–#159 là "đang mở" cả tuần sau khi chúng đã merge.
 
-**Test baseline hiện tại:** `cd backend && .venv/Scripts/python -m pytest -q` → **757 passed** (SQLite) trên `main` @ `40ada4d`, 55 file test. Số này thay đổi theo từng PR — luôn chạy lại lệnh, hoặc tốt hơn là link thẳng tới CI badge thay vì chép số vào doc.
+**Test baseline hiện tại:** `cd backend && .venv/Scripts/python -m pytest -q` → **770 collected / 769 passed** (SQLite) trên `main` @ `21bc04c`, 56 file test. Số này thay đổi theo từng PR — luôn chạy lại lệnh, hoặc tốt hơn là link thẳng tới CI badge thay vì chép số vào doc.
 
 ---
 
@@ -80,7 +80,7 @@ stw/                           ← monorepo (git, branch main @ 40ada4d)
 ├── backend/                   ← FastAPI + Alembic + Docker Compose
 │   ├── routers/              ← 15 domain routers (thêm presence), 51 HTTP paths + 2 WS routes
 │   ├── alembic/versions/     ← head prs01_presence_state (1 head duy nhất)
-│   └── test_*.py             ← 757 tests / 55 files, full suite xanh (SQLite + Postgres)
+│   └── test_*.py             ← 770 tests / 56 files, full suite xanh (SQLite + Postgres)
 ├── docs/API.md               ← endpoint map + realtime + BFF map + changelog
 ├── docs/OPS.md               ← backup / retention / verification
 ├── docs/PERF-BASELINE.md     ← benchmark + load evidence
@@ -88,7 +88,7 @@ stw/                           ← monorepo (git, branch main @ 40ada4d)
 ├── README.md / RELEASE-CHECKLIST.md / PROJECT-STATUS.md (file này)
 ├── Makefile                  ← make dev / make test
 ├── scripts/demo-packs/       ← busy-workspace.json + load/make pack scripts
-└── .github/workflows/ci.yml  ← CI 4 jobs: backend, backend-pg, frontend, demo-pack
+└── .github/workflows/ci.yml  ← CI 5 jobs: ruff, backend, backend-pg, frontend, demo-pack
 ```
 
 - **Stack frontend:** Next.js 16.3.5 + React 19.2.4 + TS 5.7.2 strict + Tailwind v4 (CSS-first, không có `tailwind.config.*`) + shadcn/ui **trên Base UI (không phải Radix)** — dùng `render={<Button/>}` thay vì `asChild` — + dnd-kit + TanStack Query 5 + next-themes (dark default)
@@ -124,13 +124,15 @@ Lấy từ `gh pr list --repo skappafrost/student-team-workspace --state open` �
 - [ ] Quyết định mở: `POST /presence/me` ghi `Activity` row (`verb=set_presence`) — status spam có nên nằm trong activity feed + audit log không?
 
 **Kỹ thuật còn nợ**
+- [ ] 🔴 **Chat realtime không delivers sang user khác.** Reproduced trên `main` @ `21bc04c` với `app/e2e-ws-transport.mjs realtime`: `POST /channels/{id}/messages` trả **201**, cả hai browser context đều có socket `[accepted]` trên **cùng một** channel URL (`sameSocketUrl=true`), nhưng marker không xuất hiện trong DOM của phía nhận. Cache key đọc và ghi cùng shape (`chat-page.tsx:106` vs `:233`) nên giả thuyết lệch key đã bị loại trừ — cần xem `_ws_broadcast_channel` có thực sự send không. Bằng chứng: `app/qa-evidence/ws-transport-realtime-report.json` + `ws-03-peer-received.png`.
+- [ ] 🔴 **`src/components/kbar/use-search-actions.ts:40` lặp vô hạn** — `Maximum update depth exceeded`, 4517 cảnh báo trong một phiên dev server trên `main`. Đây chính là thứ nhân bug socket reconnect lên 86 connection; nó cũng làm page chat chậm tới mức selector timeout.
 - [ ] `manage.py create-user` **chạy được trên DB trống**: hiện query `users` ở `backend/manage.py:227` nhưng chỉ gọi `create_all` ở `:231`, nên lần chạy đầu tiên trên DB mới toang với `no such table: users`. Cần quyết định lệnh nào sở hữu schema creation.
 - [ ] `POST /api/notifications` action `mark-all-read` đang proxy tới `POST /notifications/mark-all-read` — **route backend không tồn tại**, handler hiện trả 405. Hoặc thêm route, hoặc bỏ handler.
 - [ ] `app/src/features/workspace/components/workspace-settings-page.tsx:31` liệt kê roles `owner|admin|member|**viewer**` trong khi backend chỉ có `owner|admin|member|**guest**` (`authorization.py:17`). Dropdown cho phép chọn "viewer" — role không tồn tại ở server.
 - [ ] Chuông notification (`app/src/features/notifications/utils/store.ts:105`) vẫn đọc `mockNotifications` tại `:23`, chưa nối `GET /api/notifications` thật.
-- [ ] CI gate `ruff check` (PR `harden/ruff-debt-and-gate`): hết debt, thêm job thứ 5. `ruff format` **không** gate (69 file / ~1945 dòng chưa sạch).
-- [ ] `app/.env.local` để `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` trong khi CONTRIBUTING bắt dùng `localhost`: `session_token` là `SameSite=Lax` nên khác hostname = cookie không gửi lên WS upgrade → **mọi handshake chat + presence 4401 trước `accept()`**. Cần guard phía client báo rõ lỗi thay vì retry im lặng.
-- [ ] Frontend CI hiện chỉ `typecheck` — không lint, không build, không test; Playwright có devDep nhưng 2 spec và không chạy trong CI.
+- [x] CI gate `ruff check` (#195): 170 lỗi về 0, `ruff` là job thứ 5. `ruff format` vẫn **không** gate (69 file / ~1945 dòng chưa sạch).
+- [x] `app/.env.local` từng để `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` trong khi CONTRIBUTING bắt dùng `localhost`: `session_token` là `SameSite=Lax` nên khác hostname = cookie không gửi lên WS upgrade → **mọi handshake chat + presence 4401 trước `accept()`**, và console thì im lặng. Đã fix local file về `localhost`, và #201 thêm guard trong `lib/realtime/use-websocket.ts` log rõ tên lỗi + hostname rồi **không** retry.
+- [ ] Frontend CI hiện chỉ `typecheck` — không lint, không build, không test; Playwright có devDep nhưng 2 spec và không chạy trong CI. `app/e2e-ws-transport.mjs` là harness thứ 3 dạng script- tay, vẫn không có gate tự động nào.
 
 **Release**
 - [ ] Giải nốt #85 sau khi có smoke test; triage #193/#194 (major) riêng.

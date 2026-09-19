@@ -2,7 +2,7 @@
 
 > **Scope:** Local-first release. Cloud deployment is intentionally out of scope for now.
 > **Updated:** 2026-09-19
-> **Verified on:** `pytest -q` **757 passed** (SQLite) · `bun run typecheck` clean · `alembic heads` = 1 (`prs01_presence_state`) · `ruff check .` from `backend/` clean. Re-run these before quoting the line — every number in this repo's docs went stale once already by staying literal.
+> **Verified on:** `pytest -q` **770 collected / 769 passed** (SQLite) · `bun run typecheck` clean · `alembic heads` = 1 (`prs01_presence_state`) · `ruff check .` from `backend/` clean. Re-run these before quoting the line — every number in this repo's docs went stale once already by staying literal.
 
 ---
 
@@ -113,5 +113,5 @@ Required evidence per task type:
 - [ ] Frontend `app/.env.local` contains `NEXT_PUBLIC_API_URL=http://localhost:8000` (plus Sentry vars from `env.example.txt`, optional).
 - [ ] `bun run dev:webpack` starts the app at http://localhost:3000 (`--webpack` is mandatory — Turbopack is broken on this PC).
 - [ ] Register and login flows complete successfully (`cd app && node e2e-auth-flow.mjs`).
-- [ ] `bun run typecheck` passes; backend `python -m pytest -q` passes — 757 on main, re-run to confirm.
+- [ ] `bun run typecheck` passes; backend `python -m pytest -q` passes — 770 collected on main, re-run to confirm.
 - [ ] No secrets committed in docs or `.env` files.
