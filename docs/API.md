@@ -192,6 +192,13 @@ Tickets are enabled unless `ENVIRONMENT` is `test`/`dev` (or
 `STW_TEST_AUTH=1`); in those modes the ticket endpoint returns a benign
 `stw-ws` value and the cookie path authenticates.
 
+The 101 response names back **exactly** the string the client offered, and
+sends no `Sec-WebSocket-Protocol` header at all when the client offered none
+(the plain `new WebSocket(url)` browser case). This is not stylistic: RFC 6455
+§4.1 step 6 makes a browser fail the handshake if the server names a protocol
+it was not offered, and neither Starlette's `accept()` nor uvicorn checks it —
+`ws.py:_ws_negotiate_subprotocol` is the single place that decides the value.
+
 ### Handshake rejection codes
 
 Every rejection happens **before** the upgrade is accepted, so the client

@@ -38,7 +38,6 @@ from dependencies import _get_workspace_or_404, _utcnow, _ws_resolve_user, get_c
 from ws import (
     WS_FORBIDDEN,
     WS_NOT_FOUND,
-    WS_SUBPROTOCOL,
     _ws_broadcast_workspace,
     _ws_room_join,
     _ws_room_key_workspace,
@@ -269,7 +268,7 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
     finally:
         db.close()
 
-    await websocket.accept(subprotocol=subproto or WS_SUBPROTOCOL)
+    await websocket.accept(subprotocol=subproto)
     key = _ws_room_key_workspace(workspace_id)
     _ws_room_join(key, websocket)
     try:
