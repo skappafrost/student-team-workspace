@@ -32,3 +32,50 @@ body {
   /* Apply font-family - will now resolve from html's [data-theme] variables */
   font-family: var(--font-sans);
 }
+
+/*
+ * Presence status colors — four tokens, one per status.
+ *
+ * The four-way semantic mapping (online/away/dnd/offline) is taken from
+ * Rocket.Chat; see design-references/catalogs/usages.json. The *values* are not:
+ * the original plan was to reuse each theme's `--destructive` for dnd and
+ * `--muted-foreground` for offline rather than add tokens, and `tests/
+ * presence-dot.spec.ts` measured that against WCAG 1.4.11 (3:1) in all 11 themes
+ * × 2 modes. It failed: `--destructive` is authored for text on light surfaces
+ * and drops under 3:1 as a dot on several themes' dark backgrounds, and
+ * `--muted-foreground` is deliberately low-contrast because it is de-emphasized
+ * text, so it cannot be a legible status color. Four dedicated tokens it is.
+ *
+ * Declared once on `html` rather than 11 files x 2 modes. Specificity keeps
+ * per-theme tuning available: a theme block is `[data-theme='x']` at (0,1,0)
+ * and beats these at (0,0,1), and `[data-theme='x'].dark` at (0,2,0) beats
+ * `html.dark` at (0,1,1) — so a theme that opts in must declare the light and
+ * dark pair together, or its light value will win in dark mode.
+ */
+html {
+  --presence-online: oklch(0.55 0.15 152);
+  --presence-away: oklch(0.58 0.13 70);
+  --presence-dnd: oklch(0.52 0.19 25);
+  --presence-offline: oklch(0.55 0.02 265);
+}
+
+html.dark {
+  --presence-online: oklch(0.72 0.17 152);
+  --presence-away: oklch(0.75 0.14 80);
+  --presence-dnd: oklch(0.65 0.19 25);
+  --presence-offline: oklch(0.7 0.02 265);
+}
+
+/*
+ * The single registration site. Tailwind v4 emits NOTHING for
+ * `bg-presence-online` unless `--color-presence-online` is declared in an
+ * `@theme` block — no build error, no warning, just an invisible dot. One block
+ * covers all 11 themes because registration is global: `themes/discord.css` has
+ * no `@theme inline` of its own and still works, which is the proof.
+ */
+@theme inline {
+  --color-presence-online: var(--presence-online);
+  --color-presence-away: var(--presence-away);
+  --color-presence-dnd: var(--presence-dnd);
+  --color-presence-offline: var(--presence-offline);
+}

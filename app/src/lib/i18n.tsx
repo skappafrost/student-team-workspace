@@ -28,7 +28,16 @@ const vi: Record<string, string> = {
   // Common
   Search: 'Tìm kiếm',
   'AI Search': 'Tìm kiếm AI',
-  Dashboard: 'Bảng điều khiển'
+  Dashboard: 'Bảng điều khiển',
+  // Presence (S6). The keys are the English source strings, matching the
+  // dictionary's existing convention in this file.
+  'Set status': 'Đặt trạng thái',
+  Online: 'Trực tuyến',
+  Away: 'Vắng mặt',
+  'Do not disturb': 'Không làm phiền',
+  Offline: 'Ngoại tuyến',
+  'Status message': 'Lời nhắn trạng thái',
+  'Clear status message': 'Xoá lời nhắn trạng thái'
 };
 
 interface I18nContextValue {

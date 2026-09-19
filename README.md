@@ -259,7 +259,7 @@ Enforcement, not aspiration:
 
 - `app/design-references/catalogs/usages.json` — one record per visual: source id, license, what was taken, and the exact adaptation made. A PR that adds a visual with no record here is flagged in review.
 - Token-only colors (`var(--*)`); no hardcoded hex outside the allow-listed semantic accents
-- Contrast is reviewed per PR from the light + dark screenshots in `app/qa-evidence/`. There is **no** automated WCAG gate and no `audit:themes` script — don't cite one.
+- Contrast: the presence colors are gated automatically — `app/tests/presence-dot.spec.ts` measures every status against WCAG 1.4.11 (3:1) in all 11 themes × light and dark. Everything else is reviewed from the light + dark screenshots in `app/qa-evidence/`. There is **no** general WCAG gate and no `audit:themes` script — don't cite one.
 - Code review flags any visual without a reference entry — when in doubt, **remove the effect and use a sourced one**
 
 ## Known limitations

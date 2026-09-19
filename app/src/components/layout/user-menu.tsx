@@ -3,7 +3,9 @@
 import * as React from 'react';
 
 import { Icons } from '@/components/icons';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { PresenceDot } from '@/components/ui/presence-dot';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +13,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
+import {
+  PRESENCE_META,
+  PRESENCE_STATUSES
+} from '@/features/presence/lib/status-meta';
+import { usePresence, useSetPresence } from '@/features/presence/hooks/use-presence';
 import { signOut, signOutEverywhere, type SessionUser } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 
@@ -22,6 +29,10 @@ import { useI18n } from '@/lib/i18n';
 export function UserMenu({ user }: { user: SessionUser }) {
   const [isPending, startTransition] = React.useTransition();
   const { locale, setLocale, t } = useI18n();
+  const { byUser, hidden: presenceHidden } = usePresence();
+  const setStatus = useSetPresence();
+  const showPresence = !presenceHidden;
+  const myStatus = byUser.get(user.id)?.status;
 
   const handleSignOut = () => {
     void (async () => {
@@ -45,13 +56,20 @@ export function UserMenu({ user }: { user: SessionUser }) {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant='ghost' size='icon' aria-label='Account menu' disabled={isPending}>
-            <Icons.account className='size-5' />
+          <Button
+            variant='ghost'
+            size='icon'
+            aria-label='Account menu'
+            disabled={isPending}
+            className='size-8'
+          >
+            <Avatar size='sm' className='size-8'>
+              <AvatarFallback>{(user.name || user.email).slice(0, 2).toUpperCase()}</AvatarFallback>
+              {showPresence && myStatus ? <PresenceDot status={myStatus} /> : null}
+            </Avatar>
           </Button>
         }
-      >
-        <Icons.account className='size-5' />
-      </DropdownMenuTrigger>
+      />
       <DropdownMenuContent align='end' className='w-56'>
         {/* Plain div: DropdownMenuLabel wraps Menu.GroupLabel which requires a
             Menu.Group parent (Base UI error #31 otherwise). */}
@@ -59,6 +77,25 @@ export function UserMenu({ user }: { user: SessionUser }) {
           <span className='truncate text-sm font-medium'>{user.name || user.email}</span>
           <span className='text-muted-foreground truncate text-xs font-normal'>{user.email}</span>
         </div>
+        {showPresence ? (
+          <>
+            <DropdownMenuSeparator />
+            {PRESENCE_STATUSES.map((status) => (
+              <DropdownMenuItem
+                key={status}
+                data-presence-option={status}
+                disabled={setStatus.isPending}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setStatus.mutate({ status });
+                }}
+              >
+                {t(PRESENCE_META[status].label)}
+                {myStatus === status ? <Icons.check className='ms-auto' /> : null}
+              </DropdownMenuItem>
+            ))}
+          </>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={(event) => {

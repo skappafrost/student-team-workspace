@@ -13,6 +13,9 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PresenceDot } from '@/components/ui/presence-dot';
+import { usePresence } from '@/features/presence/hooks/use-presence';
+import type { PresenceStatus } from '@/features/presence/api/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
@@ -61,9 +64,11 @@ function RoleSelect({
 
 function MemberRow({
   member,
+  status,
   onRoleChange
 }: {
   member: WorkspaceMember;
+  status: PresenceStatus | undefined;
   onRoleChange: (id: string, role: WorkspaceRole) => void | Promise<void>;
 }) {
   const initials = member.name
@@ -81,6 +86,7 @@ function MemberRow({
           <Avatar>
             {member.avatar ? <AvatarImage src={member.avatar} alt={member.name} /> : null}
             <AvatarFallback>{initials || member.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+            {status ? <PresenceDot status={status} /> : null}
           </Avatar>
           <div>
             <div className='font-medium'>{member.name}</div>
@@ -150,6 +156,10 @@ export default function WorkspaceSettingsPage() {
     sendInvite,
     cancelInvite
   } = useWorkspaceMembers();
+  // `member.id` is the backend user id (`service.ts` maps `user_id ?? id`), so
+  // the roster keys line up with the presence payload without a second lookup.
+  const { byUser, hidden: presenceHidden } = usePresence();
+  const showPresence = !presenceHidden;
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<WorkspaceRole>('member');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -283,6 +293,7 @@ export default function WorkspaceSettingsPage() {
                     <MemberRow
                       key={member.id}
                       member={member}
+                      status={showPresence ? byUser.get(member.id)?.status : undefined}
                       onRoleChange={handleMemberRoleChange}
                     />
                   ))}
