@@ -2,7 +2,7 @@
 
 Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagger) and `/redoc`. This file is the curated teammate guide — read this first, use `/docs` for schema details.
 
-> **Accuracy:** every row below was regenerated from the live OpenAPI spec + `routers/` source (16/09/2026, main @ bca27ce, 45 paths). When the code changes, regenerate this file the same way — do not hand-edit individual rows.
+> **Accuracy:** every row below was regenerated from the live route table + `routers/` source (19/09/2026, main @ 40ada4d, 51 HTTP paths + 2 WebSocket routes). `backend/test_docs_contract.py` fails the build if a route appears in the app without a row here, if a row outlives its route, or if that count stops matching — so regenerate rather than hand-editing individual rows.
 
 ## Auth model
 
@@ -15,11 +15,11 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 
 ## Conventions
 
-- **Workspace scoping**: almost every resource lives under `/workspaces/{workspace_id}/...`. Membership is checked per request (`403` if you're not a member, `404` if the thing doesn't exist). Guests (role `guest`) can read but not create messages/events/pages/files.
+- **Workspace scoping**: almost every resource lives under `/workspaces/{workspace_id}/...`. Membership is checked per request (`403` if you're not a member, `404` if the thing doesn't exist). **The guest role is not one uniform rule** — guests pass a plain membership check, so most reads work, but these gates are stricter: creating a channel (`403`, `routers/channels.py:339`), joining a channel socket (`4403`, `routers/channels.py:271`), reading uploaded file bytes (`403`, `routers/files.py:276`), and **presence, where guests are refused on read as well as write** (`403`, `routers/presence.py:116`). Anything guarded by `require_permission` needs `member` or above.
 - **Roles**: `owner > admin > member > guest`. Role changes: `PATCH /workspaces/{id}/members/{user_id}`. Ownership transfer: `POST /workspaces/{id}/transfer-ownership` (owner only).
 - **Error envelope**: FastAPI default — `{"detail": "human-readable message"}` with the right status code (400 validation, 401 unauthenticated, 403 forbidden, 404 missing, 409 conflict, 422 bad payload, 429 rate-limited with `Retry-After`). Validation errors use `{"detail": [{"loc": [...], "msg": ..., "type": ...}]}`.
 - **Rate limiting**: login 10/min per IP + 5/min per email; register 5/hour; upload 20/hour; AI 30/hour; all other write routes 120/min per identity (sliding window; `429` + `Retry-After`). Set `RATELIMIT_ENABLED=0` to disable.
-- **IDs**: UUID strings. Timestamps: ISO-8601 UTC.
+- **IDs**: UUID strings. **Timestamps: ISO-8601, naive UTC, with no `Z` and no offset** — e.g. `"2026-08-28T09:00:00"`. This is deliberate and cross-engine: `dependencies._utcnow()` stores naive UTC, and `test_dialect_parity.py:216` pins that serialization stays naive on SQLite and PostgreSQL alike. It applies to every timestamp field in the API, presence's `last_seen` included. The trap when consuming it: `new Date("2026-08-28T09:00:00")` in JavaScript parses as **local** time, so append `Z` (or parse with an explicit UTC assumption) at the boundary — otherwise every non-UTC client silently shifts every timestamp.
 The BFF resolves "current workspace" as the first entry of `GET /workspaces` — if you add multi-workspace switching, that resolution is the place to change.
 
 ## Endpoint map
@@ -118,6 +118,21 @@ Each workspace has a storage quota enforced at upload time on `POST /workspaces/
 | GET, POST | `/notifications` | GET: `?unread_only=true`, `?limit= ?offset=` |
 | GET, PATCH, DELETE | `/notifications/{id}` | PATCH `{read: bool}` |
 
+### Presence
+
+Workspace presence (Task LVT S4/S5). One `PresenceState` row per `(workspace, user)`; a member with no row reads as `offline`, so the feature is additive and needs no backfill.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/workspaces/{id}/presence` | Every member's presence. **Members only — guests get `403` on read too.** Unknown workspace `404` (checked first, so it wins over `403`). Returns a **bare JSON array**, no `{items,total}` envelope and no `response_model`; **not paginated and not ordered** (see Pagination below) — sort client-side. Item: `{user_id, name, status, status_message, last_seen}` |
+| POST | `/workspaces/{id}/presence/me` | Sets the **caller's own** status; there is no route to set someone else's. **`200`, never `201`.** Body `{status, status_message?}` with `status` in `online\|away\|dnd\|offline` (required, non-empty) and `status_message` ≤255 chars — sending `"status_message": null` **clears** it. Side effects beyond the row: writes an `Activity` entry (`verb=set_presence`, so it also appears in `GET /workspaces/{id}/activity` and `GET /workspaces/{id}/audit-log`) and broadcasts `presence_update` |
+
+Three details about these two routes that will bite a client:
+
+- **`POST`, not `PUT`.** The route-limiter audit (`test_rate_limit.py`) requires every mutating route, PUT included, to have limiter coverage, and `_WRITE_METHODS` does not treat PUT as a write — so this app has no PUT routes at all.
+- **`422` arrives in two different envelopes here.** A shape violation (missing `status`, empty `status`, message over 255) gives FastAPI's standard list form `{"detail": [{"loc": [...], ...}]}`; an unknown `status` **value** is rejected in the service layer and gives the string form `{"detail": "Invalid presence status: sleeping"}`. Branch on the type of `detail`, not just the code.
+- **`status` is the derived value, never the stored one.** `effective_status()` demotes an idle `online` row, so a client cannot tell "the user chose away" from "the user went stale" — both read `away`. Do not build a UI that offers to restore a chosen status.
+
 ### AI
 
 | Method | Path | Notes |
@@ -141,12 +156,24 @@ All collection (list) endpoints share one contract — the helper lives in `back
 - Responses stay **bare JSON arrays** (shape frozen — no `{items,total}` envelopes); pages are read with `limit`/`offset` windows over the same ordering each endpoint already uses.
 - Ordering is explicit and stable on every paginated list (creation/join time or position), so windows are disjoint and deterministic.
 - Endpoints without a collection shape (`/ai/search`, `/users/me/export`, tree-mode `/pages` without `recent`/`search`) are not paginated.
+- **Exempt, deliberately: `GET /workspaces/{id}/presence`.** The roster is bounded by workspace membership and the client needs the whole set to render "who is online", so paging it would force the BFF to loop for zero benefit — and ordering it (`ORDER BY last_seen`) over a live-changing value makes rows duplicate or skip between windows. It returns every member in one **unordered** bare array; sort client-side.
 
-## WebSocket
+## Realtime (WebSocket)
 
-`GET /ws/channels/{channel_id}` — real-time chat socket. One room per channel
-plus one room per user, so a socket receives channel frames (messages,
-typing, reactions) and its own `notification_created` frames.
+Two sockets, one handshake resolver (`dependencies._ws_resolve_user`) and one
+close-code table, so authentication and rejection semantics below apply to both:
+
+- `GET /ws/channels/{channel_id}` — chat. Joins **two** rooms for the caller:
+  `chan:<channel_id>` (channel frames: messages, typing, reactions) and
+  `user:<user_id>` (the caller's own `notification_created` frames).
+- `GET /ws/workspaces/{workspace_id}/presence` — presence. Joins **one** room,
+  `workspace:<workspace_id>`: every presence socket of every member of that
+  workspace.
+
+The three room namespaces are disjoint, which is the thing most likely to be
+assumed wrongly: `presence_update` never arrives on the chat socket, and
+`notification_created` never arrives on the presence socket. A client that wants
+both realtime feeds opens both sockets.
 
 ### Authentication (TA4-2)
 
@@ -174,13 +201,13 @@ sees a refused handshake with a documented code (not an ambiguous 1008):
 |---|---|
 | 4400 | Reserved, **never sent today**. `WS_BAD_HANDSHAKE` is defined in `ws.py` and no code path raises it; bad subprotocol formats are simply ignored and the cookie/query credential is used instead. Listed for completeness so a client does not have to guess what it means if it ever appears. |
 | 4401 | No credential, or invalid/expired/revoked token |
-| 4403 | Authenticated but not allowed: not a workspace member, guest role, or no private-channel access |
-| 4404 | Channel does not exist |
+| 4403 | Authenticated but not allowed: not a workspace member, guest role, or no private-channel access (chat). On presence, guests are refused here too |
+| 4404 | Target does not exist — the channel (chat) or the workspace (presence) |
 
 Revoked sessions (S02) fail with 4401 — the token decode returns None once
 the `jti` is revoked.
 
-### Frames
+### Frames — chat socket
 
 Client -> server:
 
@@ -193,16 +220,62 @@ Server -> client:
 - `{"type": "reaction_update", "message_id": ..., "reactions": [...]}` — on reaction toggle
 - `{"type": "typing", "channel_id": ..., "user_id": ..., "user_name": ...}`
 - `{"type": "notification_created", "notification": NotificationOut}` — pushed to
-  the user's own sockets when a message fan-out creates their notification
-  (DM peer, thread parent author). Same shape as `GET /notifications`, so a
-  client can merge it without a second request.
+  the user's `user:<id>` room, which only this chat socket joins, so it arrives
+  per open channel socket. Same shape as `GET /notifications`, so a client can
+  merge it without a second request.
+
+### Frames — presence socket
+
+Client -> server. Text frames only, and the server's parser is permissive in
+ways that matter:
+
+- `{"type": "presence", "status": "away", "status_message": "BRB"}` -> stores that
+  status, broadcasts `presence_update`, replies `{"type": "pong"}`.
+- `{"type": "presence"}` with no `status` -> defaults to **`online`** and
+  **clears** `status_message`.
+- **Any other frame also writes `online`** with a cleared message. A bare `ping`,
+  a `{"type": "ping"}`, or anything else that is not a `presence` frame all land
+  on the same defaults, so treat *every* send as a heartbeat.
+- A `status` outside `online|away|dnd|offline` -> nothing is stored and nothing
+  is broadcast, but you still get `{"type": "pong"}`.
+- Text starting with `{` that is not valid JSON -> the frame is skipped
+  **without a `pong`**. A client that waits for a pong after every send can hang
+  on its own malformed frame.
+
+Server -> client. Exactly two kinds:
+
+- `{"type": "presence_update", "workspace_id": ..., "user_id": ..., "name": ..., "status": ..., "status_message": ..., "last_seen": ...}` — the five HTTP item fields plus the workspace id. **Broadcasts include the sender's own socket** (unlike chat's `typing`, which excludes it), so a client must be ready to apply its own change coming back at it.
+- `{"type": "pong"}`
 
 ### Connection semantics
 
-On disconnect the socket leaves **both** the channel room and the user room
+On disconnect the chat socket leaves **both** the channel room and the user room
 in the endpoint's `finally`; broadcasts additionally evict any socket whose
 send fails, so a client that dies before its cleanup still cannot keep a
 phantom delivery slot.
+
+**Presence lifecycle is refcounted per `(workspace, user)`, not per socket.**
+The user's *first* presence socket in a workspace writes `online`; a second tab
+writes **nothing** (otherwise it would clobber a `dnd` the user chose over HTTP);
+`offline` is written only when the *last* socket closes. So closing one browser
+tab does not make the user appear offline while they are still looking at the app.
+
+A hard crash never reaches the disconnect handler, so reads decay a *stored*
+`online` row on a timer instead: `online` -> `away` after `AWAY_AFTER_SECONDS`
+(300s) of no inbound frame, and `online` -> `offline` after
+`OFFLINE_AFTER_SECONDS` (1800s). `away`/`dnd`/`offline` never decay — a status a
+user chose is kept indefinitely. There is no scheduler, TTL column or sweeper;
+both transitions are computed at read/broadcast time from `last_seen`.
+
+Two consequences a client has to live with: the server only refreshes
+`last_seen` when a frame arrives, so **an open tab that sends nothing shows as
+`away` after five minutes** — send a heartbeat frame well inside 300s. And the
+room registry plus the refcount are **in-process memory**, which is correct for
+the single uvicorn worker this deployment runs and wrong the moment it is scaled
+out; multi-worker fan-out needs a shared store, not more sockets.
+
+A session revoked *after* the handshake is not re-checked: the socket stays open
+until it closes. `4401` guards connection, not the connection's lifetime.
 
 ## Health, readiness & observability
 
