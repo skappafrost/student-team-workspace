@@ -93,7 +93,15 @@ def storage_key_of(data: dict) -> str:
 
 
 class TestFilenameSanitization:
-    def test_traversal_names_with_allowed_ext_stay_flat(self, client, db_session, upload_dir):
+    def test_traversal_names_with_allowed_ext_rejected_422(self, client, db_session, upload_dir):
+        """A filename carrying a path separator is rejected outright (422).
+
+        Reconciles TA2-1 (#128, which flattened traversal names into a safe
+        key) with TA7-1 (#175, which hard-rejects them). The reject wins: it
+        answers the client with the truthful reason ('path separators')
+        instead of silently renaming the upload, and it never reaches the
+        filesystem, so nothing can escape UPLOAD_DIR.
+        """
         ws = create_workspace(client, db_session)
         for name in (
             "../../etc/passwd.txt",
@@ -103,25 +111,30 @@ class TestFilenameSanitization:
             "a/../../escaped.txt",
         ):
             resp = post_upload(client, ws["id"], name, b"x", "text/plain")
-            assert resp.status_code == 201, (name, resp.text)
-            key = storage_key_of(resp.json())
-            assert "/" not in key and "\\" not in key, (name, key)
-            assert ".." not in key, (name, key)
-            assert (upload_dir / key).is_file()
-        # nothing escaped the upload dir, and no subdirectories were created
+            assert resp.status_code == 422, (name, resp.text)
+            assert "path separators" in resp.json()["detail"], (name, resp.text)
+        # rejected before any write: the upload dir stays empty and nothing
+        # escapes it into a parent directory.
+        assert list(upload_dir.iterdir()) == []
         assert not (upload_dir.parent / "escaped.txt").exists()
         assert not (upload_dir.parent / "passwd").exists()
-        assert all(p.is_file() for p in upload_dir.iterdir())
 
     def test_traversal_with_disallowed_or_missing_ext_rejected(self, client, db_session, upload_dir):
+        """Traversal names are rejected for the separator itself (422) ahead of
+        the extension allow-list — TA7-1 reject-wins. Disallowed extensions are
+        still covered for clean names by ``test_disallowed_extension_rejected_415``;
+        an absolute Windows path is left out here because multipart transports
+        normalize drive-qualified paths inconsistently across platforms.
+        Dot-only names carry no separator, so they still fall through and fail
+        as 'name required'."""
         ws = create_workspace(client, db_session)
         for name in (
-            "../../etc/passwd",  # task-literal payload: no usable extension
-            "C:\\Users\\ha\\evil.exe",
-            "/etc/shadow",  # sanitizes to 'etc_shadow' — still no allowed ext
+            "../../etc/passwd",  # relative path, '/' survives -> separator
+            "/etc/shadow",  # '/' survives -> separator
         ):
             resp = post_upload(client, ws["id"], name, b"x", "application/octet-stream")
-            assert resp.status_code == 415, (name, resp.text)
+            assert resp.status_code == 422, (name, resp.text)
+            assert "path separators" in resp.json()["detail"], (name, resp.text)
         # dot-only names sanitize to empty -> 422 (correct: name required)
         for name in ("..", "."):
             resp = post_upload(client, ws["id"], name, b"x", "application/octet-stream")
