@@ -27,9 +27,62 @@ interface PageViewerProps {
   page: WikiPage | null | undefined;
   isLoading?: boolean;
   onSelectPage?: (id: string) => void;
+  /** All pages in the workspace, used to resolve [[title]]/[[slug]] wiki links. */
+  pages?: WikiLinkTarget[];
 }
 
-export function PageViewer({ page, isLoading, onSelectPage }: PageViewerProps) {
+type WikiLinkTarget = Pick<WikiPage, 'id' | 'slug' | 'title'>;
+
+const WIKI_LINK_RE = /\[\[([^\]]+)\]\]/g;
+
+/**
+ * Renders page content with `[[title]]` / `[[slug]]` wiki links as clickable
+ * buttons (Notion/Obsidian wiki-link idiom). Unknown targets render muted.
+ */
+function WikiContent({
+  content,
+  pages,
+  onSelectPage
+}: {
+  content: string;
+  pages: WikiLinkTarget[];
+  onSelectPage?: (id: string) => void;
+}) {
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  for (const match of content.matchAll(WIKI_LINK_RE)) {
+    const idx = match.index ?? 0;
+    if (idx > last) nodes.push(content.slice(last, idx));
+    const target = match[1].trim().toLowerCase();
+    const targetPage = pages.find(
+      (p) => p.slug.toLowerCase() === target || p.title.toLowerCase() === target
+    );
+    if (targetPage) {
+      nodes.push(
+        <button
+          key={`wl-${key++}`}
+          type='button'
+          onClick={() => onSelectPage?.(targetPage.id)}
+          className='text-primary hover:text-primary/80 font-medium underline decoration-dotted underline-offset-2'
+        >
+          {match[1]}
+        </button>
+      );
+    } else {
+      nodes.push(
+        <span key={`wl-${key++}`} className='text-muted-foreground italic'>
+          {match[0]}
+        </span>
+      );
+    }
+    last = idx + match[0].length;
+  }
+  if (last < content.length) nodes.push(content.slice(last));
+  return <>{nodes}</>;
+}
+
+export function PageViewer({ page, isLoading, onSelectPage, pages = [] }: PageViewerProps) {
   const backlinksQuery = useQuery(pageBacklinksQueryOptions(page?.id ?? null));
   const backlinks = backlinksQuery.data ?? [];
   if (isLoading) {
@@ -73,7 +126,11 @@ export function PageViewer({ page, isLoading, onSelectPage }: PageViewerProps) {
       <ScrollArea className='flex-1'>
         <CardContent className='py-4'>
           <article className='prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap'>
-            {page.content || <span className='italic text-muted-foreground'>No content.</span>}
+            {page.content ? (
+              <WikiContent content={page.content} pages={pages} onSelectPage={onSelectPage} />
+            ) : (
+              <span className='italic text-muted-foreground'>No content.</span>
+            )}
           </article>
         </CardContent>
       </ScrollArea>

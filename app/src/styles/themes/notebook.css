@@ -1,3 +1,9 @@
+/**
+ * Theme: notebook
+ * Design source: https://tweakcn.com (Notebook preset)
+ * Adaptation: Paper-like warm neutrals. Tokenized via CSS custom properties only —
+ * no component-level hardcoded colors. Catalog: design-references/themes.md
+ */
 [data-theme='notebook'] {
   --background: oklch(0.9821 0 0);
   --foreground: oklch(0.3485 0 0);
@@ -14,7 +20,7 @@
   --accent: oklch(0.9354 0.0456 94.8549);
   --accent-foreground: oklch(0.4015 0.0436 37.9587);
   --destructive: oklch(0.6627 0.0978 20.0041);
-  --destructive-foreground: oklch(1 0 0);
+  --destructive-foreground: oklch(0.28 0 0);
   --border: oklch(0.5538 0.0025 17.232);
   --input: oklch(1 0 0);
   --ring: oklch(0.7058 0 0);
@@ -63,7 +69,7 @@
   --primary: oklch(0.7572 0 0);
   --primary-foreground: oklch(0.2891 0 0);
   --secondary: oklch(0.4676 0 0);
-  --secondary-foreground: oklch(0.8078 0 0);
+  --secondary-foreground: oklch(0.8678 0 0);
   --muted: oklch(0.3904 0 0);
   --muted-foreground: oklch(0.7058 0 0);
   --accent: oklch(0.9067 0 0);

@@ -37,7 +37,9 @@ export function useSearchActions(routerPush: (url: string) => void) {
   React.useEffect(() => {
     const query = searchQuery.trim();
     if (query.length < 2) {
-      setResults({ actions: [], capped: false });
+      // Return prev when already empty: callers pass unstable callbacks, so
+      // this effect reruns often — a fresh object each time loops forever.
+      setResults((prev) => (prev.actions.length === 0 && !prev.capped ? prev : { actions: [], capped: false }));
       return;
     }
 
@@ -84,7 +86,17 @@ export function useSearchActions(routerPush: (url: string) => void) {
       }));
 
       const all = [...taskActions, ...projectActions, ...pageActions];
-      setResults({ actions: all.slice(0, SEARCH_CAP), capped: all.length > SEARCH_CAP });
+      const capped = all.length > SEARCH_CAP;
+      const actions = all.slice(0, SEARCH_CAP);
+      // Skip the state write when results are unchanged (same ids) so an
+      // unstable routerPush identity can't retrigger this effect forever.
+      setResults((prev) =>
+        prev.capped === capped &&
+        prev.actions.length === actions.length &&
+        prev.actions.every((a, i) => a.id === actions[i].id)
+          ? prev
+          : { actions, capped }
+      );
     }, 250);
 
     return () => {

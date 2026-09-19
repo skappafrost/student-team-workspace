@@ -14,9 +14,13 @@ import {
   DialogTitle,
   DialogTrigger
 } from '@/components/ui/dialog';
+import { toast } from 'sonner';
 import { Icons } from '@/components/icons';
 import { cn } from '@/lib/utils';
+import { formatSize } from '../api/service';
 import { useUploadFile } from '../api/queries';
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 // Source: shadcn/ui Dialog + Input + Button; Tailwind CSS drag-and-drop zone pattern.
 export function FileUploader() {
@@ -27,6 +31,10 @@ export function FileUploader() {
   const upload = useUploadFile();
 
   const handleFile = useCallback((file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error(`"${file.name}" is ${formatSize(file.size)} — max ${formatSize(MAX_FILE_SIZE)}`);
+      return;
+    }
     setSelectedFile(file);
   }, []);
 
@@ -61,9 +69,15 @@ export function FileUploader() {
 
   const onSubmit = async () => {
     if (!selectedFile) return;
-    await upload.mutateAsync({ file: selectedFile });
-    setSelectedFile(null);
-    setOpen(false);
+    try {
+      await upload.mutateAsync({ file: selectedFile });
+      toast.success(`Uploaded ${selectedFile.name}`);
+      setSelectedFile(null);
+      setOpen(false);
+    } catch (err) {
+      // Keep the dialog open with the file selected so the user can retry.
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
+    }
   };
 
   const onClose = (value: boolean) => {

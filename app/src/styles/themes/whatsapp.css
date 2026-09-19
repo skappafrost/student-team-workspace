@@ -1,3 +1,9 @@
+/**
+ * Theme: whatsapp
+ * Design source: https://tweakcn.com (WhatsApp preset)
+ * Adaptation: Brand-green chat palette. Tokenized via CSS custom properties only —
+ * no component-level hardcoded colors. Catalog: design-references/themes.md
+ */
 [data-theme='whatsapp'] {
   --background: oklch(0.9605 0.0046 258.3248);
   --foreground: oklch(0.2153 0.0187 235.1251);
@@ -10,11 +16,11 @@
   --secondary: oklch(0.9644 0.0208 166.1014);
   --secondary-foreground: oklch(0.4335 0.0754 182.2315);
   --muted: oklch(0.9605 0.0046 258.3248);
-  --muted-foreground: oklch(0.5589 0.0255 233.7233);
+  --muted-foreground: oklch(0.5289 0.0255 233.7233);
   --accent: oklch(0.761 0.2015 149.7403);
-  --accent-foreground: oklch(1 0 0);
+  --accent-foreground: oklch(0.4 0 0);
   --destructive: oklch(0.6257 0.2058 29.0773);
-  --destructive-foreground: oklch(1 0 0);
+  --destructive-foreground: oklch(0.2 0 0);
   --border: oklch(0.9436 0.0051 228.8204);
   --input: oklch(0.9436 0.0051 228.8204);
   --ring: oklch(0.761 0.2015 149.7403);
@@ -71,7 +77,7 @@
   --accent: oklch(0.761 0.2015 149.7403);
   --accent-foreground: oklch(0.2153 0.0187 235.1251);
   --destructive: oklch(0.6257 0.2058 29.0773);
-  --destructive-foreground: oklch(0.9436 0.0051 228.8204);
+  --destructive-foreground: oklch(0.2036 0.0051 228.8204);
   --border: oklch(0.3351 0.0253 234.8586);
   --input: oklch(0.3351 0.0253 234.8586);
   --ring: oklch(0.6509 0.1283 170.4258);

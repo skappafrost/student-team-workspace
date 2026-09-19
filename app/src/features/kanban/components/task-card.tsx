@@ -1,22 +1,29 @@
 'use client';
 
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { KanbanItem } from '@/components/ui/kanban';
+import { cn } from '@/lib/utils';
 import type { Task } from '../api/types';
 
 interface TaskCardProps extends Omit<React.ComponentProps<typeof KanbanItem>, 'value'> {
   task: Task;
   onOpen?: () => void;
+  selected?: boolean;
+  onToggleSelect?: (selected: boolean) => void;
 }
 
-export function TaskCard({ task, onOpen, ...props }: TaskCardProps) {
+export function TaskCard({ task, onOpen, selected, onToggleSelect, ...props }: TaskCardProps) {
   return (
     <KanbanItem
       value={task.id}
       {...props}
       render={
         <div
-          className='bg-card hover:bg-accent/40 cursor-pointer rounded-md border p-3 shadow-xs transition-colors'
+          className={cn(
+            'group/card bg-card hover:bg-accent/40 relative cursor-pointer rounded-md border p-3 shadow-xs transition-colors',
+            selected && 'ring-primary ring-2'
+          )}
           role='button'
           tabIndex={0}
           aria-label={`Open details for ${task.title}`}
@@ -30,9 +37,29 @@ export function TaskCard({ task, onOpen, ...props }: TaskCardProps) {
         />
       }
     >
+      {onToggleSelect && (
+        <Checkbox
+          aria-label={`Select ${task.title}`}
+          checked={selected ?? false}
+          onCheckedChange={(checked) => onToggleSelect(checked === true)}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          className={cn(
+            'absolute top-2 left-2 z-10 bg-background transition-opacity',
+            selected ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'
+          )}
+        />
+      )}
       <div className='flex flex-col gap-2'>
         <div className='flex items-center justify-between gap-2'>
-          <span className='line-clamp-1 text-sm font-medium'>{task.title}</span>
+          <span
+            className={cn(
+              'line-clamp-1 text-sm font-medium',
+              onToggleSelect && (selected ? 'pl-6' : 'group-hover/card:pl-6')
+            )}
+          >
+            {task.title}
+          </span>
           <Badge
             variant={
               task.priority === 'high' || task.priority === 'urgent'

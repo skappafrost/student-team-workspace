@@ -1,9 +1,21 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Empty,
@@ -22,6 +34,9 @@ interface MessageListProps {
   currentUserId?: string;
   onReply?: (message: Message) => void;
   onToggleReaction?: (message: Message, emoji: string) => void;
+  onOpenThread?: (message: Message) => void;
+  onEdit?: (message: Message, content: string) => void;
+  onDelete?: (message: Message) => void;
 }
 
 function authorLabel(message: Message): string {
@@ -98,14 +113,21 @@ function MessageBubble({
   isMe,
   compact = false,
   currentUserId,
-  onToggleReaction
+  onToggleReaction,
+  onEdit,
+  onDelete
 }: {
   message: Message;
   isMe: boolean;
   compact?: boolean;
   currentUserId?: string;
   onToggleReaction?: (emoji: string) => void;
+  onEdit?: (content: string) => void;
+  onDelete?: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(message.content);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   return (
     <div
       className={cn('flex w-full items-end gap-3', isMe ? 'flex-row-reverse' : 'flex-row')}
@@ -138,14 +160,51 @@ function MessageBubble({
         >
           {authorLabel(message)}
         </p>
-        <p
-          className={cn(
-            'mt-1 whitespace-pre-wrap',
-            isMe ? 'text-primary-foreground/90' : 'text-foreground/90'
-          )}
-        >
-          {message.content}
-        </p>
+        {editing ? (
+          <form
+            className='mt-1 flex flex-col gap-1.5'
+            onSubmit={(e) => {
+              e.preventDefault();
+              const content = editDraft.trim();
+              if (content && content !== message.content) onEdit?.(content);
+              setEditing(false);
+            }}
+          >
+            <textarea
+              value={editDraft}
+              onChange={(e) => setEditDraft(e.target.value)}
+              aria-label='Edit message'
+              rows={2}
+              className='border-border/60 bg-background text-foreground w-full rounded-lg border px-2 py-1 text-sm'
+            />
+            <div className='flex gap-1.5'>
+              <Button type='submit' size='sm' className='h-7 px-2 text-xs'>
+                Save
+              </Button>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='h-7 px-2 text-xs'
+                onClick={() => {
+                  setEditing(false);
+                  setEditDraft(message.content);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <p
+            className={cn(
+              'mt-1 whitespace-pre-wrap',
+              isMe ? 'text-primary-foreground/90' : 'text-foreground/90'
+            )}
+          >
+            {message.content}
+          </p>
+        )}
         <span
           className={cn(
             'mt-1 block text-[0.65rem] sm:text-[0.7rem]',
@@ -153,7 +212,60 @@ function MessageBubble({
           )}
         >
           {timeLabel(message.created_at)}
+          {message.updated_at !== message.created_at && ' · edited'}
         </span>
+        {isMe && !editing && (onEdit || onDelete) && (
+          <span className='mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'>
+            {onEdit && (
+              <button
+                type='button'
+                onClick={() => setEditing(true)}
+                aria-label={`Edit message from ${authorLabel(message)}`}
+                className={cn(
+                  'text-[0.65rem] underline underline-offset-2',
+                  isMe ? 'text-primary-foreground/80' : 'text-muted-foreground'
+                )}
+              >
+                Edit
+              </button>
+            )}
+            {onDelete && (
+              <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+                <AlertDialogTrigger
+                  aria-label={`Delete message from ${authorLabel(message)}`}
+                  className={cn(
+                    'text-[0.65rem] underline underline-offset-2',
+                    isMe ? 'text-primary-foreground/80' : 'text-destructive'
+                  )}
+                >
+                  Delete
+                </AlertDialogTrigger>
+                <AlertDialogContent size='sm'>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this message?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This is permanent — the message is removed for everyone in the channel and
+                      cannot be restored.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant='destructive'
+                      aria-label='Confirm delete message'
+                      onClick={() => {
+                        setConfirmingDelete(false);
+                        onDelete();
+                      }}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </span>
+        )}
         <ReactionChips
           reactions={message.reactions ?? []}
           currentUserId={currentUserId}
@@ -168,10 +280,14 @@ export function MessageList({
   messages,
   currentUserId,
   onReply,
-  onToggleReaction
+  onToggleReaction,
+  onOpenThread,
+  onEdit,
+  onDelete
 }: MessageListProps) {
-  const shouldReduceMotion = useReducedMotion();
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Animations always run at full intensity; OS reduced-motion is ignored by design.
+  const shouldReduceMotion = false;
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const { roots, repliesByParent } = useMemo(() => {
     const roots: Message[] = [];
@@ -188,8 +304,96 @@ export function MessageList({
     return { roots, repliesByParent };
   }, [messages]);
 
+  // Windowing: above the threshold only the visible slice mounts (react-virtual
+  // with dynamic row measurement). Below it the plain list renders so small
+  // channels keep simple DOM and entry animations.
+  const VIRTUALIZE_THRESHOLD = 50;
+  const virtualized = roots.length > VIRTUALIZE_THRESHOLD;
+  const virtualizer = useVirtualizer({
+    count: virtualized ? roots.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 96,
+    overscan: 8,
+    getItemKey: (i) => roots[i]?.id ?? i
+  });
+
+  // New messages land at the bottom; keep the view pinned there on first
+  // render and whenever the list grows while already near the bottom.
+  const lastCountRef = useRef(roots.length);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !virtualized) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+    if (roots.length !== lastCountRef.current && nearBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+    lastCountRef.current = roots.length;
+  }, [roots.length, virtualized]);
+
+  const renderMessage = (message: Message) => {
+    const isMe = message.author_id === currentUserId;
+    // Optimistic messages carry a `pending-` id that the server doesn't know
+    // yet — acting on them (reply/edit/delete/react) would send a bogus id and
+    // roll back. Hide the actions until the refetch swaps in the real id.
+    const isPending = message.id.startsWith('pending-');
+    const replies = repliesByParent.get(message.id) ?? [];
+    const lastReply = replies[replies.length - 1];
+    return (
+      <div className='group flex flex-col gap-2'>
+        <div className='flex items-center gap-2'>
+          <div className='min-w-0 flex-1'>
+            <MessageBubble
+              message={message}
+              isMe={isMe}
+              currentUserId={currentUserId}
+              onToggleReaction={
+                onToggleReaction && !isPending
+                  ? (emoji) => onToggleReaction(message, emoji)
+                  : undefined
+              }
+              onEdit={onEdit && !isPending ? (content) => onEdit(message, content) : undefined}
+              onDelete={onDelete && !isPending ? () => onDelete(message) : undefined}
+            />
+          </div>
+          {onToggleReaction && !isPending && (
+            <div className='opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'>
+              <EmojiPicker onPick={(emoji) => onToggleReaction(message, emoji)} />
+            </div>
+          )}
+          {onReply && !isPending && (
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              className='opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100'
+              onClick={() => onReply(message)}
+              aria-label={`Reply to ${authorLabel(message)}`}
+            >
+              Reply
+            </Button>
+          )}
+        </div>
+        {replies.length > 0 && (
+          <div className={cn('ps-10 sm:ps-12', isMe && 'text-right')}>
+            <Button
+              type='button'
+              variant='link'
+              size='sm'
+              className='h-auto px-0 text-xs'
+              onClick={() => onOpenThread?.(message)}
+            >
+              {replies.length === 1 ? '1 reply' : `${replies.length} replies`}
+              {lastReply && ` · last ${timeLabel(lastReply.created_at)}`} — open thread
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div
+      ref={scrollRef}
       className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 py-4 sm:px-4'
       aria-label='Messages'
       role='log'
@@ -204,83 +408,37 @@ export function MessageList({
             <EmptyDescription>Start the conversation below.</EmptyDescription>
           </EmptyHeader>
         </Empty>
-      ) : (
-        roots.map((message) => {
-          const isMe = message.author_id === currentUserId;
-          const replies = repliesByParent.get(message.id) ?? [];
-          const isOpen = expanded[message.id] ?? false;
-          return (
-            <motion.div
-              key={message.id}
-              initial={shouldReduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.28, ease: 'easeOut' }}
-              className='group flex flex-col gap-2'
+      ) : virtualized ? (
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+          {virtualizer.getVirtualItems().map((vi) => (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${vi.start}px)`
+              }}
+              className='pb-4'
             >
-              <div className='flex items-center gap-2'>
-                <div className='min-w-0 flex-1'>
-                  <MessageBubble
-                    message={message}
-                    isMe={isMe}
-                    currentUserId={currentUserId}
-                    onToggleReaction={
-                      onToggleReaction ? (emoji) => onToggleReaction(message, emoji) : undefined
-                    }
-                  />
-                </div>
-                {onToggleReaction && (
-                  <div className='opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'>
-                    <EmojiPicker onPick={(emoji) => onToggleReaction(message, emoji)} />
-                  </div>
-                )}
-                {onReply && (
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='sm'
-                    className='opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100'
-                    onClick={() => onReply(message)}
-                    aria-label={`Reply to ${authorLabel(message)}`}
-                  >
-                    Reply
-                  </Button>
-                )}
-              </div>
-              {replies.length > 0 && (
-                <div className={cn('ps-10 sm:ps-12', isMe && 'text-right')}>
-                  <Button
-                    type='button'
-                    variant='link'
-                    size='sm'
-                    className='h-auto px-0 text-xs'
-                    onClick={() => setExpanded((prev) => ({ ...prev, [message.id]: !isOpen }))}
-                    aria-expanded={isOpen}
-                  >
-                    {isOpen
-                      ? `Hide ${replies.length === 1 ? 'reply' : `${replies.length} replies`}`
-                      : `Show ${replies.length === 1 ? '1 reply' : `${replies.length} replies`}`}
-                  </Button>
-                  {isOpen && (
-                    <div className='mt-2 flex flex-col gap-2'>
-                      {replies.map((reply) => (
-                        <MessageBubble
-                          key={reply.id}
-                          message={reply}
-                          isMe={reply.author_id === currentUserId}
-                          compact
-                          currentUserId={currentUserId}
-                          onToggleReaction={
-                            onToggleReaction ? (emoji) => onToggleReaction(reply, emoji) : undefined
-                          }
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </motion.div>
-          );
-        })
+              {renderMessage(roots[vi.index])}
+            </div>
+          ))}
+        </div>
+      ) : (
+        roots.map((message) => (
+          <motion.div
+            key={message.id}
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.28, ease: 'easeOut' }}
+          >
+            {renderMessage(message)}
+          </motion.div>
+        ))
       )}
     </div>
   );

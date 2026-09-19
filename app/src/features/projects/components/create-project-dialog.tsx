@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { TiltButton } from '@/components/ui/tilt-button';
 import {
   Dialog,
   DialogContent,
@@ -54,10 +55,10 @@ export function CreateProjectDialog({ onSubmit, isSubmitting }: CreateProjectDia
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button className='gap-2'>
+          <TiltButton>
             <Icons.add className='size-4' />
             New project
-          </Button>
+          </TiltButton>
         }
       />
       <DialogContent className='sm:max-w-md'>

@@ -1,5 +1,5 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { getSessionCookie, getCurrentWorkspaceId } from '@/lib/server-workspace';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
@@ -7,17 +7,11 @@ async function getWorkspaceAndSession(): Promise<{
   sessionCookie: string;
   workspaceId: string;
 } | null> {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get('session_token')?.value;
+  const sessionCookie = await getSessionCookie();
   if (!sessionCookie) return null;
-  const res = await fetch(`${BACKEND_URL}/workspaces`, {
-    headers: { Cookie: `session_token=${sessionCookie}` },
-    cache: 'no-store'
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as Array<{ id: string }>;
-  if (!Array.isArray(data) || data.length === 0) return null;
-  return { sessionCookie, workspaceId: data[0].id };
+  const workspaceId = await getCurrentWorkspaceId(sessionCookie);
+  if (!workspaceId) return null;
+  return { sessionCookie, workspaceId };
 }
 
 /** List the current user's DM channels. */

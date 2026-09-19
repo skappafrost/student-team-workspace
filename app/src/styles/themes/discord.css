@@ -1,3 +1,9 @@
+/**
+ * Theme: discord
+ * Design source: https://tweakcn.com (Discord preset)
+ * Adaptation: Brand-blurple accent; contrast-fixed. Tokenized via CSS custom properties only —
+ * no component-level hardcoded colors. Catalog: design-references/themes.md
+ */
 [data-theme='discord'] {
   --background: oklch(0.994 0 0);
   --foreground: oklch(0 0 0);
@@ -10,11 +16,11 @@
   --secondary: oklch(0.888 0 172.405);
   --secondary-foreground: oklch(0.216 0 180);
   --muted: oklch(0.9612 0 0);
-  --muted-foreground: oklch(0.605 0 180);
+  --muted-foreground: oklch(0.555 0 180);
   --accent: oklch(0.7037 0.1568 277.9576);
-  --accent-foreground: oklch(1 0 180);
+  --accent-foreground: oklch(0.32 0 180);
   --destructive: oklch(0.654 0.232 28.66);
-  --destructive-foreground: oklch(1 0 180);
+  --destructive-foreground: oklch(0.24 0 180);
   --border: oklch(0.9401 0 0);
   --input: oklch(0.851 0 180);
   --ring: oklch(0.683 0 180);
@@ -67,7 +73,7 @@
   --muted: oklch(0.2387 0.0114 293.1598);
   --muted-foreground: oklch(0.689 0 164.055);
   --accent: oklch(0.6615 0.149 277.6548);
-  --accent-foreground: oklch(1 0 180);
+  --accent-foreground: oklch(0.28 0 180);
   --destructive: oklch(0.588 0.199 24.393);
   --destructive-foreground: oklch(1 0 180);
   --border: oklch(0.3089 0.0038 264.5091);

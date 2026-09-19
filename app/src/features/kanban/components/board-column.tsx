@@ -14,9 +14,20 @@ interface TaskColumnProps extends Omit<React.ComponentProps<typeof KanbanColumn>
   tasks: Task[];
   onAdd: (title: string) => void;
   onOpen: (taskId: string) => void;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string, selected: boolean) => void;
 }
 
-export function TaskColumn({ value, label, tasks, onAdd, onOpen, ...props }: TaskColumnProps) {
+export function TaskColumn({
+  value,
+  label,
+  tasks,
+  onAdd,
+  onOpen,
+  selectedIds,
+  onToggleSelect,
+  ...props
+}: TaskColumnProps) {
   return (
     <KanbanColumn value={value} className='w-full shrink-0 md:w-[320px]' {...props}>
       <div className='flex items-center justify-between'>
@@ -32,7 +43,15 @@ export function TaskColumn({ value, label, tasks, onAdd, onOpen, ...props }: Tas
       </div>
       <div className='flex flex-col gap-2 p-0.5'>
         {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} onOpen={() => onOpen(task.id)} />
+          <TaskCard
+            key={task.id}
+            task={task}
+            onOpen={() => onOpen(task.id)}
+            selected={selectedIds?.has(task.id)}
+            onToggleSelect={
+              onToggleSelect ? (selected) => onToggleSelect(task.id, selected) : undefined
+            }
+          />
         ))}
       </div>
       <QuickAddCard onAdd={onAdd} />

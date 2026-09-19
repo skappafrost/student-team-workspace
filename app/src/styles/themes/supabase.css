@@ -1,3 +1,9 @@
+/**
+ * Theme: supabase
+ * Design source: https://tweakcn.com (Supabase preset)
+ * Adaptation: Brand-green accent; OKLCH port. Tokenized via CSS custom properties only —
+ * no component-level hardcoded colors. Catalog: design-references/themes.md
+ */
 [data-theme='supabase'] {
   --background: oklch(0.9911 0 0);
   --foreground: oklch(0.2046 0 0);

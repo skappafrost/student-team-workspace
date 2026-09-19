@@ -1,5 +1,8 @@
 'use client';
 
+// Source: Linear inbox idiom (unread dot + muted read rows); empty state via
+// shadcn Empty. Catalog: design-references/notifications.md
+
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
@@ -8,6 +11,13 @@ import { Icons } from '@/components/icons';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty';
 import { notificationKeys, notificationsQueryOptions } from '../api/queries';
 import { markAllNotificationsAsRead, markNotificationAsRead } from '../api/service';
 import { Notification as NotificationType, NotificationStatus } from '../api/types';
@@ -87,10 +97,17 @@ export function NotificationList({ filter = 'all' }: NotificationListProps) {
 
   if (notifications.length === 0) {
     return (
-      <div className='flex flex-col items-center justify-center py-16'>
-        <Icons.notification className='text-muted-foreground/40 mb-3 h-10 w-10' />
-        <p className='text-muted-foreground text-sm'>No notifications</p>
-      </div>
+      <Empty className='py-16'>
+        <EmptyHeader>
+          <EmptyMedia variant='icon'>
+            <Icons.notification />
+          </EmptyMedia>
+          <EmptyTitle>No notifications</EmptyTitle>
+          <EmptyDescription>
+            You are all caught up. New activity will show up here.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 

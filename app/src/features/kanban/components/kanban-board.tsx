@@ -5,7 +5,9 @@ import { Kanban, KanbanBoard as KanbanBoardPrimitive, KanbanOverlay } from '@/co
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { taskKeys, tasksQueryOptions } from '../api/queries';
-import { createTask, updateTask } from '../api/service';
+import { createTask, deleteTask, updateTask } from '../api/service';
+import { Button } from '@/components/ui/button';
+import { Icons } from '@/components/icons';
 import { Task, TaskStatus } from '../api/types';
 import { TaskColumn } from './board-column';
 import { TaskCard } from './task-card';
@@ -72,7 +74,41 @@ export function KanbanBoard({ projectId }: { projectId: string }) {
 
   const [columns, setColumns] = useState<Record<TaskStatus, Task[]>>(buildColumns(tasks));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const toggleChecked = useCallback((taskId: string, selected: boolean) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(taskId);
+      else next.delete(taskId);
+      return next;
+    });
+  }, []);
+
+  const bulkUpdate = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => updateTask(id, { status: 'done' })));
+    },
+    onSuccess: () => {
+      toast.success('Tasks marked done');
+      setCheckedIds(new Set());
+      return queryClient.invalidateQueries({ queryKey: taskKeys.all });
+    },
+    onError: () => toast.error('Bulk update failed')
+  });
+
+  const bulkDelete = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => deleteTask(id)));
+    },
+    onSuccess: () => {
+      toast.success('Tasks deleted');
+      setCheckedIds(new Set());
+      return queryClient.invalidateQueries({ queryKey: taskKeys.all });
+    },
+    onError: () => toast.error('Bulk delete failed')
+  });
 
   // Keep local columns in sync with server data when switching projects or refetching.
   useEffect(() => {
@@ -177,6 +213,8 @@ export function KanbanBoard({ projectId }: { projectId: string }) {
                   })
                 }
                 onOpen={setSelectedTaskId}
+                selectedIds={checkedIds}
+                onToggleSelect={toggleChecked}
               />
             ))}
           </KanbanBoardPrimitive>
@@ -209,6 +247,38 @@ export function KanbanBoard({ projectId }: { projectId: string }) {
           if (!open) setSelectedTaskId(null);
         }}
       />
+
+      {checkedIds.size > 0 && (
+        <div
+          role='toolbar'
+          aria-label='Bulk task actions'
+          className='bg-background/80 fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 shadow-lg backdrop-blur'
+        >
+          <span className='text-muted-foreground text-sm tabular-nums'>
+            {checkedIds.size} selected
+          </span>
+          <Button
+            size='sm'
+            onClick={() => bulkUpdate.mutate([...checkedIds])}
+            disabled={bulkUpdate.isPending || bulkDelete.isPending}
+          >
+            <Icons.check className='size-4' />
+            Mark done
+          </Button>
+          <Button
+            size='sm'
+            variant='destructive'
+            onClick={() => bulkDelete.mutate([...checkedIds])}
+            disabled={bulkUpdate.isPending || bulkDelete.isPending}
+          >
+            <Icons.trash className='size-4' />
+            Delete
+          </Button>
+          <Button size='sm' variant='ghost' onClick={() => setCheckedIds(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

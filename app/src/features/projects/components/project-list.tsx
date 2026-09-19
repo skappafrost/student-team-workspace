@@ -33,14 +33,17 @@ function StatusBadge({ status }: { status: ProjectStatus }) {
   );
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, index }: { project: Project; index: number }) {
   return (
-    <Card className='transition-colors hover:bg-muted/20'>
+    <Card className='bg-accent/40 hover:bg-accent/60 transition-colors'>
       <CardHeader className='pb-2'>
         <div className='flex items-start justify-between gap-3'>
-          <CardTitle className='line-clamp-1 text-base'>{project.name}</CardTitle>
+          <span className='text-muted-foreground/60 text-2xl font-bold tabular-nums'>
+            {String(index + 1).padStart(2, '0')}
+          </span>
           <StatusBadge status={project.status} />
         </div>
+        <CardTitle className='line-clamp-1 text-base'>{project.name}</CardTitle>
         <CardDescription className='line-clamp-2'>
           {project.description || 'No description'}
         </CardDescription>
@@ -51,6 +54,21 @@ function ProjectCard({ project }: { project: Project }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function ProjectRow({ project, index }: { project: Project; index: number }) {
+  return (
+    <div className='hover:bg-accent/40 flex items-center gap-4 border-b px-3 py-2.5 transition-colors last:border-b-0'>
+      <span className='text-muted-foreground/60 w-7 shrink-0 text-sm font-semibold tabular-nums'>
+        {String(index + 1).padStart(2, '0')}
+      </span>
+      <span className='line-clamp-1 min-w-0 flex-1 text-sm font-medium'>{project.name}</span>
+      <span className='text-muted-foreground hidden w-32 text-xs sm:block'>
+        {new Date(project.created_at).toLocaleDateString()}
+      </span>
+      <StatusBadge status={project.status} />
+    </div>
   );
 }
 
@@ -75,9 +93,10 @@ export interface ProjectListProps {
   isLoading: boolean;
   /** Optional CTA rendered inside the empty state (e.g. CreateProjectDialog). */
   emptyAction?: React.ReactNode;
+  view?: 'grid' | 'list';
 }
 
-export function ProjectList({ projects, isLoading, emptyAction }: ProjectListProps) {
+export function ProjectList({ projects, isLoading, emptyAction, view = 'grid' }: ProjectListProps) {
   if (isLoading) {
     return <ProjectGridSkeleton />;
   }
@@ -99,10 +118,20 @@ export function ProjectList({ projects, isLoading, emptyAction }: ProjectListPro
     );
   }
 
+  if (view === 'list') {
+    return (
+      <div className='rounded-lg border'>
+        {projects.map((project, i) => (
+          <ProjectRow key={project.id} project={project} index={i} />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-      {projects.map((project) => (
-        <ProjectCard key={project.id} project={project} />
+      {projects.map((project, i) => (
+        <ProjectCard key={project.id} project={project} index={i} />
       ))}
     </div>
   );

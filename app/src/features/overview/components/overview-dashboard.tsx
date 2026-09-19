@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AvatarStack } from '@/components/ui/avatar-stack';
 import { projectsQueryOptions } from '@/features/projects/queries';
 import { tasksQueryOptions } from '@/features/kanban/api/queries';
 import { notificationsQueryOptions } from '@/features/notifications/api/queries';
@@ -127,6 +128,15 @@ export default function OverviewDashboard() {
             value={members.length}
             icon={<Icons.teams className='text-muted-foreground size-4' />}
             loading={membersLoading}
+            footer={
+              members.length > 0 ? (
+                <AvatarStack
+                  users={members.map((m) => ({ name: m.name, avatar: m.avatar }))}
+                  max={4}
+                  size='sm'
+                />
+              ) : undefined
+            }
           />
         </div>
 
@@ -265,25 +275,32 @@ function StatCard({
   label,
   value,
   icon,
-  loading
+  loading,
+  footer
 }: {
   label: string;
   value: number;
   icon: React.ReactNode;
   loading: boolean;
+  footer?: React.ReactNode;
 }) {
   return (
     <Card>
       <CardHeader>
-        <CardDescription className='flex items-center gap-2'>
-          {icon}
-          {label}
-        </CardDescription>
-        {loading ? (
-          <Skeleton className='h-8 w-16' />
-        ) : (
-          <CardTitle className='text-3xl font-semibold tabular-nums'>{value}</CardTitle>
-        )}
+        <div className='flex items-start justify-between'>
+          {loading ? (
+            <Skeleton className='h-12 w-20' />
+          ) : (
+            <CardTitle className='text-primary text-5xl font-bold tracking-tight tabular-nums'>
+              {value}
+            </CardTitle>
+          )}
+          <span className='bg-muted flex size-8 items-center justify-center rounded-full'>
+            {icon}
+          </span>
+        </div>
+        <CardDescription>{label}</CardDescription>
+        {footer}
       </CardHeader>
     </Card>
   );

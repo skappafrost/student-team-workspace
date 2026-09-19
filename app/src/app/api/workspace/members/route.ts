@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { getCurrentWorkspaceId } from '@/lib/server-workspace';
 import { NextResponse } from 'next/server';
 import { seededMembers } from '@/features/workspace/fixture';
 import { WorkspaceRole } from '@/features/workspace/types';
@@ -10,16 +11,6 @@ async function getSessionCookie(): Promise<string | undefined> {
   return cookieStore.get('session_token')?.value;
 }
 
-async function getCurrentWorkspaceId(sessionCookie: string): Promise<string | null> {
-  const res = await fetch(`${BACKEND_URL}/workspaces`, {
-    headers: { Cookie: `session_token=${sessionCookie}` },
-    cache: 'no-store'
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as Array<{ id: string }>;
-  if (!Array.isArray(data) || data.length === 0) return null;
-  return data[0].id;
-}
 
 async function backendRequest(
   path: string,

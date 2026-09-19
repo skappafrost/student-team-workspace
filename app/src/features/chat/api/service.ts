@@ -77,10 +77,7 @@ export async function getMembers(): Promise<WorkspaceMember[]> {
   return data.members ?? [];
 }
 
-export async function toggleReaction(
-  messageId: string,
-  emoji: string
-): Promise<ReactionSummary[]> {
+export async function toggleReaction(messageId: string, emoji: string): Promise<ReactionSummary[]> {
   const res = await fetch(`/api/messages/${encodeURIComponent(messageId)}/reactions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -95,6 +92,34 @@ export async function toggleReaction(
     throw new Error(data.error || `API error: ${res.status}`);
   }
   return data.reactions ?? [];
+}
+
+export async function editMessage(messageId: string, content: string): Promise<Message> {
+  const res = await fetch(`/api/messages/${encodeURIComponent(messageId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+    credentials: 'include'
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: Message;
+    error?: string;
+  };
+  if (!res.ok || !data.message) {
+    throw new Error(data.error || `API error: ${res.status}`);
+  }
+  return data.message;
+}
+
+export async function deleteMessage(messageId: string): Promise<void> {
+  const res = await fetch(`/api/messages/${encodeURIComponent(messageId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || `API error: ${res.status}`);
+  }
 }
 
 export async function createMessage(

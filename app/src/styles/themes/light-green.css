@@ -1,3 +1,9 @@
+/**
+ * Theme: light-green
+ * Design source: https://tweakcn.com (Light Green preset)
+ * Adaptation: Fresh green light theme. Tokenized via CSS custom properties only —
+ * no component-level hardcoded colors. Catalog: design-references/themes.md
+ */
 [data-theme='light-green'] {
   --background: oklch(0.9892 0.0054 117.9205);
   --foreground: oklch(0.2077 0.0398 265.7549);
@@ -14,7 +20,7 @@
   --accent: oklch(0.9819 0.0181 155.8263);
   --accent-foreground: oklch(0.4479 0.1083 151.3277);
   --destructive: oklch(0.6368 0.2078 25.3313);
-  --destructive-foreground: oklch(1 0 0);
+  --destructive-foreground: oklch(0.22 0 0);
   --border: oklch(0.9288 0.0126 255.5078);
   --input: oklch(0.9288 0.0126 255.5078);
   --ring: oklch(0.8871 0.2122 128.5041);

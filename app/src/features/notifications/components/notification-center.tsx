@@ -1,7 +1,13 @@
 'use client';
 
-import { Icons } from '@/components/icons';
+// Source: GitHub/GitLab header notification bell idiom (badge + popover +
+// mark-all). Catalog: design-references/notifications.md
+
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import {
   Empty,
@@ -14,24 +20,59 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { NotificationCard } from '@/components/ui/notification-card';
-import { useNotificationStore } from '../utils/store';
-import { useRouter } from 'next/navigation';
+import type { Notification } from '../api/types';
+import {
+  getNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead
+} from '../api/service';
+import { notificationKeys } from '../api/queries';
 
 const MAX_VISIBLE = 5;
 
-const actionRoutes: Record<string, string> = {
-  view: '/dashboard/overview',
-  'view-product': '/dashboard/overview',
-  billing: '/dashboard/overview',
-  open: '/dashboard/kanban',
-  'open-chat': '/dashboard/chat'
-};
-
+/**
+ * Header notification bell. Backed by the real notifications API via React
+ * Query (the previous zustand mock store is gone); optimistic read-state
+ * updates keep the badge and list in sync with the notifications page.
+ */
 export function NotificationCenter() {
-  const { notifications, markAsRead, markAllAsRead, unreadCount } = useNotificationStore();
   const router = useRouter();
-  const count = unreadCount();
-  const visibleNotifications = notifications.slice(0, MAX_VISIBLE);
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: notificationKeys.list(),
+    queryFn: getNotifications,
+    refetchInterval: 60_000
+  });
+  const notifications = query.data ?? [];
+  const count = notifications.filter((n) => n.status === 'unread').length;
+
+  const setReadInCache = (id: string) =>
+    queryClient.setQueryData<Notification[]>(notificationKeys.list(), (old) =>
+      (old ?? []).map((n) => (n.id === id ? { ...n, status: 'read' as const } : n))
+    );
+
+  const readMutation = useMutation({
+    mutationFn: (id: string) => markNotificationAsRead(id),
+    onMutate: (id) => setReadInCache(id),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to mark as read');
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+    }
+  });
+
+  const markAllMutation = useMutation({
+    mutationFn: markAllNotificationsAsRead,
+    onMutate: () =>
+      queryClient.setQueryData<Notification[]>(notificationKeys.list(), (old) =>
+        (old ?? []).map((n) => ({ ...n, status: 'read' as const }))
+      ),
+    onSuccess: () => toast.success('All notifications marked as read'),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to mark all as read');
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+    }
+  });
 
   return (
     <Popover>
@@ -61,7 +102,8 @@ export function NotificationCenter() {
                 variant='ghost'
                 size='sm'
                 className='text-muted-foreground h-auto px-2 py-1 text-xs'
-                onClick={markAllAsRead}
+                onClick={() => markAllMutation.mutate()}
+                disabled={markAllMutation.isPending}
               >
                 Mark all as read
               </Button>
@@ -82,7 +124,7 @@ export function NotificationCenter() {
             </Empty>
           ) : (
             <div className='flex flex-col gap-1 p-2'>
-              {visibleNotifications.map((notification) => (
+              {notifications.slice(0, MAX_VISIBLE).map((notification) => (
                 <NotificationCard
                   key={notification.id}
                   id={notification.id}
@@ -90,14 +132,15 @@ export function NotificationCenter() {
                   body={notification.body}
                   status={notification.status}
                   createdAt={notification.createdAt}
-                  actions={notification.actions}
-                  onMarkAsRead={markAsRead}
-                  onAction={(notifId, actionId) => {
-                    const route = actionRoutes[actionId];
-                    if (route) {
-                      markAsRead(notifId);
-                      router.push(route);
-                    }
+                  actions={
+                    notification.link
+                      ? [{ id: 'open', label: 'Open', type: 'redirect' as const }]
+                      : []
+                  }
+                  onMarkAsRead={(id) => readMutation.mutate(id)}
+                  onAction={(notifId) => {
+                    readMutation.mutate(notifId);
+                    if (notification.link) router.push(notification.link);
                   }}
                 />
               ))}

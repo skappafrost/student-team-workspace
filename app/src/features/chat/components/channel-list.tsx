@@ -1,10 +1,20 @@
 'use client';
 
+// Source: shadcn Empty component anatomy for the no-channels state.
+// Catalog: design-references/chat.md
+
 import { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Icons } from '@/components/icons';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { Channel, DMChannel } from '../api/types';
@@ -80,7 +90,17 @@ export function ChannelList({
 
       <div className='flex-1 space-y-2 overflow-y-auto pr-1' aria-label='Channel list' role='list'>
         {filtered.length === 0 ? (
-          <p className='text-muted-foreground py-8 text-center text-xs'>No channels found</p>
+          <Empty className='py-8'>
+            <EmptyHeader>
+              <EmptyMedia variant='icon'>
+                <Icons.chat />
+              </EmptyMedia>
+              <EmptyTitle className='text-sm'>No channels found</EmptyTitle>
+              <EmptyDescription className='text-xs'>
+                {search ? 'Try a different search.' : 'Channels will appear here.'}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : null}
         {filtered.map((channel) => {
           const isActive = channel.id === selectedId;

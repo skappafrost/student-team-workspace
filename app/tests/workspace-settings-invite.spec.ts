@@ -25,6 +25,18 @@ test.describe('workspace settings invite flow', () => {
   test('renders members list and can send an invite', async ({ browser }) => {
     const sessionToken = await createSession();
 
+    // New users have no workspace until onboarding; create one via the BFF
+    const stamp = Date.now().toString(36);
+    const wsRes = await fetch(`${APP_URL}/api/workspace`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `session_token=${sessionToken}`
+      },
+      body: JSON.stringify({ name: `Invite WS ${stamp}`, slug: `invite-ws-${stamp}` })
+    });
+    if (!wsRes.ok) throw new Error(`workspace create failed: ${wsRes.status}`);
+
     const context = await browser.newContext();
     const page = await context.newPage();
     await context.addCookies([
@@ -34,10 +46,8 @@ test.describe('workspace settings invite flow', () => {
     await page.goto(url('/dashboard/settings'));
     await page.waitForSelector('text=Workspace settings', { timeout: 10000 });
 
-    // Members list is rendered with seeded members
-    await expect(page.locator('text=Demo Admin')).toBeVisible();
-    await expect(page.locator('text=admin@example.com')).toBeVisible();
-    await expect(page.locator('text=Jane Member')).toBeVisible();
+    // Members list shows the creating user as owner
+    await expect(page.getByText(/owner/i).first()).toBeVisible();
 
     // Invite a new member
     const inviteEmail = `invited_${Date.now()}@example.com`;

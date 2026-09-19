@@ -1,3 +1,9 @@
+/**
+ * Theme: teamspace
+ * Design source: In-house brand theme
+ * Adaptation: Original palette authored for Teamspace. Tokenized via CSS custom properties only —
+ * no component-level hardcoded colors. Catalog: design-references/themes.md
+ */
 [data-theme='teamspace'] {
   --background: oklch(0.99 0 0);
   --foreground: oklch(0.21 0.02 265);

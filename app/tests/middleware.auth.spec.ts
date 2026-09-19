@@ -32,6 +32,18 @@ async function createRealSession(_page?: Page) {
     throw new Error('No session_token in response');
   }
 
+  // New users land on /onboarding until they own a workspace — create one so
+  // dashboard routes resolve.
+  const stamp = Date.now().toString(36);
+  await fetch(`${APP_URL}/api/workspace`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: `session_token=${sessionToken}`
+    },
+    body: JSON.stringify({ name: `MW WS ${stamp}`, slug: `mw-ws-${stamp}` })
+  });
+
   return { email, password, sessionToken };
 }
 

@@ -75,14 +75,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   }
 
-  const res = await backendRequest(
-    '/notifications/mark-all-read',
-    { method: 'POST' },
+  // The backend has no mark-all endpoint, so fan out PATCH per unread item.
+  const listRes = await backendRequest(
+    '/notifications?unread_only=true',
+    { method: 'GET' },
     sessionCookie
   );
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'Failed to mark all notifications as read');
-    return NextResponse.json({ error: text }, { status: res.status });
+  if (!listRes.ok) {
+    const text = await listRes.text().catch(() => 'Failed to fetch unread notifications');
+    return NextResponse.json({ error: text }, { status: listRes.status });
+  }
+  const unread = (await listRes.json()) as Array<{ id: string }>;
+  const results = await Promise.allSettled(
+    unread.map((n) =>
+      backendRequest(
+        `/notifications/${encodeURIComponent(n.id)}`,
+        { method: 'PATCH', body: JSON.stringify({ read: true }) },
+        sessionCookie
+      )
+    )
+  );
+  const failed = results.filter(
+    (r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)
+  ).length;
+  if (failed > 0) {
+    return NextResponse.json({ error: `Failed to mark ${failed} notifications` }, { status: 502 });
   }
   return NextResponse.json({ ok: true });
 }

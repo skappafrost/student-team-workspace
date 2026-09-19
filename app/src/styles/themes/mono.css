@@ -1,3 +1,9 @@
+/**
+ * Theme: mono
+ * Design source: https://tweakcn.com (Mono preset)
+ * Adaptation: Neutral grayscale, single accent. Tokenized via CSS custom properties only —
+ * no component-level hardcoded colors. Catalog: design-references/themes.md
+ */
 [data-theme='mono'] {
   --background: oklch(1 0 0);
   --foreground: oklch(0.1448 0 0);
@@ -14,7 +20,7 @@
   --accent: oklch(0.9702 0 0);
   --accent-foreground: oklch(0.2046 0 0);
   --destructive: oklch(0.583 0.2387 28.4765);
-  --destructive-foreground: oklch(0.9702 0 0);
+  --destructive-foreground: oklch(0.9902 0 0);
   --border: oklch(0.9219 0 0);
   --input: oklch(0.9219 0 0);
   --ring: oklch(0.709 0 0);

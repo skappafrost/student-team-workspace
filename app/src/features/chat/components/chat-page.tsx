@@ -17,7 +17,9 @@ import {
   sendMessage,
   createChannel,
   createDM,
-  toggleReaction
+  toggleReaction,
+  editMessage,
+  deleteMessage
 } from '../api/service';
 import { NewDMDialog } from './new-dm-dialog';
 import { channelKeys } from '../api/queries';
@@ -25,6 +27,7 @@ import { useChannelWebSocket } from '../utils/use-channel-websocket';
 import { ChannelList } from './channel-list';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
+import { ThreadPanel } from './thread-panel';
 import { CreateChannelDialog } from './create-channel-dialog';
 
 function buildOptimisticMessage(
@@ -50,6 +53,7 @@ export default function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -128,14 +132,11 @@ export default function ChatPage() {
   };
 
   const sendMessageMutation = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async ({ content, parentId }: { content: string; parentId: string | null }) => {
       if (!selectedChannel) throw new Error('No channel selected');
-      return sendMessage(selectedChannel.id, {
-        content,
-        parent_id: replyingTo?.id ?? null
-      });
+      return sendMessage(selectedChannel.id, { content, parent_id: parentId });
     },
-    onMutate: async (content) => {
+    onMutate: async ({ content, parentId }) => {
       if (!selectedChannel) return;
       const key = [...channelKeys.messages(selectedChannel.id), searchQuery];
       await queryClient.cancelQueries({ queryKey: key });
@@ -143,7 +144,7 @@ export default function ChatPage() {
       const optimistic = buildOptimisticMessage(
         content,
         selectedChannel.id,
-        replyingTo?.id ?? null,
+        parentId,
         currentUserId ?? 'you'
       );
       queryClient.setQueryData<Message[]>(key, (old) => [...(old ?? []), optimistic]);
@@ -165,7 +166,7 @@ export default function ChatPage() {
   });
 
   const handleSend = (content: string) => {
-    sendMessageMutation.mutate(content);
+    sendMessageMutation.mutate({ content, parentId: replyingTo?.id ?? null });
   };
 
   const reactionMutation = useMutation({
@@ -186,6 +187,64 @@ export default function ChatPage() {
   const handleToggleReaction = (message: Message, emoji: string) => {
     if (message.id.startsWith('pending-')) return;
     reactionMutation.mutate({ messageId: message.id, emoji });
+  };
+
+  const messages = useMemo(() => messagesQuery.data ?? [], [messagesQuery.data]);
+
+  const openThread = useMemo(() => {
+    if (!openThreadId) return null;
+    const parent = messages.find((m) => m.id === openThreadId);
+    if (!parent) return null;
+    return {
+      parent,
+      replies: messages.filter((m) => m.parent_id === parent.id)
+    };
+  }, [messages, openThreadId]);
+
+  const updateMessageMutation = useMutation({
+    mutationFn: async ({ messageId, content }: { messageId: string; content: string }) =>
+      editMessage(messageId, content),
+    onSuccess: (updated) => {
+      if (!selectedChannel) return;
+      const key = [...channelKeys.messages(selectedChannel.id), searchQuery];
+      queryClient.setQueryData<Message[]>(key, (old) =>
+        (old ?? []).map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+      );
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to edit message');
+    }
+  });
+
+  const deleteMessageMutation = useMutation({
+    mutationFn: async (messageId: string) => deleteMessage(messageId),
+    onSuccess: (_data, messageId) => {
+      if (!selectedChannel) return;
+      const key = [...channelKeys.messages(selectedChannel.id), searchQuery];
+      queryClient.setQueryData<Message[]>(key, (old) =>
+        (old ?? []).filter((m) => m.id !== messageId && m.parent_id !== messageId)
+      );
+      if (openThreadId === messageId) setOpenThreadId(null);
+      toast.success('Message deleted');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete message');
+    }
+  });
+
+  const handleEditMessage = (message: Message, content: string) => {
+    if (message.id.startsWith('pending-')) return;
+    updateMessageMutation.mutate({ messageId: message.id, content });
+  };
+
+  const handleDeleteMessage = (message: Message) => {
+    if (message.id.startsWith('pending-')) return;
+    deleteMessageMutation.mutate(message.id);
+  };
+
+  const handleSendThreadReply = (content: string) => {
+    if (!openThread) return;
+    sendMessageMutation.mutate({ content, parentId: openThread.parent.id });
   };
 
   // Typing indicators (F11): map of user_id -> name, cleared after 3s idle.
@@ -238,8 +297,7 @@ export default function ChatPage() {
         const { message_id, reactions } = payload;
         void queryClient.setQueryData<Message[]>(
           [...channelKeys.messages(selectedChannel.id), searchQuery],
-          (old) =>
-            (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
+          (old) => (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
         );
       }
     }
@@ -256,7 +314,8 @@ export default function ChatPage() {
     <PageContainer pageTitle='Chat' pageDescription='Workspace channels and messages.'>
       <div
         className={cn(
-          'border-border/50 bg-background/70 relative grid h-[calc(100dvh-10rem)] w-full gap-3 overflow-hidden rounded-2xl border p-3 backdrop-blur-xl sm:p-4 lg:grid-cols-[320px_1fr] lg:rounded-3xl'
+          'border-border/50 bg-background/70 relative grid h-[calc(100dvh-10rem)] w-full gap-3 overflow-hidden rounded-2xl border p-3 backdrop-blur-xl sm:p-4 lg:rounded-3xl',
+          openThread ? 'lg:grid-cols-[280px_1fr_auto]' : 'lg:grid-cols-[320px_1fr]'
         )}
       >
         <ChannelList
@@ -287,7 +346,9 @@ export default function ChatPage() {
               <header className='border-border/40 bg-background/80 flex items-center justify-between rounded-2xl border px-4 py-3 backdrop-blur sm:px-6'>
                 <div>
                   <h2 className='text-foreground text-base font-semibold sm:text-lg'>
-                    {selectedDM ? (selectedDM.peer_name ?? 'Direct message') : `#${selectedChannel.name}`}
+                    {selectedDM
+                      ? (selectedDM.peer_name ?? 'Direct message')
+                      : `#${selectedChannel.name}`}
                   </h2>
                   <p className='text-muted-foreground text-xs capitalize'>
                     {selectedDM ? 'Direct message' : `${selectedChannel.type} channel`}
@@ -337,17 +398,17 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <MessageList
-                  messages={messagesQuery.data ?? []}
+                  messages={messages}
                   currentUserId={currentUserId}
                   onReply={setReplyingTo}
                   onToggleReaction={handleToggleReaction}
+                  onOpenThread={(message) => setOpenThreadId(message.id)}
+                  onEdit={handleEditMessage}
+                  onDelete={handleDeleteMessage}
                 />
               )}
 
-              <div
-                aria-live='polite'
-                className='text-muted-foreground h-4 px-1 text-xs'
-              >
+              <div aria-live='polite' className='text-muted-foreground h-4 px-1 text-xs'>
                 {Object.values(typingUsers).length > 0 &&
                   `${Object.values(typingUsers).join(', ')} ${
                     Object.values(typingUsers).length === 1 ? 'is' : 'are'
@@ -368,9 +429,7 @@ export default function ChatPage() {
                       : `Message #${selectedChannel.name}`
                 }
                 disabled={sendMessageMutation.isPending}
-                replyingTo={
-                  replyingTo ? replyingTo.author_name || replyingTo.author_id : null
-                }
+                replyingTo={replyingTo ? replyingTo.author_name || replyingTo.author_id : null}
                 onCancelReply={() => setReplyingTo(null)}
               />
             </>
@@ -380,6 +439,17 @@ export default function ChatPage() {
             </div>
           )}
         </div>
+
+        {openThread && (
+          <ThreadPanel
+            parent={openThread.parent}
+            replies={openThread.replies}
+            currentUserId={currentUserId}
+            onClose={() => setOpenThreadId(null)}
+            onSendReply={handleSendThreadReply}
+            sending={sendMessageMutation.isPending}
+          />
+        )}
       </div>
     </PageContainer>
   );

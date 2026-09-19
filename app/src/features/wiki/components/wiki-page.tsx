@@ -78,6 +78,7 @@ export default function WikiPage() {
             page={pageQuery.data}
             isLoading={pageQuery.isLoading}
             onSelectPage={setSelectedId}
+            pages={basePages}
           />
         </div>
       </div>
