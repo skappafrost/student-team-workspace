@@ -31,7 +31,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 import models
-import services
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
 from dependencies import _get_workspace_or_404, _utcnow, _ws_resolve_user, get_current_user
@@ -178,15 +177,6 @@ async def set_my_presence(
         status_message=payload.status_message,
     )
     user = db.get(models.User, current_user["id"])
-    services.log_activity(
-        db,
-        workspace_id=ws.id,
-        actor_id=current_user["id"],
-        verb="set_presence",
-        target_type="presence",
-        target_id=current_user["id"],
-        target_label=row.status,
-    )
     db.commit()
     out = _row_out(row, current_user["id"], user.display_name if user else None)
     await _publish(ws.id, out)

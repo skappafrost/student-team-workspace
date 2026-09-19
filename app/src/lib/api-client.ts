@@ -1,4 +1,21 @@
 /**
+ * A failed BFF call, with the HTTP status attached.
+ *
+ * Callers need the status, not prose: "am I a guest, so presence is refused" and
+ * "did the network die" have to be told apart, and matching on the message text
+ * is how a 403 ends up rendered as a retrying error banner.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/**
  * Shared BFF fetch wrapper (R04) — replaces per-feature apiRequest copies.
  *
  * const apiRequest = createApiClient('/api/tasks');
@@ -21,7 +38,7 @@ export function createApiClient(basePath: string, opts?: { jsonHeaders?: boolean
       detail?: string;
     };
     if (!res.ok) {
-      throw new Error(data.error || data.detail || `API error: ${res.status}`);
+      throw new ApiError(data.error || data.detail || `API error: ${res.status}`, res.status);
     }
     return data;
   };

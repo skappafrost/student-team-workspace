@@ -26,7 +26,7 @@ export const seededMembers: WorkspaceMember[] = [
     id: 'usr_4',
     name: 'David Pham',
     email: 'david@example.com',
-    role: 'viewer',
+    role: 'guest',
     avatar: undefined
   }
 ];

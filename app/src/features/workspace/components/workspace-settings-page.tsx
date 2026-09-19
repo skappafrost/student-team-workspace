@@ -28,7 +28,7 @@ import { WorkspaceRole, WorkspaceMember, WorkspaceInvite } from '../types';
 import { toast } from 'sonner';
 import { Icons } from '@/components/icons';
 
-const ROLES: WorkspaceRole[] = ['owner', 'admin', 'member', 'viewer'];
+const ROLES: WorkspaceRole[] = ['owner', 'admin', 'member', 'guest'];
 
 function RoleSelect({
   value,

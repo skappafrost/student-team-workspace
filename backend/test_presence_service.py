@@ -359,3 +359,46 @@ def test_invalid_status_detail_is_string_form(client):
     as_user(client, "owner")
     r = client.post(f"/workspaces/{ws['id']}/presence/me", json={"status": "sleeping"})
     assert r.json()["detail"] == "Invalid presence status: sleeping"
+
+
+# ---------------------------------------------------------------------------
+# Activity-feed noise: presence is transient state, not a work event
+# ---------------------------------------------------------------------------
+
+def test_setting_presence_writes_no_activity_row(client):
+    """Presence history lives in `PresenceState`; the Activity feed is for humans.
+
+    Two reasons the old `log_activity(verb="set_presence")` was wrong rather than
+    merely noisy: the socket path (`_set_and_publish`) never logged a row, so
+    whether a status change appeared in the feed depended on which transport the
+    user's client happened to use; and `services.log_activity` has no dedup or
+    cooldown, so every deliberate click became a permanent row in a feed the
+    overview renders at eight entries.
+    """
+    ws = _ws(client)
+    token = _member(client, ws["id"], "actor")
+    resp = client.post(
+        f"/workspaces/{ws['id']}/presence/me",
+        json={"status": "away"},
+        headers={"Cookie": f"session_token={token}"},
+    )
+    assert resp.status_code == 200
+
+    as_user(client, "owner")
+    verbs = [a["verb"] for a in client.get(f"/workspaces/{ws['id']}/activity").json()]
+    assert "set_presence" not in verbs, verbs
+
+
+def test_presence_state_still_records_the_status(client):
+    """The removal above must not lose the data — the row is the record."""
+    ws = _ws(client)
+    token = _member(client, ws["id"], "actor")
+    client.post(
+        f"/workspaces/{ws['id']}/presence/me",
+        json={"status": "dnd", "status_message": "exam week"},
+        headers={"Cookie": f"session_token={token}"},
+    )
+    as_user(client, "owner")
+    rows = client.get(f"/workspaces/{ws['id']}/presence").json()
+    mine = [r for r in rows if r["user_id"] == "actor"]
+    assert [(r["status"], r["status_message"]) for r in mine] == [("dnd", "exam week")]

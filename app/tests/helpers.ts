@@ -44,25 +44,37 @@ export async function createWorkspace(token: string, name: string): Promise<stri
   return res.json.id as string;
 }
 
+/** Create an invite and return its token. */
+export async function invite(
+  ownerToken: string,
+  workspaceId: string,
+  email: string,
+  role = 'member'
+): Promise<string> {
+  const res = await apiPost(`/workspaces/${workspaceId}/invites`, { email, role }, ownerToken);
+  if (res.status !== 201) {
+    throw new Error(`invite failed: ${res.status} ${JSON.stringify(res.json)}`);
+  }
+  return res.json.token as string;
+}
+
+export async function acceptInvite(token: string, memberToken: string): Promise<void> {
+  const accept = await apiPost('/invites/accept', { token }, memberToken);
+  if (accept.status !== 201) {
+    throw new Error(`accept failed: ${accept.status} ${JSON.stringify(accept.json)}`);
+  }
+}
+
 /** Invite `email` and accept it with `memberToken`, ending with a real 2-member workspace. */
 export async function inviteAndAccept(
   ownerToken: string,
   workspaceId: string,
   email: string,
-  memberToken: string
+  memberToken: string,
+  role = 'member'
 ): Promise<void> {
-  const invite = await apiPost(
-    `/workspaces/${workspaceId}/invites`,
-    { email, role: 'member' },
-    ownerToken
-  );
-  if (invite.status !== 201) {
-    throw new Error(`invite failed: ${invite.status} ${JSON.stringify(invite.json)}`);
-  }
-  const accept = await apiPost('/invites/accept', { token: invite.json.token }, memberToken);
-  if (accept.status !== 201) {
-    throw new Error(`accept failed: ${accept.status} ${JSON.stringify(accept.json)}`);
-  }
+  const token = await invite(ownerToken, workspaceId, email, role);
+  await acceptInvite(token, memberToken);
 }
 
 /**
