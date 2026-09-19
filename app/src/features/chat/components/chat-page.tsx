@@ -34,7 +34,7 @@ function buildOptimisticMessage(
   authorId: string = 'you'
 ): Message {
   return {
-    id: `pending-${Date.now()}`,
+    id: `pending-${crypto.randomUUID()}`,
     channel_id: channelId,
     author_id: authorId,
     content,
@@ -231,7 +231,15 @@ export default function ChatPage() {
         }
         void queryClient.setQueryData<Message[]>(
           [...channelKeys.messages(msg.channel_id), searchQuery],
-          (old) => (old ? [...old, msg] : [msg])
+          (old) => {
+            const list = old ?? [];
+            // The room broadcast includes the author's own socket and the
+            // settle-time refetch carries the same row, so this frame can
+            // legitimately arrive second. Ordering is not guaranteed either
+            // way: `messages.py` broadcasts before the POST has returned.
+            if (list.some((m) => m.id === msg.id)) return list;
+            return [...list, msg];
+          }
         );
       } else if (payload.type === 'reaction_update' && payload.message_id) {
         if (!selectedChannel) return;
