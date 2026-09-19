@@ -103,9 +103,25 @@ def _ws_room_key_user(user_id: str) -> str:
     return f"user:{user_id}"
 
 
+def _ws_room_key_workspace(workspace_id: str) -> str:
+    """Presence fan-out room: every socket of a workspace's members.
+
+    Distinct from ``chan:`` (per-channel message fan-out) so a status change
+    reaches a member on any channel they have open, not just the one socket
+    they are reading. Members-only by construction: a socket joins only after
+    the endpoint has verified workspace membership.
+    """
+    return f"workspace:{workspace_id}"
+
+
 async def _ws_broadcast_channel(channel_id: str, payload: dict, exclude=None) -> int:
     """Broadcast to every member socket of a channel room."""
     return await _ws_broadcast(_ws_room_key_channel(channel_id), payload, exclude=exclude)
+
+
+async def _ws_broadcast_workspace(workspace_id: str, payload: dict, exclude=None) -> int:
+    """Broadcast a workspace-scoped frame (presence updates) to member sockets."""
+    return await _ws_broadcast(_ws_room_key_workspace(workspace_id), payload, exclude=exclude)
 
 
 async def _ws_broadcast_user(user_id: str, payload: dict) -> int:
