@@ -13,7 +13,7 @@ from database import get_db
 from dependencies import _get_channel_or_404, _get_message_or_404, get_current_user
 from query_utils import LIKE_ESCAPE, contains_pattern
 from routers.channels import _is_private_channel_member
-from services import log_activity
+from services import log_activity, notify
 from ws import _ws_broadcast_channel, _ws_notify_user
 
 router = APIRouter()
@@ -161,7 +161,9 @@ async def list_channel_messages(
 
     query = db.query(models.Message).filter(models.Message.channel_id == channel_id)
     if q and q.strip():
-        query = query.filter(models.Message.content.ilike(f"%{q.strip()}%"))
+        query = query.filter(
+            models.Message.content.ilike(contains_pattern(q.strip()), escape=LIKE_ESCAPE)
+        )
     _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     messages = (
         query.order_by(models.Message.created_at.asc())

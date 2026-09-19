@@ -244,14 +244,16 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
     ticket from ``POST /auth/ws-ticket``, never in a URL) > ``session_token``
     cookie (browser default) > ``?session_token=`` query (test/legacy).
     """
-    user, close_code, close_reason, subproto = _ws_resolve_user(websocket)
-    if user is None:
-        await websocket.close(code=close_code, reason=close_reason or "")
-        return
-
-    # Validate channel + membership BEFORE joining any room.
+    # One handshake session, shared by token auth (jti revocation) and the
+    # channel/membership checks below; closed in ``finally`` before ``accept``.
     db = next(get_db())
     try:
+        user, close_code, close_reason, subproto = _ws_resolve_user(websocket, db)
+        if user is None:
+            await websocket.close(code=close_code, reason=close_reason or "")
+            return
+
+        # Validate channel + membership BEFORE joining any room.
         try:
             channel = _get_channel_or_404(db, channel_id)
         except HTTPException as exc:

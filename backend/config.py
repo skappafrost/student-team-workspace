@@ -36,6 +36,11 @@ class Settings(BaseSettings):
         """Server-side upload cap in bytes (MAX_UPLOAD_MB, default 25 MB)."""
         return int(self.max_upload_mb * 1024 * 1024)
 
+    # Per-workspace storage quota (TA2-3): max stored bytes per workspace,
+    # in megabytes. 0 disables the check. Counts File.size_bytes only.
+    # routers/files.py:enforce_upload_quota reads this at upload time.
+    max_workspace_storage_mb: int = 512
+
     # Maintenance / retention (see retention.py):
     # upload_retention_days bounds the whole File lifecycle (row + bytes).
     # 0 = no age-based deletion. Retention is opt-in: retention_enabled must
