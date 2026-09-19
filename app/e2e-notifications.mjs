@@ -121,7 +121,10 @@ try {
   await browser.close();
 }
 
-const reportPath = `C:/Users/Ha Trung/Documents/Team-workspace/app/e2e-notifications-result.json`;
+// Anchor to this file, not to cwd or an absolute path: the previous hardcoded
+// location pointed outside the repo (…/Team-workspace/app, missing the `stw/`
+// segment), so every run's evidence silently landed where nothing would look.
+const reportPath = new URL('qa-evidence/e2e-notifications-result.json', import.meta.url);
 fs.writeFileSync(reportPath, JSON.stringify({ stamp, results }, null, 2));
 console.log(`\nReport: ${reportPath}`);
 const failed = results.filter((r) => r.status === 'FAIL');
