@@ -48,7 +48,7 @@ cd app && bun audit --prod
 cd backend && ./.venv/Scripts/python -m pip_audit
 ```
 
-CI (`.github/workflows/ci.yml`) runs four jobs on every push and PR: `backend` (pytest on SQLite), `backend-pg` (pytest on Postgres 16), `frontend` (typecheck), `demo-pack` (validates `scripts/demo-packs/busy-workspace.json` structure). All four must be green before a PR is marked ready.
+CI (`.github/workflows/ci.yml`) runs the jobs defined there: `backend` (pytest on SQLite), `backend-pg` (pytest on Postgres 16), `frontend` (typecheck), `demo-pack` (validates `scripts/demo-packs/busy-workspace.json` structure), plus `ruff` (lint) once the gate in `harden/ruff-debt-and-gate` lands. Open the workflow file for the authoritative list rather than trusting this sentence — and all of them must be green before a PR is marked ready.
 
 ### SQLite + PostgreSQL parity
 
@@ -58,7 +58,7 @@ CI runs the full pytest suite twice — once against SQLite (`backend` job) and 
 
 ### Backend (`backend/`)
 
-- FastAPI routers live in `routers/` (one file per domain: `auth`, `workspaces`, `invites`, `members`, `channels`, `messages`, `projects`, `tasks`, `events`, `pages`, `files`, `notifications`, `ai`, `account`). Do not reorganize this layout — extend it.
+- FastAPI routers live in `routers/` (one file per domain: `auth`, `workspaces`, `invites`, `members`, `channels`, `messages`, `projects`, `tasks`, `events`, `pages`, `files`, `notifications`, `ai`, `account`, `presence`). Do not reorganize this layout — extend it.
 - Shared plumbing: `dependencies.py` (auth, token minting, resource getters), `authorization.py` (Role + RBAC checks), `channel_access.py` (channel membership helpers). Cross-cutting side effects (notifications, activity feed) go through `services.py` (`notify`, `log_activity`).
 - SQLAlchemy 2.0 typed models in `models.py`, Pydantic schemas in `schemas.py`, env-driven config in `config.py`.
 - Rate limiting: per-route dependencies in `rate_limit.py` (`login_limit`, `register_limit`, `upload_limit`, `ai_limit`) plus a fallback sliding-window cap for uncovered write routes. Returns `429` with a `Retry-After` header.
@@ -75,6 +75,13 @@ CI runs the full pytest suite twice — once against SQLite (`backend` job) and 
 - Page headers: `PageContainer` props (`pageTitle`, `pageDescription`); never a raw `<Heading>`
 - Forms: `useAppForm` from `@/lib/form` + field components in `@/components/forms/fields`
 - Style: single quotes, no trailing comma, 2-space indent (oxfmt enforced)
+
+### Docs
+
+`docs/API.md`, `PROJECT-STATUS.md`, `README.md` and `RELEASE-CHECKLIST.md` have each been found stating things the code did not do — most recently a changelog listing #123–#159 as unmerged for days after they shipped, and a status doc describing `/auth/refresh` as "not merged" when it was. Two rules keep that from recurring:
+
+- **Never write a literal count, hash or PR list into a doc without the command that produced it on the same line.** `757 passed (cd backend && pytest -q)` survives; a bare `408 passing` rots silently the next merge. Prefer the live CI badge over a copied number.
+- **Document a route in the same PR that adds it.** `backend/test_docs_contract.py` now fails CI on an undocumented route, a row whose route is gone, a second `## Changelog`, or a header count that no longer matches — prose accuracy is still a review duty, path coverage is not.
 
 ### Design rule
 

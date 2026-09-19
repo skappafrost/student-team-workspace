@@ -1,8 +1,8 @@
 # STW Release Checklist
 
 > **Scope:** Local-first release. Cloud deployment is intentionally out of scope for now.
-> **Updated:** 2026-09-12 — seeded from `Team-workspace/RELEASE-CHECKLIST.md` + `app/RELEASE-CHECKLIST.md` (stale app-path era), rewritten for the `stw/` monorepo.
-> **Verified on:** pytest **300 passed**, `bun run typecheck` clean, `alembic heads` = 1 (`adfcaabfb828`).
+> **Updated:** 2026-09-19
+> **Verified on:** `pytest -q` **757 passed** (SQLite) · `bun run typecheck` clean · `alembic heads` = 1 (`prs01_presence_state`) · `ruff check .` from `backend/` clean. Re-run these before quoting the line — every number in this repo's docs went stale once already by staying literal.
 
 ---
 
@@ -21,7 +21,10 @@
 | W8 | AI layer | ✅ Done | AI summary + search UI wired to backend |
 | W9 | Chat polish | ✅ Done | Author display name on messages, create-channel dialog + empty-state CTAs |
 | W10 | QA fixes + docs | ✅ Done | Local run docs + this checklist |
-| T-wave | Security audit fixes (T001–T050) | 🔄 Landing via draft PRs | e.g. T003 test-auth gate, T004 real-JWT fixtures, T009 bcrypt policy, T015 duplicate-membership guard |
+| T-wave | Security audit fixes (T001–T050) | ✅ Merged | T003 test-auth gate, T004 real-JWT fixtures, T009 bcrypt policy, T015 duplicate-membership guard, T040 file-delete + orphan sweeper — all landed (#1–#11) |
+| TA-wave | Backend contract hardening | ✅ Merged | Auth refresh + secret governance, upload ingress/egress + quota, pagination contract, notification fan-out, WS auth, N+1 + indexes, dialect parity, ops maintenance, observability, coverage floor, security regression pack (#123–#175) |
+| Recovery | Repairs after squash-merges dropped wiring | ✅ Merged | Restored backend import, `/auth/refresh`, upload path, message-search escaping; narrowed the `conftest.py` exception mask that had been hiding the breakage; merged the split Alembic heads (#185, #188) |
+| S-wave | Realtime presence | 🔄 In progress | S3 single-head + S4 `PresenceState` (#188), S5 presence service + HTTP set/list + WS fan-out (#189). **S6 presence UI (frontend) not started** |
 
 ---
 
@@ -29,9 +32,9 @@
 
 | # | Issue | Impact | Workaround / Owner |
 |---|-------|--------|--------------------|
-| 1 | **WS dev cookie-domain footgun** | WebSocket auth fails if `NEXT_PUBLIC_API_URL` uses an IP/`127.0.0.1` instead of the page host. The browser opens the WS directly against that URL with the `session_token` cookie, and cookies are host-scoped. | Always set `NEXT_PUBLIC_API_URL=http://localhost:8000` in `app/.env.local` for local dev (same host for LAN: `http://<ip>:8000`). |
-| 2 | **No token revocation** | `POST /auth/logout` only clears the session cookie; issued JWTs stay valid until expiry. | Accept for local-first; needs a denylist/rotation design before cloud. |
-| 3 | **In-memory WebSocket rooms** | Channel rooms live in the uvicorn process — one worker only. | Never run multiple uvicorn workers; no broadcast fan-out yet. |
+| 1 | **WS dev cookie-domain footgun** | WebSocket auth fails if `NEXT_PUBLIC_API_URL` uses an IP/`127.0.0.1` instead of the page host. The browser opens the WS directly against that URL with the `session_token` cookie, and cookies are host-scoped (`SameSite=Lax`). This breaks **every** socket the same way — chat and presence both `4401` before `accept()`. `app/.env.local` on the current dev machine has `127.0.0.1`, so realtime is broken right now locally. It cannot come from a clone — the file is gitignored and `app/env.example.txt` does not define the variable at all (README says add it by hand), which is precisely why the mistake recurs. | Set `NEXT_PUBLIC_API_URL=http://localhost:8000` in `app/.env.local` for local dev (same host for LAN: `http://<ip>:8000`). |
+| 2 | ~~No token revocation~~ **fixed** | Sessions are revocable: each login writes an `auth_sessions` row keyed by the JWT `jti`, and `POST /auth/logout` / `/auth/logout-all` revoke it, so a logged-out token gets `401` everywhere — including WS handshakes (`4401` before `accept()`). Refresh tokens rotate single-use and a replay revokes the whole family. | Residual gap: revocation is checked per **request**, not mid-connection — a socket opened before logout stays open until it closes. |
+| 3 | **In-process realtime state** | Channel rooms, the per-user notification room, the presence socket refcount and the WS ticket store all live in the uvicorn process. | Never run multiple uvicorn workers (the Dockerfile and Makefile don't). Scale-out needs a shared store, not more sockets. |
 | 4 | **Turbopack broken on this PC** | `bun run dev` crashes compiling `globals.css`. | Always `bun run dev:webpack`. |
 
 ---
@@ -110,5 +113,5 @@ Required evidence per task type:
 - [ ] Frontend `app/.env.local` contains `NEXT_PUBLIC_API_URL=http://localhost:8000` (plus Sentry vars from `env.example.txt`, optional).
 - [ ] `bun run dev:webpack` starts the app at http://localhost:3000 (`--webpack` is mandatory — Turbopack is broken on this PC).
 - [ ] Register and login flows complete successfully (`cd app && node e2e-auth-flow.mjs`).
-- [ ] `bun run typecheck` passes; backend `python -m pytest -q` passes (300).
+- [ ] `bun run typecheck` passes; backend `python -m pytest -q` passes — 757 on main, re-run to confirm.
 - [ ] No secrets committed in docs or `.env` files.
