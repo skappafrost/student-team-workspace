@@ -179,22 +179,36 @@ cd backend && ./.venv/Scripts/python -m pytest -q
 # Migrations — exactly one head expected
 cd backend && ./.venv/Scripts/python -m alembic heads
 
-# Frontend
-cd app && bun run typecheck     # tsc --noEmit   (the only frontend job CI runs)
-cd app && bun run lint          # oxlint        (local only — not in CI)
-cd app && bun run lint:strict   # oxlint --deny-warnings
-cd app && bun run format:check  # oxfmt
-cd app && bun run build         # webpack build
-cd app && bun run gen:api       # regenerate src/types/api.d.ts from /openapi.json
+# Frontend — the three steps the `frontend` CI job runs
+cd app && bunx oxlint --deny-warnings src   # warnings fail; scoped to src, see ci.yml
+cd app && bun run typecheck                 # tsc --noEmit
+cd app && bun run build                     # webpack build
 
-# Browser evidence (ad-hoc scripts, not a CI suite)
+# Browser specs — CI job `frontend-e2e`. Playwright starts the backend and the
+# app itself, so no servers need to be running first.
+cd app && bunx playwright test              # everything in app/tests/
+make realtime                               # just the delivery proof, one command
+
+# Manual-only QA scripts. These expect the app on :3000 and backend :8000, and
+# every one of them exits non-zero when a step fails.
 cd app && node e2e-auth-flow.mjs
 cd app && node e2e-notifications.mjs
+cd app && node e2e-w3-projects-kanban.mjs
+cd app && node e2e-workspace-settings.mjs
+cd app && node qa-api-test.mjs
+cd app && bun qa-browser.ts
+
+# Not gates, and knowingly red: `bun run lint` also walks the manual harnesses
+# above (9 no-console warnings today), and `bun run format:check` flags nearly
+# every file until a working tree is re-checked out under `.gitattributes`.
+cd app && bun run lint
+cd app && bun run format:check
+cd app && bun run gen:api                   # regenerate src/types/api.d.ts from /openapi.json
 ```
 
-> There is **no automated frontend test suite**: no Vitest, no component tests, and Playwright is a devDependency with two specs in `app/tests/` that nothing runs in CI. Verification here is `typecheck` + `build` plus the manual `e2e-*.mjs` / `qa-*.ts` scripts whose screenshots land in `app/qa-evidence/`. Don't claim a frontend behavior is tested unless one of those scripts proves it.
+> **What is actually tested.** `app/tests/` holds four Playwright specs that run in CI against a live backend: route guards, the workspace-settings invite flow, the host-mismatch socket guard, and cross-browser message delivery. There are no component tests and no accessibility automation — contrast is reviewed from the light/dark screenshots in `app/qa-evidence/`. Don't claim a frontend behavior is tested unless one of the commands above proves it.
 
-CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — `ruff` (lint), `backend` (SQLite), `backend-pg` (Postgres 16), `frontend` (typecheck) and `demo-pack`. All green before review.
+CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — `ruff` (lint), `backend` (SQLite), `backend-pg` (Postgres 16), `frontend` (lint + typecheck + build), `frontend-e2e` (Playwright on Chromium) and `demo-pack`. All green before review.
 
 > **SQLite/Postgres parity is mandatory.** A migration that renders valid DDL on one engine can be invalid on the other (a boolean `server_default` must be `sa.false()` / `"false"`, not `sa.text("0")` — Postgres rejects an unquoted integer default on a boolean column). The `backend-pg` job is the safety net; local SQLite-only pytest does not catch this.
 

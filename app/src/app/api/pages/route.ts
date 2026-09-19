@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { WikiPage, WikiPageSummary } from '@/features/wiki/api/types';
+import { WikiPageSummary } from '@/features/wiki/api/types';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
@@ -36,66 +36,6 @@ const MOCK_PAGES: WikiPageSummary[] = [
     slug: 'react-guidelines'
   }
 ];
-
-const MOCK_PAGE_MAP: Record<string, WikiPage> = {
-  'page-1': {
-    id: 'page-1',
-    workspace_id: 'ws-1',
-    parent_id: null,
-    title: 'Getting Started',
-    slug: 'getting-started',
-    content:
-      '# Getting Started\n\nWelcome to the workspace wiki. This is a placeholder page rendered from mock data while the backend pages API is being implemented.\n\n## Quick links\n\n- Engineering\n- Frontend\n- Backend',
-    created_by: 'dev',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  'page-2': {
-    id: 'page-2',
-    workspace_id: 'ws-1',
-    parent_id: null,
-    title: 'Engineering',
-    slug: 'engineering',
-    content:
-      '# Engineering\n\nEngineering team knowledge base.\n\n## Sub-pages\n\n- Frontend\n- Backend',
-    created_by: 'dev',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  'page-3': {
-    id: 'page-3',
-    workspace_id: 'ws-1',
-    parent_id: 'page-2',
-    title: 'Frontend',
-    slug: 'frontend',
-    content: '# Frontend\n\nFrontend guidelines and best practices.',
-    created_by: 'dev',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  'page-4': {
-    id: 'page-4',
-    workspace_id: 'ws-1',
-    parent_id: 'page-2',
-    title: 'Backend',
-    slug: 'backend',
-    content: '# Backend\n\nBackend architecture and API conventions.',
-    created_by: 'dev',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  'page-5': {
-    id: 'page-5',
-    workspace_id: 'ws-1',
-    parent_id: 'page-3',
-    title: 'React Guidelines',
-    slug: 'react-guidelines',
-    content: '# React Guidelines\n\nComponent architecture, hooks, and patterns.',
-    created_by: 'dev',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
-};
 
 async function getSessionCookie(): Promise<string | undefined> {
   const cookieStore = await cookies();

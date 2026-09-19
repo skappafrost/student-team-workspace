@@ -2,7 +2,7 @@ import { chromium, Page } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 
-const BASE = 'http://localhost:3001';
+const BASE = 'http://localhost:3000';
 const API_BASE = 'http://127.0.0.1:8000';
 
 const testEmail = `zen.qa.${Date.now()}@test.com`;

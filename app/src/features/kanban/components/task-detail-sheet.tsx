@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -69,15 +69,6 @@ function TaskDetailBody({ task }: { task: Task }) {
   const [status, setStatus] = useState<TaskStatus>(task.status);
   const [assigneeId, setAssigneeId] = useState<string | null>(task.assignee_id);
   const [position, setPosition] = useState<string>(String(task.position));
-
-  useEffect(() => {
-    setTitle(task.title);
-    setDescription(task.description ?? '');
-    setPriority(task.priority);
-    setStatus(task.status);
-    setAssigneeId(task.assignee_id);
-    setPosition(String(task.position));
-  }, [task.id]);
 
   const handleSave = () => {
     const payload: {

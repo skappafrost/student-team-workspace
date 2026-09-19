@@ -7,6 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 
+// Plain navigation triggers the browser download via Content-Disposition.
+function handleExport() {
+  window.location.assign('/api/account');
+}
+
 /**
  * Account self-service (S03): export data as JSON, delete account.
  * Deletion requires password confirmation and signs the user out.
@@ -15,11 +20,6 @@ export default function AccountCard() {
   const [password, setPassword] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-
-  const handleExport = () => {
-    // Plain navigation triggers the browser download via Content-Disposition.
-    window.location.assign('/api/account');
-  };
 
   const handleDelete = async () => {
     if (!password) {
