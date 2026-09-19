@@ -55,3 +55,9 @@ playwright-report/
 .coverage
 coverage.xml
 htmlcov/
+
+# Linked worktrees used for isolated verification runs. They are checkouts of
+# this same repo, so tracking them makes git treat them as embedded repos (a
+# stray gitlink got committed once already). A repo-root `ruff check .` also
+# walks them and reports 146 phantom errors.
+.worktrees/
