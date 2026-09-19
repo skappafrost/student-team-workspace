@@ -16,7 +16,7 @@
 **Tài liệu gốc (nằm ngoài repo, ở `Team-workspace/`):**
 - `IDEA.md` — ý tưởng 1 đoạn
 - `student_workspace_ecosystem.md` — spec đầy đủ (kiến trúc, data model, roadmap 5 phase)
-- `design-references/catalogs/DECISIONS.md` — 8 quyết định design đã khóa
+- `design-references/catalogs/DECISIONS.md` — 8 quyết định design đã khóa (sống ngoài repo, trong `Team-workspace/`). Ledger adaptation thì **không**: `app/design-references/catalogs/usages.json` đã được copy vào repo cùng wave này để reviewer đọc được trong cùng diff với code nó audit.
 - `SESSION-CONTEXT.md` — handoff cũ (stale paths, chỉ tham khảo lịch sử)
 
 ---
@@ -47,7 +47,7 @@ Từ notes của anh trên gallery (`design-reference-my-notes.json`, 51 favorit
 | W0 | Design decisions + tooling | ✅ Done |
 | W1 | App shell & theme (dark default, sidebar Linear 7 mục, motion D6) | ✅ Done |
 | W2 | FastAPI + Postgres schema, JWT auth, workspace/members, route guard | ✅ Done |
-| W3 | Projects + Kanban (dnd-kit, task detail), QA gate 12/12 E2E | ✅ Done |
+| W3 | Projects + Kanban (dnd-kit, task detail), script QA `e2e-w3-projects-kanban.mjs` 12/12 | ✅ Done — ⚠️ đó là **transcript chạy tay**, không phải gate: script này không có exit code cho tới #208 |
 | W4 | Calendar API + UI, dialog hydration fix, kanban proxy fix | ✅ Done |
 | W5 | Chat channels/messages API + UI, WebSocket broadcast, QA gate | ✅ Done |
 | W6 | Wiki (page tree, editor/viewer, search) | ✅ Done |
@@ -61,34 +61,37 @@ Từ notes của anh trên gallery (`design-reference-my-notes.json`, 51 favorit
 | Recovery | Sửa các wiring mà squash-merge làm rơi ở #123/#126/#130/#148/#159/#161/#163 + bỏ `except Exception: pass` trong `conftest.py` từng che hỏng hóc | ✅ #185, #188 |
 | S-wave | Realtime presence: S3 single-head, S4 `PresenceState` model, S5 service + HTTP set/list + WS fan-out, **S6 presence UI (frontend)** | 🔄 S3–S5 đã merge (#188, #189); **S6 chưa làm** |
 
-**Merged trên `main` (mới nhất trước):** #201 WS transport fix · #200 status docs refresh · #199 presence docs + `test_docs_contract.py` gate · #198 worktree ignore + e2e evidence path · #197 API.md contract repairs · #196 presence socket refcount · #195 ruff debt 170→0 + CI `ruff` job · #189 presence service + WS (S5) · #188 Alembic single-head + `PresenceState` (S3/S4) · #185 restore baseline · #175 security regression pack (TA7-1) · #174 coverage floor + RBAC edge tests (TA6-3) · #164 load/perf baseline (TA6-2) · #163 ops maintenance (TA5-3) · #162 SQLite/PG dialect parity (TA5-2) · #161 WS auth + semantics (TA4-2) · #160 docs rewrite (TA3-3) · #159 pagination contract (TA3-1) · #149 observability + `/readyz` (TA6-1) · #148 N+1 + indexes (TA5-1) · #138 notification fan-out (TA4-1) · #134 LIKE escape + channel type enum (TA3-2) · #132 storage quota (TA2-3) · #130 authenticated `/uploads` read (TA2-2) · #128 upload ingress (TA2-1) · #126 jti request-scoped session (TA1-3) · #124 JWT secret governance (TA1-2) · #123 `/auth/refresh` (TA1-1) · #102 kanban guard · #101/#100/#99 rate-limit fallback + app README + demo-pack CI · #88 Postgres CI · #87 manage.py tests · #80 lifespan · #79 request log + healthz · #78 rate limiting · #28 UI redesign · Dependabot #81–#86.
+**Merged trên `main` (mới nhất trước):** #208 CI gate frontend thật (`oxlint --deny-warnings src` + `typecheck` + `build`, job mới `frontend-e2e` chạy Playwright với backend sống) · #207 clone mới reproduce được realtime (`.gitattributes`, `env.example.txt`, `make realtime`) · #206 chat delivery idempotent + spec browser đầu tiên pass thật · #205 **root cause của "realtime chết": server đặt tên subprotocol mà client không offer** · #203 kbar render loop · #201 WS transport fix · #200 status docs refresh · #199 presence docs + `test_docs_contract.py` gate · #198 worktree ignore + e2e evidence path · #197 API.md contract repairs · #196 presence socket refcount · #195 ruff debt 170→0 + CI `ruff` job · #189 presence service + WS (S5) · #188 Alembic single-head + `PresenceState` (S3/S4) · #185 restore baseline · #175 security regression pack (TA7-1) · #174 coverage floor + RBAC edge tests (TA6-3) · #164 load/perf baseline (TA6-2) · #163 ops maintenance (TA5-3) · #162 SQLite/PG dialect parity (TA5-2) · #161 WS auth + semantics (TA4-2) · #160 docs rewrite (TA3-3) · #159 pagination contract (TA3-1) · #149 observability + `/readyz` (TA6-1) · #148 N+1 + indexes (TA5-1) · #138 notification fan-out (TA4-1) · #134 LIKE escape + channel type enum (TA3-2) · #132 storage quota (TA2-3) · #130 authenticated `/uploads` read (TA2-2) · #128 upload ingress (TA2-1) · #126 jti request-scoped session (TA1-3) · #124 JWT secret governance (TA1-2) · #123 `/auth/refresh` (TA1-1) · #102 kanban guard · #101/#100/#99 rate-limit fallback + app README + demo-pack CI · #88 Postgres CI · #87 manage.py tests · #80 lifespan · #79 request log + healthz · #78 rate limiting · #28 UI redesign · Dependabot #81–#86.
 
 > ⚠️ **Caveat khi verify bằng `git log`:** repo merge theo kiểu squash, nên **commit hash ≠ merge commit của PR**. Muốn biết PR nào đã landing, dùng `gh pr view <N> --json number,state,mergeCommit` — đừng kết luận từ `git log --oneline`. Chính hiểu nhầm này làm tài liệu cũ ghi sai trạng thái #123–#159 là "đang mở" cả tuần sau khi chúng đã merge.
 
-**Test baseline hiện tại:** `cd backend && .venv/Scripts/python -m pytest -q` → **770 collected / 769 passed** (SQLite) trên `main` @ `21bc04c`, 56 file test. Số này thay đổi theo từng PR — luôn chạy lại lệnh, hoặc tốt hơn là link thẳng tới CI badge thay vì chép số vào doc.
+**Test baseline hiện tại:** `cd backend && .venv/Scripts/python -m pytest -q` → **775 tests / 57 file** (SQLite), và `cd app && bunx playwright test` → **7 specs / 4 files**. Hai con số này đổi theo từng PR — chạy lại lệnh trước khi quote, đừng tin dòng này.
 
 ---
 
 ## 4. Hiện trạng kỹ thuật
 
 ```
-stw/                           ← monorepo (git, branch main @ 40ada4d)
+stw/                           ← monorepo (git, branch main — lấy sha bằng `git log -1 --format=%h`)
 ├── app/                       ← Next.js 16 frontend
 │   ├── src/app/dashboard/     ← overview, kanban, chat, calendar, wiki, files, settings
 │   ├── src/app/api/          ← BFF route handlers (proxy session cookie → backend)
-│   └── src/features/         ← chat (WS hook), calendar, projects, kanban…
+│   ├── src/features/         ← chat (WS hook), calendar, projects, kanban…
+│   ├── tests/                ← 4 Playwright spec + helpers (CI `frontend-e2e`)
+│   └── design-references/    ← usages.json: ledger adaptation theo Zero Native Design Rule
 ├── backend/                   ← FastAPI + Alembic + Docker Compose
 │   ├── routers/              ← 15 domain routers (thêm presence), 51 HTTP paths + 2 WS routes
 │   ├── alembic/versions/     ← head prs01_presence_state (1 head duy nhất)
-│   └── test_*.py             ← 770 tests / 56 files, full suite xanh (SQLite + Postgres)
+│   └── test_*.py             ← 775 tests / 57 files, full suite xanh (SQLite + Postgres);
+│                                test_ws_handshake_subprotocol.py chặn hồi quy RFC 6455 §4.1
 ├── docs/API.md               ← endpoint map + realtime + BFF map + changelog
 ├── docs/OPS.md               ← backup / retention / verification
 ├── docs/PERF-BASELINE.md     ← benchmark + load evidence
 ├── CONTRIBUTING.md           ← branch/PR flow, checks, conventions
 ├── README.md / RELEASE-CHECKLIST.md / PROJECT-STATUS.md (file này)
-├── Makefile                  ← make dev / make test
+├── Makefile                  ← make dev / test / realtime / verify
 ├── scripts/demo-packs/       ← busy-workspace.json + load/make pack scripts
-└── .github/workflows/ci.yml  ← CI 5 jobs: ruff, backend, backend-pg, frontend, demo-pack
+└── .github/workflows/ci.yml  ← CI 6 jobs: ruff, backend, backend-pg, frontend, frontend-e2e, demo-pack
 ```
 
 - **Stack frontend:** Next.js 16.3.5 + React 19.2.4 + TS 5.7.2 strict + Tailwind v4 (CSS-first, không có `tailwind.config.*`) + shadcn/ui **trên Base UI (không phải Radix)** — dùng `render={<Button/>}` thay vì `asChild` — + dnd-kit + TanStack Query 5 + next-themes (dark default)
@@ -120,19 +123,34 @@ Lấy từ `gh pr list --repo skappafrost/student-team-workspace --state open` �
 ## 6. Việc tiếp theo
 
 **Product**
-- [ ] **S6 — presence UI (frontend)**, branch `feat/rt-presence-ui`: consume `GET /workspaces/{id}/presence` + `/ws/workspaces/{id}/presence`, dot trên DM list / member table / user menu. **Phải theo Zero Native Design Rule** — phần sourcing đã xong: 7 record trong `design-references/catalogs/usages.json` (id nguồn + path + license + adaptation), trong đó `element-web` là **AGPL → chỉ lấy spec, không copy code**. Còn lại là code UI + verify tương phản sáng/tối trên trình duyệt theo D8.
-- [ ] Quyết định mở: `POST /presence/me` ghi `Activity` row (`verb=set_presence`) — status spam có nên nằm trong activity feed + audit log không?
+- [ ] **S6 — presence UI (frontend)**, branch `feat/rt-presence-ui`: consume `GET /workspaces/{id}/presence` + `/ws/workspaces/{id}/presence`, dot trên DM list / member table / user menu. **Phải theo Zero Native Design Rule** — phần sourcing đã xong: 7 record trong `app/design-references/catalogs/usages.json` (id nguồn + path + license + adaptation; ledger đã move vào repo để reviewer đọc được trong cùng diff), trong đó `element-web` là **AGPL → chỉ lấy spec, không copy code**. Ba blocker kỹ thuật đứng trước nó đã gỡ xong (#205 handshake, #207 môi trường, #208 gate); còn lại là code UI + verify tương phản sáng/tối bằng screenshot theo D8.
+- [x] Quyết định: `POST /presence/me` **ngừng** ghi `Activity` row (`verb=set_presence`). Lý do: path socket (`presence.py:_set_and_publish`) vốn không ghi dòng nào → feed là coin flip theo transport mà client chọn; `services.log_activity` không dedup/cooldown; overview feed chỉ giữ 8 item và render raw verb. `PresenceState` mới là bảng của lịch sử status. Thi công ở PR presence-data-layer kèm test "POST presence không tạo Activity row".
 
 **Kỹ thuật còn nợ**
-- [ ] 🔴 **Chat realtime không delivers sang user khác** — RÚT LẠI MỘT PHẦN. Reproduced trên `main` với `app/e2e-ws-transport.mjs realtime`: `POST /channels/{id}/messages` trả **201**, cả hai browser context đều có socket `[accepted]` trên **cùng một** channel URL (`sameSocketUrl=true`), nhưng phía nhận không render. Đã loại trừ: `MessageOut` **có** `channel_id` (nên guard `msg.channel_id !== selectedChannel?.id` không phải thủ phạm), và test in-process cho delivery giữa hai socket (`test_ws.py::test_ws_typing_excludes_sender`, `test_ws_broadcast_new_message_to_member`) **đều pass**. Probe `framerceived` báo 0 frame trên *cả hai* socket kể cả socket người gửi → nhiều khả năng là harness Playwright không bắt được frame hơn là broadcast chết; cần instrument phía server (đếm `delivered` mà `_ws_broadcast` trả về) trước khi kết luận root cause.
+- [x] 🔴 → ✅ **Mọi WebSocket của browser đều chết ở bắt tay** (#205 + #206) — đây là root cause thật của mục "chat realtime không delivers" mà doc này từng mô tả sai hai lần. Chuỗi lỗi, mỗi mắt xích đọc trực tiếp trong code:
+  1. `app/src/lib/realtime/use-websocket.ts:95` → `new WebSocket(url)` **không truyền `protocols`**, nên client không offer subprotocol nào.
+  2. `backend/dependencies.py` path cookie trả `accepted_subprotocol = None`.
+  3. `channels.py` / `presence.py` gọi `accept(subprotocol=subproto or WS_SUBPROTOCOL)` → 101 nêu `stw-ws`.
+  4. Starlette 1.6 `accept()` nhét thẳng giá trị vào ASGI message, **không đối chiếu offer**.
+  5. uvicorn 0.52 `websockets_impl.process_subprotocol` được override để "return whatever subprotocol is sent in the accept message"; bản sansio append header `Sec-WebSocket-Protocol`.
+  6. RFC 6455 §4.1 step 6: client **MUST fail** khi server nêu protocol mình không offer → Chrome abort sau 101, hook reconnect (backoff 1→5s) nên một page mở 4 socket.
+  - Vì sao 770 test xanh: `starlette/testclient.py:124` chỉ *ghi* `accepted_subprotocol` chứ không validate, và không call site `websocket_connect(` nào truyền `subprotocols=`. Vì sao người (kể cả agent) kết luận sai: dòng `[accepted]` trong log uvicorn chỉ chứng minh **application** accept, không chứng minh browser hoàn tất handshake.
+  - Defect thứ hai cùng dòng: path ticket trả bare `stw-ws` trong khi client offer `stw-ws.<ticket>` (`ws.py:_ws_ticket_subprotocol`) → cũng là giá trị không được offer.
+  - Bằng chứng ngược có sẵn trong repo trước khi sửa: `app/qa-evidence/ws-transport-realtime-report.json` ghi `message-reaches-peer-context: FAIL, rendered=false inDom=false sameSocketUrl=true` — 1 socket/page, cùng URL, 0 frame.
+  - Regression guard: `backend/test_ws_handshake_subprotocol.py` assert ở tầng ASGI (`picked is None or picked in offered`) — chạy trong cả 2 backend job, không cần port hay browser. RED trước khi sửa: 3 fail + 1 ImportError.
+  - Hệ quả lộ ra sau khi handshake sống: author nhận **2 bản** message (broadcast không `exclude` + refetch lúc settle) → sửa bằng dedupe theo `id` phía client (#206). Server-side `exclude` không biểu đạt được: HTTP handler không giữ object WebSocket nào, còn exclude theo user sẽ giết luôn tab khác của chính người gửi.
+  - Đo sau fix: `app/tests/realtime-delivery.spec.ts` pass; mutation check (đặt lại bug) làm spec fail; probe tạm ở `messages.py` ghi `delivered=2` cho cả 7 broadcast.
 - [x] 🔶 → ✅ **`src/components/kbar/use-search-actions.ts:40` lặp vô hạn** — đã sửa (#203). Root cause: effect dep `[searchQuery, routerPush]` trong khi caller truyền inline arrow (`kbar/index.tsx:66`), cộng với `setResults({…})` luôn cấp object mới → chu trình render. Hệ quả phụ: debounce 250ms bị reset mỗi render nên kbar data search gần như không bao giờ chạy. Đo bằng chứng thật: **6007 → 0** cảnh báo `Maximum update depth` trên cùng một kịch bản load trang.
 - [ ] `manage.py create-user` **chạy được trên DB trống**: hiện query `users` ở `backend/manage.py:227` nhưng chỉ gọi `create_all` ở `:231`, nên lần chạy đầu tiên trên DB mới toang với `no such table: users`. Cần quyết định lệnh nào sở hữu schema creation.
 - [ ] `POST /api/notifications` action `mark-all-read` đang proxy tới `POST /notifications/mark-all-read` — **route backend không tồn tại**, handler hiện trả 405. Hoặc thêm route, hoặc bỏ handler.
 - [ ] `app/src/features/workspace/components/workspace-settings-page.tsx:31` liệt kê roles `owner|admin|member|**viewer**` trong khi backend chỉ có `owner|admin|member|**guest**` (`authorization.py:17`). Dropdown cho phép chọn "viewer" — role không tồn tại ở server.
 - [ ] Chuông notification (`app/src/features/notifications/utils/store.ts:105`) vẫn đọc `mockNotifications` tại `:23`, chưa nối `GET /api/notifications` thật.
-- [x] CI gate `ruff check` (#195): 170 lỗi về 0, `ruff` là job thứ 5. `ruff format` vẫn **không** gate (69 file / ~1945 dòng chưa sạch).
-- [x] `app/.env.local` từng để `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` trong khi CONTRIBUTING bắt dùng `localhost`: `session_token` là `SameSite=Lax` nên khác hostname = cookie không gửi lên WS upgrade → **mọi handshake chat + presence 4401 trước `accept()`**, và console thì im lặng. Đã fix local file về `localhost`, và #201 thêm guard trong `lib/realtime/use-websocket.ts` log rõ tên lỗi + hostname rồi **không** retry.
-- [ ] Frontend CI hiện chỉ `typecheck` — không lint, không build, không test; Playwright có devDep nhưng 2 spec và không chạy trong CI. `app/e2e-ws-transport.mjs` là harness thứ 3 dạng script- tay, vẫn không có gate tự động nào.
+- [x] CI gate `ruff check` (#195): 170 lỗi về 0. `ruff format` vẫn **không** gate.
+- [x] `app/.env.local` từng để `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` trong khi CONTRIBUTING bắt dùng `localhost`: `session_token` là `SameSite=Lax` nên khác hostname = cookie không gửi lên WS upgrade → **mọi handshake chat + presence 4401 trước `accept()`**, và console thì im lặng. Nay `env.example.txt` đã chứa biến này (#207) nên không còn bước "thêm tay", và `lib/realtime/use-websocket.ts` log rõ tên lỗi + hostname rồi **không** retry (#201).
+- [x] Frontend CI (#208): job `frontend` chạy `oxlint --deny-warnings src` + `typecheck` + `build`; job `frontend-e2e` chạy 7 Playwright test với backend sống (tự khởi động qua `playwright.config.ts`). Lần chạy đầu của job này đỏ vì config tìm `backend/.venv` mà CI không tạo → đã sửa trong cùng PR; hiện 6/6 job xanh.
+- [ ] **`app/src/app/api/workspace/members/route.ts:49-57` trả `seededMembers` (dữ liệu bịa)** khi thiếu cookie hoặc backend không reachable, và PATCH thì mutate thẳng fixture trong bộ nhớ. `workspace-settings-invite.spec.ts` từng assert đúng dữ liệu bịa đó (`Demo Admin`, `Jane Member`) — đã viết lại trong #208. Presence dot chỉ render khi `user_id` có trong payload nên row bịa không dot, nhưng bản thân cơ chế fallback vẫn là defect chưa ai xử lý.
+- [ ] Quan sát chưa kết luận: khi chạy Playwright **song song** (4 workers), socket của page A có đóng + reconnect (đo được 2→3 socket). Client reconnect là hành vi đúng, nên không gọi là bug; nhưng chưa rõ vì sao socket đóng dưới tải. Spec hiện assert cận trên (`+3`) thay vì số tuyệt đối để không biến quan sát này thành false red.
+- [ ] `bun run format:check` chưa phải gate. Con số "329/330 file chưa format" từng ghi trong doc là **artifact CRLF** (`core.autocrlf=true`, không có `.gitattributes`, blob trong commit là LF sạch); `.gitattributes` (#207) sửa gốc. Working tree cũ vẫn CRLF tới khi checkout lại, nên cần một PR format riêng sau khi wave này xong.
 
 **Release**
 - [ ] Giải nốt #85 sau khi có smoke test; triage #193/#194 (major) riêng.

@@ -1,0 +1,105 @@
+{
+  "_comment": "Adaptation ledger for the Zero Native Design Rule (workspace AGENTS.md, 'Design-Reference Workflow' step 3: document the source URL/id and the exact adaptation made). CATALOG.md lists what exists to look at; DECISIONS.md records direction. Neither records what was TAKEN and HOW it was re-expressed, so a reviewer could not audit a visual against its source. This file closes that gap: one record per shipped visual, keyed to an existing catalog id. Vendored into the client repo so a reviewer can read it in the same diff as the code it audits; the catalog indexes it keys to (CATALOG.md, DECISIONS.md) and the open-source/ clones named in _gaps live in the sibling design-references checkout and are not duplicated here.",
+  "_schema": {
+    "slice": "workstream slice the visual belongs to",
+    "visual": "the specific thing rendered",
+    "source_id": "id of an existing catalog entry (local-clones.json / merged-gallery-data.json)",
+    "source_path": "path inside that clone, or URL, where the spec was read",
+    "license": "license of the source — governs whether code may be copied",
+    "took": "the exact property/geometry/table lifted, verbatim values quoted",
+    "adaptation": "how it is re-expressed in STW (stack, files, token names) and what was deliberately NOT copied",
+    "status": "sourced | implemented | verified",
+    "evidence": "qa-evidence artifact proving it, once verified"
+  },
+  "usages": [
+    {
+      "slice": "S6 presence UI",
+      "visual": "presence dot geometry (offset + size + cut-out ring)",
+      "source_id": "chat-collab__mattermost",
+      "source_url": "https://github.com/mattermost/mattermost",
+      "source_path": "webapp/channels/src/sass/components/_status-icon.scss:60-71",
+      "license": "MIT",
+      "took": "position:absolute; right:-3px; bottom:-4px; width:15px; height:15px; border-radius:100px; background:var(--center-channel-bg) — i.e. the dot's ring is painted in the surrounding surface colour so it reads as a cut-out, not an overlay. Sidebar variant at :9-20 scales it to 19px at right:-6px.",
+      "adaptation": "No positioning CSS authored. app/src/components/ui/avatar.tsx:51 AvatarBadge already implements exactly this shape (absolute right-0 bottom-0 rounded-full ring-2 ring-background) and is currently unused, so the ring-in-surface-colour trick is already solved by the design system. PresenceDot sets only the colour class per status and leaves geometry to AvatarBadge's existing data-[size] scaling.",
+      "status": "sourced",
+      "evidence": null
+    },
+    {
+      "slice": "S6 presence UI",
+      "visual": "status -> semantic colour mapping",
+      "source_id": "chat-collab__Rocket.Chat",
+      "source_url": "https://github.com/RocketChat/Rocket.Chat",
+      "source_path": "packages/ui-client/src/components/UserStatus/index.ts:1-6",
+      "license": "MIT",
+      "took": "the four-way semantic mapping: online=success-500, away=warning-600, busy(dnd)=danger-500, offline=neutral-600.",
+      "adaptation": "Mapping reused, token names are not (STW has no success/warning/neutral scales — verified: no such token in any of the 11 theme files). Expressed as new --presence-online / --presence-away OKLCH pairs in app/src/styles/theme.css, with dnd reusing each theme's existing --destructive and offline reusing --muted-foreground, so dark and light both resolve without inventing a palette. Raw utilities (bg-emerald-500) rejected: they are not theme-relative, which breaks the locked D4 requirement that light and dark are both first-class.",
+      "status": "sourced",
+      "evidence": null
+    },
+    {
+      "slice": "S6 presence UI",
+      "visual": "per-state icon + tooltip label table",
+      "source_id": "chat-collab__element-web",
+      "source_url": "https://github.com/vector-im/element-web",
+      "source_path": "apps/web/src/components/views/rooms/MemberList/tiles/common/PresenceIconView.tsx:25-59, :63-70",
+      "license": "AGPL-3.0 / GPL-3.0 — COPY NO CODE",
+      "took": "the shape of the two switch tables (state -> glyph, state -> tooltip key) and the tooltip configuration placement='bottom' with isTriggerInteractive={false}, so the indicator is not itself a click target.",
+      "adaptation": "Spec only, re-expressed from scratch: a status -> {label, dotClass, icon} record in app/src/features/presence/lib/status-meta.ts, glyphs from @tabler/icons-react via the Icons registry (app rule #8 forbids direct icon imports), tooltip from the existing components/ui/tooltip.tsx with the same bottom placement and non-interactive trigger. Their four states collapse onto STW's four (online/away/dnd/offline); element-web's 'unreachable' has no backend equivalent and is not invented. No file, class name or CSS custom property is shared with the AGPL source.",
+      "status": "sourced",
+      "evidence": null
+    },
+    {
+      "slice": "S6 presence UI",
+      "visual": "overlay composition (avatar + indicator as one component)",
+      "source_id": "chat-collab__element-web",
+      "source_url": "https://github.com/vector-im/element-web",
+      "source_path": "apps/web/src/components/views/avatars/WithPresenceIndicator.tsx:87-122",
+      "license": "AGPL-3.0 / GPL-3.0 — COPY NO CODE",
+      "took": "the wrapper API shape: a component that renders its children and appends the indicator inside a relatively-positioned box, rather than every call site laying out a dot by hand.",
+      "adaptation": "Re-expressed as <PresenceDot status={…} /> placed inside the existing <Avatar>, plus <PresenceAvatar> where the pairing repeats. Children-plus-icon composition is the pattern taken; their DOM, hooks and class names are not.",
+      "status": "sourced",
+      "evidence": null
+    },
+    {
+      "slice": "S6 presence UI",
+      "visual": "roster ordering and offline collapse",
+      "source_id": "chat-collab__zulip",
+      "source_url": "https://github.com/zulip/zulip",
+      "source_path": "web/src/buddy_list_presence.ts, web/src/presence.ts",
+      "license": "Apache-2.0",
+      "took": "the ordering rule for a member list with presence: currently-active first, then idle, with offline grouped and de-emphasised at the bottom.",
+      "adaptation": "Needed because GET /workspaces/{id}/presence is documented as unordered — the backend returns the roster in database order, so any stable presentation must be produced client-side. A sort comparator in features/presence/lib (online, then away, then dnd, then offline; name as tiebreak) feeding the DM list and the member table.",
+      "status": "sourced",
+      "evidence": null
+    },
+    {
+      "slice": "S6 presence UI",
+      "visual": "carrier primitive: avatar badge + avatar group",
+      "source_id": "design-system__shadcn-ui",
+      "source_url": "https://ui.shadcn.com/docs/components/avatar",
+      "source_path": "app/src/components/ui/avatar.tsx:51 (AvatarBadge), :67 (AvatarGroup), :80 (AvatarGroupCount)",
+      "license": "MIT",
+      "took": "the registry components themselves, already vendored by the scaffold.",
+      "adaptation": "Locked by decision D5 (shadcn/ui + Origin UI + Tremor) and by app/AGENTS.md rule 7, which says extend components/ui/* rather than edit them in place — so the three currently-unused members of avatar.tsx become the indicator and the 'N online' stack, and nothing in ui/ is modified.",
+      "status": "sourced",
+      "evidence": null
+    },
+    {
+      "slice": "S6 presence UI",
+      "visual": "online pulse / motion on the indicator",
+      "source_id": "prod__ui-kits-design-systems__magic-ui",
+      "source_url": "https://magicui.design",
+      "source_path": null,
+      "license": "n/a — evaluated and DECLINED",
+      "took": "nothing. Recorded so the decision is auditable rather than silent.",
+      "adaptation": "Deliberately not used. Locked decision D6 caps motion at 150-250ms and describes the target as 'mượt không lòe loẹt'; a perpetual pulse on every online user is neither. The house idiom animate-pulse exists only in loading skeletons (components/ui/skeleton.tsx:7). S6 ships a static dot with a single transition-colors inside the D6 budget.",
+      "status": "sourced",
+      "evidence": null
+    }
+  ],
+  "_gaps": [
+    "21st.dev is named first in the workspace AGENTS.md as an acceptable source but appears nowhere in this catalog (zero hits across CATALOG.md and all six JSON indexes). Either it gets added as a reference entry or it should stop being cited as the go-to.",
+    "No entry in this catalog previously recorded an adaptation, so every visual shipped before S6 is unauditable against a source by the rule's own standard. This file starts the ledger at S6; back-filling W0-W10 is unowned.",
+    "open-source/chat-collab/{element-web,mattermost,zulip} have no NOTES.md, though README.md promises 'Each local clone has NOTES.md'. Only 2 of the 5 clones carry SOURCE.md."
+  ]
+}

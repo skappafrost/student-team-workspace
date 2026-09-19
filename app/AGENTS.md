@@ -239,9 +239,10 @@ NEXT_PUBLIC_SENTRY_DISABLED="false"  # Set to "true" to disable in dev
 
 ## Theming System
 
-The project uses a sophisticated multi-theme system with 10 built-in themes:
+The project uses a multi-theme system with 11 built-in themes (the list below matches `src/styles/themes/`; `DEFAULT_THEME` in `src/components/themes/theme.config.ts` is `teamspace`):
 
-- `vercel` (default)
+- `teamspace` (default)
+- `vercel`
 - `claude`
 - `discord`
 - `supabase`
@@ -448,21 +449,19 @@ NEXT_PUBLIC_SENTRY_DISABLED="true"
 
 ---
 
-## Testing Strategy
+## Testing
 
-**Note**: This project does not include a test suite by default. Consider adding:
+What exists today, and what CI actually runs:
 
-- **Unit tests**: Vitest or Jest for utilities and hooks
-- **Component tests**: React Testing Library for UI components
-- **E2E tests**: Playwright for critical user flows
+- **E2E (job `frontend-e2e`)** — Playwright specs in `tests/`, against a live backend that `playwright.config.ts` starts itself. Seeding helpers shared by the specs live in `tests/helpers.ts`.
+- **Static gates (job `frontend`)** — `bunx oxlint --deny-warnings src`, `bun run typecheck`, `bun run build`.
+- **No unit or component runner.** There is no Vitest, Jest or React Testing Library dependency and no config for them. Do not add `*.test.ts` files expecting a runner to find them, and do not write "Vitest" into any doc — that sentence is exactly how a false claim about test coverage got into this repo.
 
-Recommended test locations:
+Adopting a unit runner is a decision to make deliberately (dependency + CI step + a home for the tests), not a default to assume. Until then: a behavior Playwright cannot reach is verified by hand, and the docs have to say so rather than imply a gate.
 
 ```
-/src
-  /__tests__           # Unit tests
-  /features/*/tests    # Feature tests
-/e2e                   # Playwright tests
+/tests                 # Playwright specs, run in CI
+/app/qa-evidence       # screenshots that back a visual claim
 ```
 
 ---
