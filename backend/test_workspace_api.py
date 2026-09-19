@@ -8,9 +8,6 @@ fixtures from conftest.py) so the full suite is isolated and hermetic.
 
 import uuid
 
-import pytest
-from fastapi.testclient import TestClient
-
 from conftest import as_user
 
 

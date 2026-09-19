@@ -9,10 +9,11 @@ signature/expiry/claims checks are what rejects them.
 
 from datetime import UTC, datetime, timedelta
 
+from jose import jwt as jose_jwt
+
 import models
 from conftest import make_user
 from dependencies import ALGORITHM, _get_secret, create_refresh_token
-from jose import jwt as jose_jwt
 
 PASSWORD = "super-secret-1"
 

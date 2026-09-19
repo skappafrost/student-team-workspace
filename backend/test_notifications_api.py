@@ -1,14 +1,8 @@
 """Tests for Notification CRUD endpoints."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app import app, Role
 from conftest import as_user, make_user
-
-
-
-
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -30,7 +24,7 @@ def create_user(client, db_session, user_id, email):
 # ---------------------------------------------------------------------------
 
 def test_create_notification(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     resp = client.post(
@@ -54,7 +48,7 @@ def test_create_notification(client, db_session):
 
 
 def test_list_notifications_for_current_user(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
 
@@ -90,7 +84,7 @@ def test_list_notifications_for_current_user(client, db_session):
 
 
 def test_get_notification(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     n = client.post(
@@ -106,7 +100,7 @@ def test_get_notification(client, db_session):
 
 
 def test_mark_notification_read(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     n = client.post(
@@ -125,26 +119,7 @@ def test_mark_notification_read(client, db_session):
 
 
 def test_list_unread_only(client, db_session):
-    ws = create_workspace(client, "owner")
-    create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
-    n = client.post(
-        "/notifications",
-        json={"user_id": "target-user", "type": "mention", "title": "Read me"},
-    ).json()
-
-    as_user(client, "target-user")
-    resp = client.patch(f"/notifications/{n['id']}", json={"read": True})
-    assert resp.status_code == 200
-    assert resp.json()["read"] is True
-
-    resp = client.patch(f"/notifications/{n['id']}", json={"read": False})
-    assert resp.status_code == 200
-    assert resp.json()["read"] is False
-
-
-def test_list_unread_only(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
 
@@ -168,7 +143,7 @@ def test_list_unread_only(client, db_session):
 
 
 def test_delete_notification(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     n = client.post(
@@ -187,7 +162,7 @@ def test_delete_notification(client, db_session):
 # ---------------------------------------------------------------------------
 
 def test_user_cannot_access_others_notifications(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "user-a", "a@example.com")
     create_user(client, db_session, "user-b", "b@example.com")
 
@@ -206,7 +181,7 @@ def test_user_cannot_access_others_notifications(client, db_session):
 
 
 def test_cannot_create_notification_for_missing_user(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.post(
         "/notifications",
@@ -216,7 +191,7 @@ def test_cannot_create_notification_for_missing_user(client):
 
 
 def test_invalid_notification_type_rejected(client, db_session):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
     as_user(client, "owner")
     resp = client.post(

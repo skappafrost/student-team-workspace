@@ -1,14 +1,9 @@
 """Tests for Channel and Message CRUD endpoints with RBAC."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app import app, Role
+from app import Role
 from conftest import as_user, clear_auth, make_user
-
-
-
-
 
 # ---------------------------------------------------------------------------
 # Auth helpers

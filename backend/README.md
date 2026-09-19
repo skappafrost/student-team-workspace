@@ -124,22 +124,29 @@ pytest test_invites_api.py test_workspace_api.py
 
 ## 7. Lint and format (ruff)
 
-The backend uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting.
-Config lives in `backend/ruff.toml`; CI enforces both checks (`.github/workflows/ci.yml`).
+The backend is linted with [ruff](https://docs.astral.sh/ruff/). Config lives in
+`backend/ruff.toml`, and CI runs `ruff check .` as its own job — so a lint error
+blocks the PR, not just the reviewer's patience.
 
 ```bash
-ruff check            # lint
+ruff check            # lint (what CI enforces)
 ruff check --fix      # lint + autofix
-ruff format           # format
 ```
 
+Run both from `backend/`: that is where `ruff.toml` is, and a repo-root `ruff check .`
+picks up no config at all while also linting `.worktrees/` checkouts.
+
+`ruff format` is a local convenience and is **not** gated: the tree is not
+format-clean today (`ruff format --check` reports 69 files, ~2000 lines), so
+gating it would bury real changes under whitespace. Do not reformat files your
+PR does not otherwise touch.
+
 **Pre-commit hook (recommended):** add this to your local `.git/hooks/pre-commit`
-(or use the [pre-commit](https://pre-commit.com) framework with the same commands):
+(or use the [pre-commit](https://pre-commit.com) framework with the same command):
 
 ```bash
 #!/bin/sh
-# Lint staged backend changes
-cd backend && .venv/Scripts/ruff check --fix && .venv/Scripts/ruff format
+cd backend && .venv/Scripts/ruff check .
 ```
 
 ---

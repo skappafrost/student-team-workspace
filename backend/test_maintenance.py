@@ -23,10 +23,8 @@ import app as app_module
 import database
 import maintenance
 import models
-from app import Role
-from conftest import make_user, as_user
+from conftest import as_user, make_user
 from database import Base
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

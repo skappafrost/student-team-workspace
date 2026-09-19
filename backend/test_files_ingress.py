@@ -26,7 +26,6 @@ import database
 from app import app
 from conftest import as_user, make_user
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (same isolation pattern as test_maintenance.py)
 # ---------------------------------------------------------------------------

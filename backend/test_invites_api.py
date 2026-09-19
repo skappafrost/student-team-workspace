@@ -7,9 +7,6 @@ TestClient with isolated test databases and real JWT authentication
 
 import uuid
 
-import pytest
-from fastapi.testclient import TestClient
-
 from conftest import as_user
 
 

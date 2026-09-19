@@ -18,4 +18,8 @@ ignore = [
 
 [lint.per-file-ignores]
 "test_*.py" = ["B011", "SIM"]
-"alembic/*" = ["F401", "E402"]
+# Merged migrations are frozen history: their `revision` / `down_revision`
+# metadata is the only thing that matters, so import order and typing idioms
+# are ignored rather than hand-edited. Rewriting an already-applied migration is
+# how `b5e15` collided (see add_channel_members.py:27).
+"alembic/*" = ["F401", "E402", "I001", "UP007", "UP035"]

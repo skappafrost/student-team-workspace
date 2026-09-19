@@ -1,15 +1,11 @@
 """Tests for File CRUD endpoints with RBAC."""
 
 import io
-import pytest
+
 from fastapi.testclient import TestClient
 
-from app import app, Role
+from app import Role
 from conftest import as_user, clear_auth, make_user
-
-
-
-
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -201,21 +197,21 @@ def test_non_member_cannot_access_files(client):
 # ---------------------------------------------------------------------------
 
 def test_get_file_not_found(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.get("/files/nonexistent-uuid")
     assert resp.status_code == 404
 
 
 def test_update_file_not_found(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.patch("/files/nonexistent-uuid", json={"name": "x.pdf"})
     assert resp.status_code == 404
 
 
 def test_delete_file_not_found(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.delete("/files/nonexistent-uuid")
     assert resp.status_code == 404

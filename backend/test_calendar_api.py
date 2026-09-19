@@ -1,11 +1,9 @@
 """Tests for Calendar/Event CRUD endpoints with RBAC and date-range filtering."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app import app, Role
+from app import Role
 from conftest import as_user, clear_auth, make_user
-
 
 # ---------------------------------------------------------------------------
 # Auth / helper helpers (mirrors test_projects_api)

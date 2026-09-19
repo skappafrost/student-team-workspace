@@ -9,25 +9,25 @@ an unauthenticated case. Tests hit every guarded endpoint asserting:
 Covers privilege escalation attempts (member calling admin-only route, guest POST).
 """
 
-import pytest
 import os
 import uuid
 from datetime import timedelta
-from typing import Optional
-from fastapi.testclient import TestClient
-from app import app, Role, ROLE_HIERARCHY, create_access_token, Base, _utcnow
-from conftest import make_user
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from starlette.websockets import WebSocketDisconnect
-import models  # noqa: F401  -- ensures all model tables are registered on Base.metadata
+from functools import partial
+from types import SimpleNamespace
 
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+import models  # noqa: F401  -- ensures all model tables are registered on Base.metadata
+from app import ROLE_HIERARCHY, Role, _utcnow, app, create_access_token
+from conftest import make_user
 
 # ---------------------------------------------------------------------------
 # JWT helper for real-token negative tests
 # ---------------------------------------------------------------------------
 
-def _jwt_auth_client(user_id: str, expires_delta: Optional[timedelta] = None) -> TestClient:
+def _jwt_auth_client(user_id: str, expires_delta: timedelta | None = None) -> TestClient:
     """Return a TestClient authenticated with a real JWT for ``user_id``."""
     client = TestClient(app)
     token = create_access_token(user_id, expires_delta=expires_delta)
@@ -57,6 +57,7 @@ class RoleUser:
         # For unauthenticated users, return a completely fresh client
         if self.role is None:
             from fastapi.testclient import TestClient
+
             from app import app
             fresh_client = TestClient(app)
             return fresh_client
@@ -214,6 +215,11 @@ def _create_test_member(client: TestClient, ws_id: str, role: Role = Role.MEMBER
     return user_id
 
 
+def _transfer_ownership_payload(user_id: str) -> dict:
+    """Payload for the two dynamic transfer-ownership sites below."""
+    return {"user_id": user_id}
+
+
 ENDPOINT_PAYLOAD_FACTORIES = {
     ("POST", "/workspaces"): lambda: {"name": "New WS", "slug": f"new-ws-{uuid.uuid4().hex[:8]}"},
     ("GET", "/workspaces"): lambda: None,
@@ -354,8 +360,8 @@ class TestRoleMatrix:
 
         # Pre-create reusable resources; each role gets fresh copies so that
         # destructive operations (DELETE member/invite) do not interfere.
-        invite_id: Optional[str] = None
-        user_id: Optional[str] = None
+        invite_id: str | None = None
+        user_id: str | None = None
         needs_target_user = "{user_id}" in path or (method == "POST" and "transfer-ownership" in path)
         if "{invite_id}" in path:
             invite_id = _create_test_invite(owner.client, ws_id)
@@ -365,7 +371,7 @@ class TestRoleMatrix:
             user_id = _create_test_member(owner.client, ws_id, target_role)
             # For transfer-ownership payload, fill in the real user_id
             if method == "POST" and "transfer-ownership" in path:
-                payload_factory = lambda uid=user_id: {"user_id": uid}  # type: ignore[assignment]
+                payload_factory = partial(_transfer_ownership_payload, user_id)
 
         # Test each authenticated role
         for role, role_user in role_users.items():
@@ -380,7 +386,7 @@ class TestRoleMatrix:
                 target_role = Role.ADMIN if method == "POST" and "transfer-ownership" in path else Role.MEMBER
                 current_user_id = _create_test_member(owner.client, ws_id, target_role)
                 if method == "POST" and "transfer-ownership" in path:
-                    payload_factory = lambda uid=current_user_id: {"user_id": uid}  # type: ignore[assignment]
+                    payload_factory = partial(_transfer_ownership_payload, current_user_id)
 
             payload = payload_factory() if payload_factory else None
 
@@ -562,7 +568,6 @@ class TestRoleMatrix:
         owner_a = RoleUser(client, "owner-a", Role.OWNER)
         ws_a_resp = owner_a.client.post("/workspaces", json={"name": "Workspace A", "slug": "ws-a"})
         assert ws_a_resp.status_code == 201
-        ws_a_id = ws_a_resp.json()["id"]
         owner_a.clear_auth()
 
         # Create workspace B with owner B
@@ -752,21 +757,19 @@ def test_print_role_matrix_summary():
     print(f"{'Endpoint':<45} {'Owner':<8} {'Admin':<8} {'Member':<8} {'Guest':<8} {'Unauth':<8}")
     print("-" * 80)
 
+    def check(role, allowed, is_public):
+        if is_public or allowed is None:
+            return "✓"
+        return "✓" if role in allowed else "✗"
+
     for (method, path), config in sorted(EXPECTED_ACCESS.items()):
         allowed = config["allowed"]
         is_public = config["public"]
 
-        def check(role):
-            if is_public:
-                return "✓"
-            if allowed is None:
-                return "✓"
-            return "✓" if role in allowed else "✗"
-
-        owner_ok = check(Role.OWNER)
-        admin_ok = check(Role.ADMIN)
-        member_ok = check(Role.MEMBER)
-        guest_ok = check(Role.GUEST)
+        owner_ok = check(Role.OWNER, allowed, is_public)
+        admin_ok = check(Role.ADMIN, allowed, is_public)
+        member_ok = check(Role.MEMBER, allowed, is_public)
+        guest_ok = check(Role.GUEST, allowed, is_public)
         unauth_ok = "✓" if is_public else "401"
 
         endpoint_str = f"{method} {path}"
@@ -795,7 +798,6 @@ def test_print_role_matrix_summary():
 # All requests use REAL JWTs (Authorization: Bearer <create_access_token(user_id)>),
 # not the X-Test-User-* header bypass.
 
-from types import SimpleNamespace
 
 T002_ACTORS = ["owner", "admin", "member", "guest", "stranger", "anonymous"]
 
