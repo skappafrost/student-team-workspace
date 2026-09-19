@@ -109,9 +109,10 @@ Required evidence per task type:
 
 - [ ] Backend virtualenv created, dependencies installed, `backend/.env` copied from `.env.example` (Compose **fails** without it — `docker compose config` exits 1).
 - [ ] `alembic upgrade head` runs without error; `alembic heads` shows exactly 1 head.
-- [ ] `.venv/Scripts/python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload` starts and `/health` returns 200.
+- [ ] `.venv/Scripts/python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload` starts and `/health` returns 200. (`--host` is the **bind** address; `NEXT_PUBLIC_API_URL` must still name the *page's* hostname — see §1.)
 - [ ] Frontend `app/.env.local` contains `NEXT_PUBLIC_API_URL=http://localhost:8000` (plus Sentry vars from `env.example.txt`, optional).
 - [ ] `bun run dev:webpack` starts the app at http://localhost:3000 (`--webpack` is mandatory — Turbopack is broken on this PC).
+- [ ] `make realtime` passes: it starts both servers itself and asserts a message sent by one browser renders in a second browser's channel. A `/ws/...` line in the uvicorn log is **not** this proof — `[accepted]` only means the application accepted.
 - [ ] Register and login flows complete successfully (`cd app && node e2e-auth-flow.mjs`).
 - [ ] `bun run typecheck` passes; backend `python -m pytest -q` passes — 770 collected on main, re-run to confirm.
 - [ ] No secrets committed in docs or `.env` files.

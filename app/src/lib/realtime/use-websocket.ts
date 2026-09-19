@@ -13,7 +13,15 @@ export function isUuid(id: string | undefined): id is string {
 
 export function getApiBaseUrl(): string {
   if (typeof window === 'undefined') return '';
-  return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://127.0.0.1:8000';
+  // Derive the host from the page instead of defaulting to 127.0.0.1: this
+  // file's own guard below refuses to connect when the socket host differs from
+  // the page host, so a literal default here would contradict it. The 26 BFF
+  // route handlers keep their 127.0.0.1 default — they are server-to-server and
+  // forward the cookie by hand, where the host does not gate authentication.
+  return (
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ??
+    `${window.location.protocol}//${window.location.hostname}:8000`
+  );
 }
 
 /**
