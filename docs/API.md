@@ -372,7 +372,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 - #175 — security regression pack.
 - #185 — restored wiring that squash-merges had silently dropped (backend import, `/auth/refresh`, upload path, message-search escaping) and narrowed the `conftest` exception mask that had been hiding it.
 - #188 — Alembic single head + `PresenceState` model.
-- #189 — presence service: `POST /workspaces/{id}/presence/me`, `GET /workspaces/{id}/presence`, `GET /presence/me`, `/ws/workspaces/{id}/presence`.
+- #189 — presence service: `POST /workspaces/{id}/presence/me`, `GET /workspaces/{id}/presence`, `/ws/workspaces/{id}/presence`.
 - #195–#201 — hardening wave: ruff to zero + CI gate, presence socket refcount, this file's route coverage enforced by `test_docs_contract.py`, generic realtime hook (`useRealtimeSocket`).
 
 **Realtime transport fix (#205, #206).** `accept()` used to name `stw-ws` even when the client offered no subprotocol, which RFC 6455 §4.1 step 6 makes a browser fail on — so **no browser socket in this app ever completed a handshake**, while every pytest WS test stayed green because Starlette's `TestClient` records `accepted_subprotocol` without validating it. The reply is now the verbatim offered string, or no header at all. Contract text in § Authentication above is unchanged and was already what the code should have done. No route, status code or payload shape changed. Client-side follow-up in #206: the channel broadcast reaches the author's own socket too, so `chat-page.tsx` dedupes inbound messages by `id` — clients must expect their own writes to come back at them.
