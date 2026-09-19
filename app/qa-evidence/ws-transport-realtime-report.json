@@ -1,0 +1,36 @@
+{
+  "stamp": 1789816233920,
+  "mode": "realtime",
+  "results": [
+    {
+      "name": "seed-two-member-workspace",
+      "status": "PASS",
+      "detail": "channel=room-1789816233920"
+    },
+    {
+      "name": "backend-socket-opens",
+      "status": "PASS",
+      "detail": "A backend sockets=1"
+    },
+    {
+      "name": "one-socket-per-page",
+      "status": "PASS",
+      "detail": "A backend urls=[\"ws://localhost:8000/ws/channels/75136c6e-b238-4367-bc2f-4e71b697f10e\"]"
+    },
+    {
+      "name": "no-reconnect-after-30-renders",
+      "status": "PASS",
+      "detail": "extra backend sockets=0, total=1"
+    },
+    {
+      "name": "message-reaches-peer-context",
+      "status": "FAIL",
+      "detail": "marker=cross-context-1789816233920 rendered=false inDom=false sameSocketUrl=true A=[\"ws://localhost:8000/ws/channels/75136c6e-b238-4367-bc2f-4e71b697f10e\"] B=[\"ws://localhost:8000/ws/channels/75136c6e-b238-4367-bc2f-4e71b697f10e\"]"
+    },
+    {
+      "name": "no-host-guard-misfire",
+      "status": "PASS",
+      "detail": "guard errors=0"
+    }
+  ]
+}
