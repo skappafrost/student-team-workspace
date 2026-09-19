@@ -1,11 +1,20 @@
 """Workspace presence (Task LVT S5): status set/list + realtime fan-out.
 
 Presence is per ``(workspace, user)`` (model: ``models.PresenceState``). Status
-is set two ways — an explicit ``PUT /workspaces/{id}/presence/me`` (a user
-choosing away/dnd/message) and the presence socket lifecycle (connect → online,
-heartbeat → keep online, disconnect → offline). Reads derive an idle *online*
-row down to *away* from ``last_seen`` so no background scheduler is needed: the
-value is computed at read/broadcast time from the naive-UTC ``last_seen``.
+is set two ways — an explicit ``POST /workspaces/{id}/presence/me`` (a user
+choosing away/dnd/message) and the presence socket lifecycle. ``POST`` rather
+than ``PUT`` because ``rate_limit._WRITE_METHODS`` excludes PUT and
+``test_rate_limit.py``'s audit demands limiter coverage for every mutating
+route; this app has no PUT routes at all.
+
+One row is shared by every socket a user holds, so the socket only writes on a
+transition of the live-socket count: the user's *first* connect in a workspace
+goes ``online``, their *last* disconnect goes ``offline``, and extra tabs change
+nothing (otherwise opening a second tab would clobber a deliberate ``dnd``).
+Reads derive an idle *online* row down to *away*, and a socketless *online* row
+all the way to *offline*, from the naive-UTC ``last_seen`` — so a hard crash,
+which skips the disconnect handler entirely, still expires. No scheduler, no
+TTL column, no sweeper: both transitions are computed at read/broadcast time.
 
 Realtime fan-out reuses the in-process ``ws`` room manager on a dedicated
 ``workspace:<id>`` room (every member socket of one workspace), so a status
@@ -44,6 +53,17 @@ PRESENCE_STATUSES = frozenset({"online", "away", "dnd", "offline"})
 #: (the idle→away TTL). Module-level so tests can shorten it deterministically.
 AWAY_AFTER_SECONDS = 300.0
 
+#: An ``online`` row older than this reads as ``offline`` — the safety net for a
+#: hard crash, which never reaches the disconnect handler. Independent of
+#: ``AWAY_AFTER_SECONDS`` so the idle→away test keeps its single knob, and only
+#: *stored* ``online`` decays: a chosen ``away``/``dnd`` never does.
+OFFLINE_AFTER_SECONDS = 1800.0
+
+#: Live presence sockets per ``(workspace_id, user_id)``. Process-local, exactly
+#: like ``ws._ws_rooms`` — correct on the single uvicorn worker this deployment
+#: runs, and a horizontal scale needs a shared store rather than this dict.
+_presence_sockets: dict[tuple[str, str], set] = {}
+
 
 class PresenceIn(BaseModel):
     status: str = Field(..., min_length=1)
@@ -56,12 +76,14 @@ def _naive(dt):
 
 
 def effective_status(row: models.PresenceState | None, now=None) -> str:
-    """Display status: missing row → offline; idle online → away; else stored."""
+    """Display status: no row → offline; idle online → away; stale online → offline."""
     if row is None:
         return "offline"
     if row.status == "online":
-        idle = (now or _utcnow()) - _naive(row.last_seen)
-        if idle.total_seconds() > AWAY_AFTER_SECONDS:
+        idle = ((now or _utcnow()) - _naive(row.last_seen)).total_seconds()
+        if idle > OFFLINE_AFTER_SECONDS:
+            return "offline"
+        if idle > AWAY_AFTER_SECONDS:
             return "away"
     return row.status
 
@@ -192,9 +214,41 @@ async def _set_and_publish(workspace_id: str, user_id: str, status: str, message
     await _publish(workspace_id, out)
 
 
+def _presence_join(workspace_id: str, user_id: str, websocket) -> bool:
+    """Track a socket; True when it is the user's first in this workspace.
+
+    No ``await`` in here or in :func:`_presence_leave`: the 0→1 / 1→0 decision
+    has to be atomic within one event-loop tick, or two concurrent handshakes
+    could each conclude they were first.
+    """
+    key = (workspace_id, user_id)
+    sockets = _presence_sockets.get(key)
+    if sockets is None:
+        sockets = _presence_sockets[key] = set()
+    sockets.add(websocket)
+    return len(sockets) == 1
+
+
+def _presence_leave(workspace_id: str, user_id: str, websocket) -> bool:
+    """Stop tracking a socket; True when the user now holds none.
+
+    Idempotent, and the key is dropped once empty so the dict cannot keep an
+    entry per historical member.
+    """
+    key = (workspace_id, user_id)
+    sockets = _presence_sockets.get(key)
+    if sockets is None:
+        return False
+    sockets.discard(websocket)
+    if sockets:
+        return False
+    del _presence_sockets[key]
+    return True
+
+
 @router.websocket("/ws/workspaces/{workspace_id}/presence")
 async def presence_websocket(websocket: WebSocket, workspace_id: str):
-    """Presence socket: connect→online, frame→keep online/set status, bye→offline.
+    """Presence socket: first connect→online, frame→set status, last bye→offline.
 
     Rejection happens before ``accept()`` so the client sees a documented 4xxx
     close code, matching the channel socket's contract.
@@ -218,8 +272,9 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
     await websocket.accept(subprotocol=subproto or WS_SUBPROTOCOL)
     key = _ws_room_key_workspace(workspace_id)
     _ws_room_join(key, websocket)
-    await _set_and_publish(workspace_id, user["id"], "online")
     try:
+        if _presence_join(workspace_id, user["id"], websocket):
+            await _set_and_publish(workspace_id, user["id"], "online")
         while True:
             raw = await websocket.receive_text()
             status, message = "online", None
@@ -238,4 +293,5 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
         pass
     finally:
         _ws_room_leave(key, websocket)
-        await _set_and_publish(workspace_id, user["id"], "offline")
+        if _presence_leave(workspace_id, user["id"], websocket):
+            await _set_and_publish(workspace_id, user["id"], "offline")

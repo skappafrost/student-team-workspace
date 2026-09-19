@@ -184,3 +184,178 @@ def test_ws_rejects_revoked_session(client):
             w.receive_json()
     # handshake rejects a revoked jti before accept (WS_UNAUTHENTICATED 4401)
     assert exc.value.code == 4401
+
+
+# ---------------------------------------------------------------------------
+# Multi-tab lifecycle: one presence row is shared by every socket a user holds,
+# so ``online`` is written on the FIRST connect and ``offline`` only on the LAST
+# close. Without this, closing any tab marks the user offline while they are
+# still looking at the app.
+# ---------------------------------------------------------------------------
+
+def _presence_url(ws_id, token):
+    return f"/ws/workspaces/{ws_id}/presence?session_token={token}"
+
+
+def _open(client, ws_id, token, sessions):
+    """Enter a WS test session outside a ``with`` block so closes can be ordered.
+
+    Sessions are registered in ``sessions`` and unwound by each test's finally,
+    so a mid-test assertion failure cannot leak a live socket into later tests.
+    """
+    session = client.websocket_connect(_presence_url(ws_id, token))
+    session.__enter__()
+    sessions.append(session)
+    return session
+
+
+def _close(session):
+    session.__exit__(None, None, None)
+
+
+def _sync(session):
+    """Block until ``session``'s task has processed everything queued on it.
+
+    A frame with an unknown status is a pure no-op server-side (it fails the
+    ``PRESENCE_STATUSES`` guard so nothing is written or broadcast) yet still
+    earns a ``pong``, which is what makes it usable as a barrier.
+    """
+    session.send_text(json.dumps({"type": "presence", "status": "sleeping"}))
+    while True:
+        frame = session.receive_json()
+        if frame["type"] == "pong":
+            return
+
+
+def _status_of(client, ws_id, token, user_id):
+    rows = client.get(
+        f"/workspaces/{ws_id}/presence", headers={"Authorization": f"Bearer {token}"}
+    ).json()
+    return next(r["status"] for r in rows if r["user_id"] == user_id)
+
+
+def test_second_socket_close_keeps_user_online(client):
+    ws = _ws(client)
+    actor = _member(client, ws["id"], "actor")
+    sessions = []
+    try:
+        _open(client, ws["id"], actor, sessions)  # first socket -> online
+        second = _open(client, ws["id"], actor, sessions)
+        _close(sessions[0])
+        _sync(second)
+        assert _status_of(client, ws["id"], actor, "actor") == "online"
+    finally:
+        for session in sessions:
+            _close(session)
+
+
+def test_last_socket_close_writes_offline(client):
+    ws = _ws(client)
+    actor = _member(client, ws["id"], "actor")
+    sessions = []
+    try:
+        _open(client, ws["id"], actor, sessions)
+        second = _open(client, ws["id"], actor, sessions)
+        _close(sessions[0])
+        assert _status_of(client, ws["id"], actor, "actor") == "online"
+        _close(second)
+        sessions.remove(second)
+        assert _status_of(client, ws["id"], actor, "actor") == "offline"
+    finally:
+        for session in sessions:
+            _close(session)
+
+
+def test_second_socket_connect_keeps_explicit_status(client):
+    """A second tab must not clobber a status the user chose deliberately."""
+    ws = _ws(client)
+    actor = _member(client, ws["id"], "actor")
+    sessions = []
+    try:
+        _open(client, ws["id"], actor, sessions)
+        client.post(
+            f"/workspaces/{ws['id']}/presence/me",
+            json={"status": "dnd"},
+            headers={"Authorization": f"Bearer {actor}"},
+        )
+        _sync(_open(client, ws["id"], actor, sessions))
+        assert _status_of(client, ws["id"], actor, "actor") == "dnd"
+    finally:
+        for session in sessions:
+            _close(session)
+
+
+def test_no_duplicate_online_broadcast(client):
+    """Frames reach peers in order, so a spurious ``online`` from a second
+    connect would overtake the ``dnd`` broadcast that follows it."""
+    ws = _ws(client)
+    viewer = _member(client, ws["id"], "viewer")
+    actor = _member(client, ws["id"], "actor")
+    sessions = []
+    try:
+        vs = _open(client, ws["id"], viewer, sessions)
+        vs.receive_json()  # viewer's own online (broadcasts include the sender)
+        _open(client, ws["id"], actor, sessions)
+        first = vs.receive_json()
+        assert (first["user_id"], first["status"]) == ("actor", "online")
+        second = _open(client, ws["id"], actor, sessions)
+        second.send_text(json.dumps({"type": "presence", "status": "dnd"}))
+        while True:  # drain the actor's own copies until its pong
+            if second.receive_json()["type"] == "pong":
+                break
+        peer = vs.receive_json()
+        assert (peer["user_id"], peer["status"]) == ("actor", "dnd")
+    finally:
+        for session in sessions:
+            _close(session)
+
+
+def test_presence_socket_registry_freed(client):
+    """The refcount dict must track live sockets and drop the key on the last
+    close, or it grows one entry per historical member forever."""
+    ws = _ws(client)
+    actor = _member(client, ws["id"], "actor")
+    other = _member(client, ws["id"], "other")
+    key = (ws["id"], "actor")
+    session = client.websocket_connect(_presence_url(ws["id"], actor))
+    peer = client.websocket_connect(_presence_url(ws["id"], other))
+    peer.__enter__()
+    try:
+        session.__enter__()
+        assert len(presence._presence_sockets[key]) == 1
+        second = client.websocket_connect(_presence_url(ws["id"], actor))
+        second.__enter__()
+        assert len(presence._presence_sockets[key]) == 2
+        _close(second)
+        assert key in presence._presence_sockets, "a held socket must keep the entry"
+        _close(session)
+    finally:
+        _close(session)
+        _close(peer)
+    assert key not in presence._presence_sockets
+
+
+def test_stale_online_decays_to_offline(client, monkeypatch):
+    """A hard crash skips the socket's finally; read-time decay covers it."""
+    ws = _ws(client)
+    as_user(client, "owner")
+    client.post(f"/workspaces/{ws['id']}/presence/me", json={"status": "online"})
+    monkeypatch.setattr(presence, "OFFLINE_AFTER_SECONDS", -1.0)
+    assert client.get(f"/workspaces/{ws['id']}/presence").json()[0]["status"] == "offline"
+
+
+def test_dnd_never_decays_to_offline(client, monkeypatch):
+    ws = _ws(client)
+    as_user(client, "owner")
+    client.post(f"/workspaces/{ws['id']}/presence/me", json={"status": "dnd"})
+    monkeypatch.setattr(presence, "OFFLINE_AFTER_SECONDS", -1.0)
+    assert client.get(f"/workspaces/{ws['id']}/presence").json()[0]["status"] == "dnd"
+
+
+def test_invalid_status_detail_is_string_form(client):
+    """S6's error handling branches on this; nothing else pinned which of the
+    endpoint's two 422 envelopes a caller gets for a bad enum value."""
+    ws = _ws(client)
+    as_user(client, "owner")
+    r = client.post(f"/workspaces/{ws['id']}/presence/me", json={"status": "sleeping"})
+    assert r.json()["detail"] == "Invalid presence status: sleeping"
