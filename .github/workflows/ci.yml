@@ -126,14 +126,17 @@ jobs:
           python-version: "3.12"
       # playwright.config.ts starts uvicorn itself, so the schema has to exist
       # before it can answer anything. No other job migrates a database: the
-      # backend jobs build their own schema inside pytest fixtures.
+      # backend jobs build their own schema inside pytest fixtures. The venv is
+      # not cosmetic - the config looks for `backend/.venv`, which is what
+      # CONTRIBUTING tells a human to create.
       - name: Prepare backend database
         working-directory: backend
         run: |
-          pip install -r requirements.txt
+          python -m venv .venv
+          .venv/bin/python -m pip install -q -r requirements.txt
           ENVIRONMENT=dev JWT_SECRET_KEY=ci-only-not-a-secret \
             DATABASE_URL=sqlite:///./ci_e2e.db \
-            python -m alembic upgrade head
+            .venv/bin/python -m alembic upgrade head
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
       - name: Install dependencies
