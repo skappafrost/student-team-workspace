@@ -167,7 +167,7 @@ bun run dev:webpack            # → http://localhost:3000
 
 | Variable | Notes |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | **Not in the example file — add manually.** Must be `localhost`, not `127.0.0.1`, or the chat WebSocket never connects (cookies are host-scoped) |
+| `NEXT_PUBLIC_API_URL` | In the example file as `http://localhost:8000`. Must name the **same host the page is served from** — `127.0.0.1` while the app is on `localhost` means the chat WebSocket never connects (cookies are host-scoped) |
 | `NEXT_PUBLIC_SENTRY_*` / `SENTRY_AUTH_TOKEN` | Optional error tracking |
 
 ## Testing

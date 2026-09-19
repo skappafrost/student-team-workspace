@@ -1,0 +1,22 @@
+# Normalize line endings so a Windows clone and a Linux runner agree on the
+# bytes. Without this, `core.autocrlf=true` puts CRLF in the working tree while
+# every committed blob is LF, which makes `oxfmt --write` in lint-staged a
+# silent no-op (it writes LF, git re-normalizes on commit) and turns
+# `oxfmt --check` into a report that ~all files are unformatted when almost
+# none are.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.db binary
+*.sqlite3 binary
+
+# Shipped as-is; reflowing them would break byte-exact fixtures.
+*.patch text eol=lf
+*.snap text eol=lf

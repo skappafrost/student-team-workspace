@@ -4,7 +4,7 @@
 
 1. Backend: `cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt` (Windows; on Linux/macOS use `.venv/bin/pip`)
 2. Apply migrations: `./.venv/Scripts/python -m alembic upgrade head` (from `backend/`; Linux/macOS: `.venv/bin/python`)
-3. Frontend: `cd app && bun install --frozen-lockfile && cp env.example.txt .env.local` — then add `NEXT_PUBLIC_API_URL=http://localhost:8000` to `.env.local` (it is not in the example file; use `localhost`, not `127.0.0.1`, or chat realtime breaks)
+3. Frontend: `cd app && bun install --frozen-lockfile && cp env.example.txt .env.local` — `NEXT_PUBLIC_API_URL` is in the example file and must stay `localhost`, not `127.0.0.1`, or chat realtime breaks (the `session_token` cookie is host-scoped, so the WebSocket upgrade arrives unauthenticated and is refused with 4401 before `accept()`)
 
 Default dev URLs: frontend `http://localhost:3000`, backend `http://localhost:8000` (Swagger at `/docs`).
 
