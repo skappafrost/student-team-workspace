@@ -22,9 +22,6 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 - **IDs**: UUID strings. Timestamps: ISO-8601 UTC.
 The BFF resolves "current workspace" as the first entry of `GET /workspaces` — if you add multi-workspace switching, that resolution is the place to change.
 
-## Changelog
-
-
 ## Endpoint map
 
 ### Auth & account
@@ -35,6 +32,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 | POST | `/auth/login` | Session cookie + tokens |
 | POST | `/auth/logout` | Revokes current session |
 | POST | `/auth/logout-all` | Revokes all sessions (sign out everywhere) |
+| POST | `/auth/refresh` | Exchanges a refresh token for a new access+refresh pair. Refresh tokens are **single-use**: each call rotates the session row and mints a successor in the same rotation family. Replaying an already-rotated token is treated as theft and revokes the **whole family** (every token from that login) with `401`. Expired/malformed/revoked get a plain `401`. Needs a stable `JWT_SECRET_KEY` across restarts, or outstanding tokens fail to decode. |
 | POST | `/auth/ws-ticket` | One-shot WS handshake ticket (TA4-2) |
 | GET | `/auth/me` | Current user |
 | GET | `/users/me/tasks` | My tasks across workspaces; `?due=overdue|today|week|later|none`, `?status=`, `?limit= ?offset=` |
@@ -103,6 +101,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 |---|---|---|
 | GET, POST | `/workspaces/{id}/files` | GET: `?project_id= ?task_id= ?message_id= ?limit= ?offset=`; POST is multipart upload |
 | GET, PATCH, DELETE | `/files/{id}` | File content served from `/uploads/...` |
+| GET | `/uploads/{storage_key}` | Serves the bytes themselves, authenticated: same policy as `GET /files/{id}` — anonymous `401`, non-member `403`, guest `403`, revoked session `401`, unknown key `404`. Replaced the old unauthenticated `StaticFiles` mount, so any LAN peer with a URL can no longer read another workspace's files. |
 
 #### Storage quota (TA2-3)
 
@@ -173,7 +172,7 @@ sees a refused handshake with a documented code (not an ambiguous 1008):
 
 | Code | Meaning |
 |---|---|
-| 4400 | Malformed handshake (bad subprotocol format) |
+| 4400 | Reserved, **never sent today**. `WS_BAD_HANDSHAKE` is defined in `ws.py` and no code path raises it; bad subprotocol formats are simply ignored and the cookie/query credential is used instead. Listed for completeness so a client does not have to guess what it means if it ever appears. |
 | 4401 | No credential, or invalid/expired/revoked token |
 | 4403 | Authenticated but not allowed: not a workspace member, guest role, or no private-channel access |
 | 4404 | Channel does not exist |
@@ -257,9 +256,9 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 ## Changelog
 
-### TA4-1 — message notification fan-out (additive)
+### Contract status: what is actually on `main`
 
-**Landed on `main`** (squash-merged, in the 45-path surface above):
+**Landed on `main`** (squash-merged; every endpoint in the map above exists in the code):
 - **Role matrix + RBAC** (T002, #5) — cross-workspace escalation fixed; `require_permission` map in `authorization.py`.
 - **Private channels** (T012, #8) — real `channel_members` gate on private channels (messages, reactions, WS join).
 - **SQLite FK enforcement** (T014, #9) — `PRAGMA foreign_keys=ON`.
@@ -271,21 +270,36 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 - **Postgres CI** (T4-E2, #88) — `backend-pg` job; SQLite/PG parity enforced.
 - **Audit log** — `GET /workspaces/{id}/audit-log`, admin+, with filters.
 
-**Open `harden/*` PRs** (not yet on `main`; endpoints they add are documented above **only** where the branch is listed as merged — treat the rest as pending):
-- #123 `harden/auth-refresh` — `POST /auth/refresh` with single-use rotation + family invalidation.
-- #124 `harden/jwt-secret-governance` — refuse startup with the default JWT secret outside dev/test.
-- #126 `harden/jti-request-session` — jti revocation routed through the request DB session.
-- #128 `harden/upload-ingress` — sanitize, size cap, allow-list, executable sniffing on uploads.
-- #130 `harden/uploads-read-auth` — authenticated `/uploads` read path.
-- #132 `harden/storage-quota` — per-workspace storage quota at upload time.
-- #134 `harden/like-escape-channels-enum` — LIKE wildcard escaping; channel `type` validated.
-- #138 `harden/message-fanout` — notification fan-out on message create (DM peer, @mentions, thread replies).
-- #148 `harden/nplus1-indexes` — N+1 elimination + FK index plan.
-- #149 `harden/observability` — slow-query logging, 5xx counter, `/readyz` readiness.
-- #159 `harden/pagination-contract` — uniform `limit`/`offset` on list endpoints.
-- `harden/coverage-floor` (TA6-3) — CI runs `pytest --cov` on both DB jobs and enforces a `fail_under` floor; adds regression tests for the RBAC core. Not endpoint-facing. Internal-only note: the unused private helper `authorization._require_min_role_in_workspace` was removed (no callers in the repo, public RBAC surface unchanged).
+**Merged since — the whole hardening wave.** All of these are on `main`; they were listed as "open" here for days after merging, which is exactly how this file lost credibility:
+- #123 `POST /auth/refresh` — single-use rotation + family invalidation.
+- #124 — refuse startup with the default JWT secret outside dev/test.
+- #126 — jti revocation routed through the request DB session.
+- #128 — upload sanitize, size cap, MIME allow-list, executable sniffing.
+- #130 — authenticated `/uploads` read path (row added to the map above).
+- #132 — per-workspace storage quota enforced at upload.
+- #134 — LIKE wildcard escaping; channel `type` enum validation.
+- #138 — notification fan-out on message create (DM peer, @mentions, thread replies).
+- #148 — N+1 elimination + FK indexes.
+- #149 — slow-query logging, 5xx counter, `/readyz`.
+- #159 — uniform `limit`/`offset` pagination contract.
+- #160 — this file regenerated from the live spec, plus `CONTRIBUTING.md` / `PROJECT-STATUS.md`.
+- #161 — WebSocket handshake auth + connection semantics.
+- #162 — SQLite/PostgreSQL dialect parity suite + timezone normalization.
+- #163 — ops maintenance: backup, retention, verification.
+- #164 — repeatable load/perf baseline harness.
+- #174 — CI coverage floor + RBAC edge regression tests.
+- #175 — security regression pack.
+- #185 — restored wiring that squash-merges had silently dropped (backend import, `/auth/refresh`, upload path, message-search escaping) and narrowed the `conftest` exception mask that had been hiding it.
+- #188 — Alembic single head + `PresenceState` model.
 
-**Docs-only regeneration note**: this file was rewritten for main @ bca27ce. When a `harden/*` PR above merges, add its row here and drop it from the open list — that is the whole maintenance burden.
+**Open PRs** — re-check with `gh pr list --state open`; there were 17 at the time of writing and none of them change the contract above: #85 (dependabot shadcn/react), #121 (T020 search), #137 (client-experience program), #176–#184 (T001, T002, T003, T004, T009, T012, T014, T015, T040 re-submitted — their subjects match behaviour already on `main`, verify each against the landed list before closing), #190–#194 (dependabot: fastapi, httpx, uvicorn, typescript 5.7→7.0, react-table 8→9; the last two are major bumps).
+
+**Maintenance rule**: when your PR changes a route, update the map above **in that PR** — the changelog entry is the second half of the change, not a follow-up.
+
+### TA4-1 — message notification fan-out (additive)
+
+`POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py:78`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by the **chat** socket (`routers/channels.py:286` joins the channel room *and* the user room) — so a client only sees `{"type": "notification_created", "notification": NotificationOut}` while it has a channel socket open. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+
 ### TA3-2 — ilike wildcard escaping + channels type validation
 - **Search filters now treat `%` and `_` as literal characters.** `GET /workspaces/{id}/pages?search=`, `GET /channels/{id}/messages?q=` and `GET /workspaces/{id}/audit-log?q=` previously interpolated the raw term into a `%...%` SQL LIKE pattern, so a user searching `50%` also matched `50 dollars` (wildcard `%`) and `A_B` matched `AxB` (wildcard `_`). A shared helper (`backend/query_utils.py`: `escape_like`/`contains_pattern` + `escape=LIKE_ESCAPE`) is now applied at every like/ilike site. Behavior change: searches containing `%`/`_` return exact literal matches on both SQLite and PostgreSQL; plain-text searches are unchanged (still case-insensitive).
 - **`POST /workspaces/{id}/channels` validates `type`** against the enum `general|project|private` at the schema layer — unknown types are rejected with 422 (FastAPI's standard validation error envelope) instead of being stored. Valid payloads and the `general` default are unchanged. (Covered by regression tests in `backend/test_query_escapes.py`.)
