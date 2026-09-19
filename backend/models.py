@@ -93,7 +93,7 @@ class User(Base):
     notifications: Mapped[list[Notification]] = relationship(
         "Notification", back_populates="user", cascade="all, delete-orphan"
     )
-    channel_memberships: Mapped[List["ChannelMember"]] = relationship(
+    channel_memberships: Mapped[list[ChannelMember]] = relationship(
         "ChannelMember", back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -239,8 +239,8 @@ class WorkspaceMember(Base):
         UniqueConstraint('workspace_id', 'user_id', name='uq_workspace_members_workspace_user'),
     )
 
-    workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="members")
-    user: Mapped["User"] = relationship("User", back_populates="memberships")
+    workspace: Mapped[Workspace] = relationship("Workspace", back_populates="members")
+    user: Mapped[User] = relationship("User", back_populates="memberships")
 
 
 # Back-compat alias: routers and earlier tests were written against the
@@ -384,7 +384,7 @@ class Channel(Base):
     messages: Mapped[list[Message]] = relationship(
         "Message", back_populates="channel", cascade="all, delete-orphan"
     )
-    members: Mapped[List["ChannelMember"]] = relationship(
+    members: Mapped[list[ChannelMember]] = relationship(
         "ChannelMember", back_populates="channel", cascade="all, delete-orphan"
     )
 
@@ -411,8 +411,8 @@ class ChannelMember(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    channel: Mapped["Channel"] = relationship("Channel", back_populates="members")
-    user: Mapped["User"] = relationship("User", back_populates="channel_memberships")
+    channel: Mapped[Channel] = relationship("Channel", back_populates="members")
+    user: Mapped[User] = relationship("User", back_populates="channel_memberships")
 
 
 # ---------------------------------------------------------------------------

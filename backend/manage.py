@@ -30,9 +30,10 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from sqlalchemy import func, select
+
 import database
 import models
-from sqlalchemy import func, select
 
 # ---------------------------------------------------------------------------
 # Seed dataset (fixed identities keep seed-demo idempotent)
@@ -79,7 +80,7 @@ def _hash_password(password: str) -> str:
     return get_password_hash(password)
 
 
-def _make_session(db_url: Optional[str]):
+def _make_session(db_url: str | None):
     """Return (engine, Session) honoring --db-url without rebinding globals."""
     from sqlalchemy.orm import sessionmaker
 
@@ -268,7 +269,7 @@ def cmd_reset_password(args: argparse.Namespace) -> int:
         db.close()
 
 
-def _alembic_heads() -> List[str]:
+def _alembic_heads() -> list[str]:
     """Current alembic heads from alembic.ini (no DB connection needed)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
@@ -408,7 +409,7 @@ def cmd_maintenance(args: argparse.Namespace) -> int:
     return maintenance.main(_maintenance_argv("purge-orphans", args))
 
 
-def _maintenance_argv(command: str, args: argparse.Namespace) -> List[str]:
+def _maintenance_argv(command: str, args: argparse.Namespace) -> list[str]:
     """Translate manage.py maintenance flags into maintenance.main() argv."""
     argv = [command]
     if command == "purge-orphans":
@@ -425,7 +426,7 @@ def _maintenance_argv(command: str, args: argparse.Namespace) -> List[str]:
     return argv
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "seed-demo":
         return cmd_seed_demo(args)

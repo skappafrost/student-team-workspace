@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: F401  (re-exported for test
 import logging_mw
 import rate_limit
 from authorization import ROLE_HIERARCHY, Role  # noqa: F401  (re-exported for tests)
+from config import JWT_SECRET_KEY_DEFAULT, settings
 from database import Base, engine, get_db  # noqa: F401  (get_db: test override target)
 from dependencies import (  # noqa: F401  (re-exported for tests and convenience)
     _decode_token,
@@ -43,8 +44,6 @@ from routers import (
     tasks,
     workspaces,
 )
-
-from config import JWT_SECRET_KEY_DEFAULT, settings
 
 
 def _require_production_jwt_secret() -> None:

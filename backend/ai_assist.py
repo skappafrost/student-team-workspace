@@ -13,8 +13,8 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, selectinload
 
-import models
 import channel_access
+import models
 from config import settings
 
 

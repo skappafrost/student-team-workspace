@@ -22,15 +22,15 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from sqlalchemy import inspect
 
 import app as app_module
 import database
 import models
-from sqlalchemy import inspect
-
 import retention
 
 logger = logging.getLogger("maintenance")
@@ -38,8 +38,8 @@ logger = logging.getLogger("maintenance")
 DEFAULT_ORPHAN_AGE_HOURS = 24.0
 POSTGRES_PREFIXES = ("postgres://", "postgresql://", "postgres+")
 
-Report = Dict[str, object]
-Counts = Dict[str, int]
+Report = dict[str, object]
+Counts = dict[str, int]
 
 
 def _is_postgres_url(url: str) -> bool:
@@ -47,15 +47,15 @@ def _is_postgres_url(url: str) -> bool:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _storage_mtime(path: Path) -> datetime:
     """File mtime as a tz-aware UTC datetime."""
-    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
 
 
-def _to_aware(value: Optional[datetime]) -> Optional[datetime]:
+def _to_aware(value: datetime | None) -> datetime | None:
     """Normalize a stored timestamp to tz-aware UTC.
 
     SQLAlchemy's ``DateTime(timezone=True)`` round-trips naive values on
@@ -65,8 +65,8 @@ def _to_aware(value: Optional[datetime]) -> Optional[datetime]:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _summary(report: Report) -> Counts:
@@ -103,8 +103,8 @@ def purge_orphans(
     db,
     upload_dir: Path,
     apply: bool = False,
-    min_age: Optional[timedelta] = None,
-    retention_cutoff: Optional[timedelta] = None,
+    min_age: timedelta | None = None,
+    retention_cutoff: timedelta | None = None,
 ) -> Report:
     """Scan upload state and report (or repair) orphans.
 
@@ -139,8 +139,8 @@ def purge_orphans(
     )
 
     # Phase 2: bytes on disk with no row, older than min_age -> unlink.
-    orphan_files: List[str] = []
-    skipped_fresh_files: List[str] = []
+    orphan_files: list[str] = []
+    skipped_fresh_files: list[str] = []
     for path in sorted(upload_dir.iterdir()):
         if not path.is_file():
             continue
@@ -154,9 +154,9 @@ def purge_orphans(
 
     # Phase 3: retention window over the whole File lifecycle (row + bytes).
     # Disabled by default; only deletes when explicitly armed + apply=True.
-    retention_rows: List[str] = []
-    retention_files: List[str] = []
-    retention_skipped: List[str] = []
+    retention_rows: list[str] = []
+    retention_files: list[str] = []
+    retention_skipped: list[str] = []
     if retention_cutoff is not None:
         cutoff = now - retention_cutoff
         for f in rows:
@@ -168,9 +168,9 @@ def purge_orphans(
                 else:
                     retention_skipped.append(f.id)
 
-    dropped_rows: List[str] = []
-    unlinked_files: List[str] = []
-    unlink_errors: List[Tuple[str, str]] = []
+    dropped_rows: list[str] = []
+    unlinked_files: list[str] = []
+    unlink_errors: list[tuple[str, str]] = []
 
     if apply:
         for file_id, storage_key in missing_bytes_rows:
@@ -352,7 +352,7 @@ def cmd_integrity_check(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m maintenance",
         description="STW backend maintenance tasks.",
