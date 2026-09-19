@@ -1,10 +1,10 @@
 /* eslint-disable no-console, unicorn/consistent-function-scoping */
 // E2E: workspace settings page - invite member, role change, persistence after reload
-// Run: node e2e-workspace-settings.mjs (needs frontend :3000/3001 + backend :8000 up)
+// Run: node e2e-workspace-settings.mjs (manual-only; needs the app on :3000 and backend :8000 up)
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 
-const APP = 'http://localhost:3001';
+const APP = 'http://localhost:3000';
 const BACKEND = 'http://127.0.0.1:8000';
 const results = [];
 const stamp = Date.now();
@@ -101,3 +101,6 @@ fs.writeFileSync(
   'e2e-workspace-settings-result.json',
   JSON.stringify({ when: new Date().toISOString(), pass, total: results.length, results }, null, 2)
 );
+// Manual-only, but it has to be able to fail: without this the run reports
+// success however many steps did.
+process.exitCode = results.some((r) => r.status === 'FAIL') ? 1 : 0;

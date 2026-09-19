@@ -100,8 +100,63 @@ jobs:
         uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      # Scoped to src deliberately. `bun run lint` also walks the manual
+      # app/*.mjs harnesses, whose entire output is console.log, so a repo-wide
+      # --deny-warnings would bury the 294 files a reviewer is responsible for.
+      - name: Lint
+        run: bunx oxlint --deny-warnings src
       - name: Typecheck
         run: bun run typecheck
+      # Also the only step that ever sees Tailwind's emitted CSS, which matters
+      # because v4 drops an unregistered utility silently instead of erroring.
+      - name: Build
+        run: bun run build
+
+  frontend-e2e:
+    needs: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # playwright.config.ts starts uvicorn itself, so the schema has to exist
+      # before it can answer anything. No other job migrates a database: the
+      # backend jobs build their own schema inside pytest fixtures. The venv is
+      # not cosmetic - the config looks for `backend/.venv`, which is what
+      # CONTRIBUTING tells a human to create.
+      - name: Prepare backend database
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -q -r requirements.txt
+          ENVIRONMENT=dev JWT_SECRET_KEY=ci-only-not-a-secret \
+            DATABASE_URL=sqlite:///./ci_e2e.db \
+            .venv/bin/python -m alembic upgrade head
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      # Chromium only. It is the engine whose subprotocol behaviour the RFC 6455
+      # handshake bug turned on, and installing three engines doubles the job.
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: E2E
+        run: bunx playwright test
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          TEST_APP_URL: http://localhost:3000
+          STW_BACKEND_URL: http://localhost:8000
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: app/playwright-report
 
   demo-pack:
     runs-on: ubuntu-latest

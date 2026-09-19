@@ -194,3 +194,6 @@ fs.writeFileSync(
   'e2e-auth-result.json',
   JSON.stringify({ when: new Date().toISOString(), pass, total: results.length, results }, null, 2)
 );
+// Without this the script reports success however many steps failed, and any
+// doc that cites it as a QA gate is describing a run that cannot go red.
+process.exitCode = results.some((r) => r.status === 'FAIL') ? 1 : 0;

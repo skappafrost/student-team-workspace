@@ -64,7 +64,7 @@ export default function AuditLogPage() {
 
   React.useEffect(() => {
     void load(q, targetType);
-  }, [load, targetType]);
+  }, [load, q, targetType]);
 
   return (
     <PageContainer

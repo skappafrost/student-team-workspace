@@ -1,55 +1,40 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const APP_URL = process.env.TEST_APP_URL ?? 'http://localhost:3000';
+import { createWorkspace, openPage, registerUser } from './helpers';
 
-function url(path: string) {
-  return `${APP_URL}${path}`;
-}
+/**
+ * Workspace settings, driven through a real workspace.
+ *
+ * This spec used to assert `Demo Admin` / `Jane Member` — rows from the
+ * `seededMembers` fixture that `app/src/app/api/workspace/members/route.ts`
+ * returns only while the backend is unreachable. Against a live backend with a
+ * freshly registered user it could not pass for two independent reasons: the
+ * fixture rows are not the data on screen, and a user with zero workspaces is
+ * redirected to `/onboarding` by `app/src/app/dashboard/layout.tsx` before the
+ * settings page ever renders.
+ */
+test('owner sees the real member list and can send an invite', async ({ browser }) => {
+  test.setTimeout(180_000);
 
-async function createSession() {
-  const email = `ws_test_${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`;
-  const res = await fetch(`${APP_URL}/api/auth/session`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind: 'register', email, password: 'password123' }),
-    credentials: 'include'
-  });
-  if (!res.ok) throw new Error(`Registration failed: ${res.status}`);
-  const cookies = res.headers.get('set-cookie') ?? '';
-  const match = cookies.match(/session_token=([^;]+)/);
-  if (!match) throw new Error('No session_token cookie');
-  return match[1];
-}
+  const owner = await registerUser('ws-owner');
+  await createWorkspace(owner.token, `settings-${Date.now()}`);
 
-test.describe('workspace settings invite flow', () => {
-  test('renders members list and can send an invite', async ({ browser }) => {
-    const sessionToken = await createSession();
+  const { context, page } = await openPage(browser, owner.token, '/dashboard/settings');
 
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await context.addCookies([
-      { name: 'session_token', value: sessionToken, domain: 'localhost', path: '/' }
-    ]);
+  await expect(page.getByRole('heading', { name: 'Workspace settings' })).toBeVisible();
+  // The owner is a member of the workspace they created, so their own row is
+  // the one this list must contain. The list arrives after a BFF round trip on a
+  // route that may still be compiling, so the 5s expect default is not enough.
+  await expect(page.getByText(owner.email)).toBeVisible({ timeout: 30_000 });
 
-    await page.goto(url('/dashboard/settings'));
-    await page.waitForSelector('text=Workspace settings', { timeout: 10000 });
+  const invited = `invited-${Date.now()}@example.com`;
+  await page.getByPlaceholder('colleague@example.com').fill(invited);
+  await page.locator("button[type='submit']").first().click();
 
-    // Members list is rendered with seeded members
-    await expect(page.locator('text=Demo Admin')).toBeVisible();
-    await expect(page.locator('text=admin@example.com')).toBeVisible();
-    await expect(page.locator('text=Jane Member')).toBeVisible();
+  await expect(page.getByText('Pending invites')).toBeVisible({ timeout: 30_000 });
+  // Scoped to the table row: the address is also in the confirmation toast, so
+  // a bare text locator resolves to two elements.
+  await expect(page.getByRole('row').filter({ hasText: invited })).toBeVisible();
 
-    // Invite a new member
-    const inviteEmail = `invited_${Date.now()}@example.com`;
-    await page.fill("input[type='email']", inviteEmail);
-    await page.click('button[type="submit"]');
-
-    // Pending invites section appears and contains the new email
-    await page.waitForSelector(`text=Pending invites`, { timeout: 5000 });
-    await expect(page.locator('text=Pending invites')).toBeVisible();
-    const pendingInvite = page.locator('table tbody tr td .font-medium', { hasText: inviteEmail });
-    await expect(pendingInvite).toBeVisible();
-
-    await context.close();
-  });
+  await context.close();
 });

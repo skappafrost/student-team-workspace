@@ -69,9 +69,12 @@ test.describe('middleware auth route guard', () => {
       }
     ]);
     await page.goto(url('/auth/sign-in'));
-    // Middleware sees cookie and redirects to dashboard
-    await page.waitForURL(url('/dashboard/overview'), { timeout: 15000 });
-    expect(page.url()).toBe(url('/dashboard/overview'));
+    // Middleware sees the cookie and pushes the visitor out of the auth pages.
+    // A freshly registered account owns no workspace, so the dashboard layout's
+    // first-run rule (`app/src/app/dashboard/layout.tsx`) sends it on to
+    // /onboarding rather than to an empty overview.
+    await page.waitForURL(url('/onboarding'), { timeout: 15000 });
+    expect(page.url()).toBe(url('/onboarding'));
     await context.close();
   });
 
@@ -106,9 +109,11 @@ test.describe('middleware auth route guard', () => {
       }
     ]);
     await authPage.goto(url('/'));
-    // Landing page server-side validates with backend and redirects authenticated users to dashboard
-    await authPage.waitForURL(url('/dashboard/overview'), { timeout: 15000 });
-    expect(authPage.url()).toBe(url('/dashboard/overview'));
+    // Landing page server-side validates with backend and redirects authenticated
+    // users into the app; with no workspace yet, the first-run rule lands them on
+    // /onboarding rather than /dashboard/overview.
+    await authPage.waitForURL(url('/onboarding'), { timeout: 15000 });
+    expect(authPage.url()).toBe(url('/onboarding'));
     await authContext.close();
   });
 });

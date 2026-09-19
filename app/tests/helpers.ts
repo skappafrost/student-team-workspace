@@ -1,0 +1,94 @@
+import { request, type Browser, type Page } from '@playwright/test';
+
+export const APP = process.env.TEST_APP_URL ?? 'http://localhost:3000';
+export const API = process.env.STW_BACKEND_URL ?? 'http://localhost:8000';
+export const PASSWORD = 'password123';
+
+/**
+ * Seeding helpers shared by the specs.
+ *
+ * Fixtures are created through the backend API rather than the BFF because the
+ * BFF resolves "the current workspace" as the first row of `/workspaces`, so a
+ * spec that needs a second member cannot express it through those routes.
+ */
+
+export async function apiPost(
+  pathname: string,
+  body: unknown,
+  token?: string
+): Promise<{ status: number; json: any }> {
+  const ctx = await request.newContext({
+    baseURL: API,
+    extraHTTPHeaders: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+  const res = await ctx.post(pathname, { data: body });
+  const json = await res.json().catch(() => null);
+  await ctx.dispose();
+  return { status: res.status(), json };
+}
+
+export async function registerUser(tag: string): Promise<{ email: string; token: string }> {
+  const email = `${tag}-${Date.now()}@example.com`;
+  const res = await apiPost('/auth/register', { email, password: PASSWORD });
+  if (res.status !== 201) {
+    throw new Error(`register ${tag} failed: ${res.status} ${JSON.stringify(res.json)}`);
+  }
+  return { email, token: res.json.access_token as string };
+}
+
+export async function createWorkspace(token: string, name: string): Promise<string> {
+  const res = await apiPost('/workspaces', { name, slug: name, description: 'x' }, token);
+  if (res.status !== 201) {
+    throw new Error(`workspace failed: ${res.status} ${JSON.stringify(res.json)}`);
+  }
+  return res.json.id as string;
+}
+
+/** Invite `email` and accept it with `memberToken`, ending with a real 2-member workspace. */
+export async function inviteAndAccept(
+  ownerToken: string,
+  workspaceId: string,
+  email: string,
+  memberToken: string
+): Promise<void> {
+  const invite = await apiPost(
+    `/workspaces/${workspaceId}/invites`,
+    { email, role: 'member' },
+    ownerToken
+  );
+  if (invite.status !== 201) {
+    throw new Error(`invite failed: ${invite.status} ${JSON.stringify(invite.json)}`);
+  }
+  const accept = await apiPost('/invites/accept', { token: invite.json.token }, memberToken);
+  if (accept.status !== 201) {
+    throw new Error(`accept failed: ${accept.status} ${JSON.stringify(accept.json)}`);
+  }
+}
+
+/**
+ * A page that is already signed in as `token`.
+ *
+ * The cookie is written for the page's own hostname on purpose: `session_token`
+ * is SameSite=Lax and host-scoped, so a page served from `localhost` with a
+ * socket aimed at `127.0.0.1` authenticates as nobody.
+ */
+export async function openPage(
+  browser: Browser,
+  token: string,
+  path: string
+): Promise<{ context: import('@playwright/test').BrowserContext; page: Page }> {
+  const context = await browser.newContext();
+  await context.addCookies([
+    {
+      name: 'session_token',
+      value: token,
+      domain: new URL(APP).hostname,
+      path: '/',
+      httpOnly: true,
+      sameSite: 'Lax'
+    }
+  ]);
+  const page = await context.newPage();
+  await page.goto(`${APP}${path}`);
+  return { context, page };
+}

@@ -297,9 +297,13 @@ try {
   };
   fs.writeFileSync('e2e-w3-result.json', JSON.stringify(report, null, 2));
   console.log(`\n===== W3 QA: ${pass}/${results.length} passed, ${fail} failed =====`);
+  // A 12/12 transcript that exits 0 whatever happens is not a gate.
+  // `exitCode` rather than `process.exit()` so the `finally` still closes the browser.
+  process.exitCode = fail > 0 ? 1 : 0;
 } catch (err) {
   console.error('W3 QA crashed:', err);
   fs.writeFileSync('e2e-w3-result.json', JSON.stringify({ error: String(err), results }, null, 2));
+  process.exitCode = 1;
 } finally {
   await browser.close();
 }
