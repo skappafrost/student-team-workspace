@@ -14,7 +14,10 @@ psycopg2-binary>=2.9.9
 requests>=2.34.2
 
 # Dev tooling
-ruff>=0.6.0
+# Pinned exactly on purpose: CI gates `ruff check .`, and a floating version
+# would let a ruff release add rules and turn the gate red with no code change.
+# Bump it deliberately, in its own PR, with `ruff check .` green locally first.
+ruff==0.16.7
 # Coverage measurement (TA6-3): CI runs pytest with --cov; the floor is
 # enforced via [tool.coverage.report] fail_under in pyproject.toml.
 pytest-cov>=4.1.0
