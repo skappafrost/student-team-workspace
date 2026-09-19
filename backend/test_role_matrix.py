@@ -12,7 +12,6 @@ Covers privilege escalation attempts (member calling admin-only route, guest POS
 import os
 import uuid
 from datetime import timedelta
-from typing import Optional
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,7 +25,7 @@ from conftest import make_user
 # JWT helper for real-token negative tests
 # ---------------------------------------------------------------------------
 
-def _jwt_auth_client(user_id: str, expires_delta: Optional[timedelta] = None) -> TestClient:
+def _jwt_auth_client(user_id: str, expires_delta: timedelta | None = None) -> TestClient:
     """Return a TestClient authenticated with a real JWT for ``user_id``."""
     client = TestClient(app)
     token = create_access_token(user_id, expires_delta=expires_delta)
@@ -354,8 +353,8 @@ class TestRoleMatrix:
 
         # Pre-create reusable resources; each role gets fresh copies so that
         # destructive operations (DELETE member/invite) do not interfere.
-        invite_id: Optional[str] = None
-        user_id: Optional[str] = None
+        invite_id: str | None = None
+        user_id: str | None = None
         needs_target_user = "{user_id}" in path or (method == "POST" and "transfer-ownership" in path)
         if "{invite_id}" in path:
             invite_id = _create_test_invite(owner.client, ws_id)

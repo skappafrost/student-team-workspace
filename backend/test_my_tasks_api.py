@@ -62,7 +62,7 @@ def _setup(client, db_session):
 def _add_task(client, proj_id, title, due_in_days=None, assignee="u1"):
     payload = {"title": title, "assignee_id": assignee}
     if due_in_days is not None:
-        due = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=due_in_days)
+        due = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=due_in_days)
         payload["due_at"] = due.isoformat()
     resp = client.post(f"/projects/{proj_id}/tasks", json=payload)
     assert resp.status_code == 201, resp.text
@@ -89,7 +89,7 @@ def test_my_tasks_due_buckets(client, db_session):
     _add_task(client, proj["id"], "overdue", due_in_days=-1)
     # "today" = later today; clamp to 23:59:59 so runs near midnight don't
     # roll the task into tomorrow and flake the bucket.
-    _now = datetime.datetime.now(datetime.timezone.utc)
+    _now = datetime.datetime.now(datetime.UTC)
     today_due = min(
         _now + datetime.timedelta(hours=2),
         _now.replace(hour=23, minute=59, second=59, microsecond=0),
@@ -139,6 +139,6 @@ def test_due_at_roundtrip_on_create_and_update(client, db_session):
     t = _add_task(client, proj["id"], "x", due_in_days=5)
     assert t["due_at"] is not None
 
-    new_due = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=10)).isoformat()
+    new_due = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=10)).isoformat()
     updated = client.patch(f"/tasks/{t['id']}", json={"due_at": new_due}).json()
     assert updated["due_at"][:10] == new_due[:10]

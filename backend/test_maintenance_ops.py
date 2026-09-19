@@ -96,7 +96,7 @@ def add_file_row(db, file_id: str, storage_key: str, age_days: float | None = No
     make_user(db, "user-1")
     created = None
     if age_days is not None:
-        created = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age_days)
+        created = dt.datetime.now(dt.UTC) - dt.timedelta(days=age_days)
         created = created.replace(tzinfo=None)  # stored naive on SQLite
     db.add(
         models.File(
@@ -399,7 +399,7 @@ def add_file_row_cli(db_url, file_id: str, storage_key: str, age_days: float | N
         make_user(db, "user-1")
         created = None
         if age_days is not None:
-            created = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age_days)).replace(tzinfo=None)
+            created = (dt.datetime.now(dt.UTC) - dt.timedelta(days=age_days)).replace(tzinfo=None)
         db.add(models.File(
             id=file_id, workspace_id="ws-1", uploader_id="user-1",
             original_name=storage_key, storage_key=storage_key,
