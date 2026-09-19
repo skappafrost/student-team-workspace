@@ -5,8 +5,6 @@
 **One workspace for student teams — chat, kanban, wiki, files, calendar and deadlines, connected by a shared activity graph.**
 
 [![CI](https://github.com/skappafrost/student-team-workspace/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/skappafrost/student-team-workspace/actions/workflows/ci.yml)
-[![Backend tests](https://img.shields.io/badge/backend%20pytest-408%20passing-brightgreen)](#testing)
-[![Frontend](https://img.shields.io/badge/frontend-tsc%20%7C%20oxlint%20%7C%20playwright-brightgreen)](#testing)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
 *Built by a student team, with AI agents as teammates — Hermes Agent multi-agent kanban + Claude Code pair-programming. Every visual is sourced, never native-designed (see [Zero Native Design Rule](#zero-native-design-rule)).*
@@ -121,10 +119,10 @@ stw/
 │   ├── ws.py                   # in-process room manager
 │   ├── services.py             # notify() + log_activity() entry points
 │   ├── rate_limit.py           # sliding-window limiter + middleware
-│   └── test_*.py               # 32 test files · 408 tests
+│   └── test_*.py               # 55 test files · 757 tests
 ├── scripts/demo-packs/         # CI-validated demo data
 ├── docs/                       # API reference, contributing, release checklist
-├── .github/workflows/ci.yml    # 4 jobs: backend · backend-pg · frontend · demo-pack
+├── .github/workflows/ci.yml    # CI jobs — see § Testing
 └── Makefile                    # dev · test · seed
 ```
 
@@ -175,46 +173,53 @@ bun run dev:webpack            # → http://localhost:3000
 ## Testing
 
 ```bash
-# Backend — 408 tests, runs identically on SQLite and PostgreSQL
+# Backend — 757 tests, runs identically on SQLite and PostgreSQL
 cd backend && ./.venv/Scripts/python -m pytest -q
 
 # Migrations — exactly one head expected
 cd backend && ./.venv/Scripts/python -m alembic heads
 
 # Frontend
-cd app && bun run test          # Vitest (unit + component)
-cd app && bun run typecheck     # tsc --noEmit
-cd app && bun run lint          # oxlint
-cd app && bun run audit:themes  # WCAG AA contrast gate (all 11 themes)
-cd app && bun run test:e2e      # Playwright golden paths (needs :3000 + :8000)
-cd app && bun run qa:evidence   # capture all surfaces, light + dark
+cd app && bun run typecheck     # tsc --noEmit   (the only frontend job CI runs)
+cd app && bun run lint          # oxlint        (local only — not in CI)
+cd app && bun run lint:strict   # oxlint --deny-warnings
+cd app && bun run format:check  # oxfmt
+cd app && bun run build         # webpack build
+cd app && bun run gen:api       # regenerate src/types/api.d.ts from /openapi.json
+
+# Browser evidence (ad-hoc scripts, not a CI suite)
+cd app && node e2e-auth-flow.mjs
+cd app && node e2e-notifications.mjs
 ```
 
-CI enforces four jobs on every push and PR: `backend` (SQLite) · `backend-pg` (Postgres 16) · `frontend` (typecheck) · `demo-pack`. All four green before review.
+> There is **no automated frontend test suite**: no Vitest, no component tests, and Playwright is a devDependency with two specs in `app/tests/` that nothing runs in CI. Verification here is `typecheck` + `build` plus the manual `e2e-*.mjs` / `qa-*.ts` scripts whose screenshots land in `app/qa-evidence/`. Don't claim a frontend behavior is tested unless one of those scripts proves it.
+
+CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — currently `backend` (SQLite), `backend-pg` (Postgres 16), `frontend` (typecheck) and `demo-pack`; the pending lint PR adds `ruff`. All green before review.
 
 > **SQLite/Postgres parity is mandatory.** A migration that renders valid DDL on one engine can be invalid on the other (a boolean `server_default` must be `sa.false()` / `"false"`, not `sa.text("0")` — Postgres rejects an unquoted integer default on a boolean column). The `backend-pg` job is the safety net; local SQLite-only pytest does not catch this.
 
 ## Project status
 
-**v0.9 — platform complete, hardening lane in flight.** All core features shipped; the current sprint is a dedicated security/reliability pass (`harden/*` branch family) plus a client-experience program.
+**v0.9 — platform complete.** All core features shipped and the security/reliability pass (`harden/*`, #123–#175) has landed; the live lane is realtime presence (`feat/rt-*`).
 
 | Area | Status | Evidence |
 |---|---|---|
-| Feature surface | ✅ all core modules shipped | 57 endpoints · 19 models · 14 client features |
-| Backend suite | ✅ 408 passing, 0 failing | `pytest -q` on SQLite + Postgres |
-| Client tests | ✅ Vitest 8/8 · Playwright golden paths | `bun run test` / `test:e2e` |
-| Alembic | ✅ single head | `alembic heads` |
+| Feature surface | ✅ all core modules shipped | 51 HTTP paths · 2 WebSocket routes · 20 mapped tables · 15 backend routers (recount: walk `app.routes` after `import app`) |
+| Backend suite | ✅ 757 passing, 0 failing | `pytest -q` on SQLite; same suite on Postgres 16 in CI |
+| Client tests | 🔶 **no automated suite** | CI runs `typecheck` only — no lint, build or tests; 2 Playwright specs exist but nothing runs them; verification is the manual `e2e-*.mjs` scripts |
+| Alembic | ✅ single head `prs01_presence_state` | `alembic heads`; `/readyz` 503s if it ever splits |
 | Type check | ✅ clean | `tsc --noEmit` |
-| Contrast | ✅ WCAG AA on all 11 themes | `bun run audit:themes` |
-| Realtime | 🔶 single-process rooms only | no cross-worker fan-out yet |
-| Storage | 🔶 ingress + quota in review PRs | authenticated read path pending merge |
+| Backend lint | 🔶 0 errors locally, **not yet gated in CI** | `ruff check .` from `backend/` — gate pending in `harden/ruff-debt-and-gate` |
+| Contrast | 🔶 manual only | light/dark screenshots in `app/qa-evidence/`; no automated WCAG gate exists |
+| Realtime | 🔶 single-process rooms + presence refcount, both in-memory | no cross-worker fan-out; one uvicorn worker |
+| Storage | ✅ ingress hardening + quota + authenticated read path | #128, #130, #132 merged |
 | AI assist | 🔶 provider-pluggable, offline fallback | no LLM wired yet |
 
-**In flight (open PRs):** auth refresh + rotation (#123) · JWT secret governance (#124) · jti request session (#126) · upload ingress hardening (#128) · authenticated `/uploads` (#130) · storage quota (#132) · LIKE escape + enum docs (#134) · message→notification fan-out (#138) · pagination contract (#159) · WebSocket auth (#161) · docs rewrite (#160) · client-experience program (#137, changes requested).
+**In flight (open PRs):** the accurate list is in [`PROJECT-STATUS.md` §5](PROJECT-STATUS.md) and comes from `gh pr list --state open` — 17 at 19/09/2026, mostly stale T00x rehashes (#176–#184, safe to close) and Dependabot bumps (#193 TypeScript 7 and #194 react-table 9 are **major**). The client-experience program is #137.
 
 ## Roadmap
 
-- [ ] **Realtime communication platform** — live presence, free audio/video calls, screen sharing, provider-agnostic signaling (`transport interface` boundary, no provider lock-in)
+- [ ] **Realtime communication platform** — ✅ live presence shipped server-side (#188, #189); **S6 presence UI is open**, and free audio/video calls, screen sharing and provider-agnostic signaling (`transport interface` boundary, no provider lock-in) are not started
 - [ ] **Storage provider abstraction** — swap local `/uploads` for S3-compatible or Google Drive via a provider interface
 - [ ] **Cloud deploy** — Vercel (frontend) + Neon/Supabase (Postgres) + Render/Fly (FastAPI)
 - [ ] **Real LLM provider** for AI search/summarize (interface already in place)
