@@ -241,7 +241,8 @@ async def mint_ws_ticket(current_user: dict = Depends(get_current_user)):
     Offer the returned value as the ``Sec-WebSocket-Protocol`` header so the
     credential never appears in a URL or access log. See docs/API.md.
     """
-    from dependencies import WS_SUBPROTOCOL, _ws_ticket_is_enabled, create_ws_ticket
+    from dependencies import _ws_ticket_is_enabled, create_ws_ticket
+    from ws import WS_SUBPROTOCOL
 
     if not _ws_ticket_is_enabled():
         # Dev/test: tickets are disabled and the WS endpoint authenticates

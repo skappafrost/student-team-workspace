@@ -240,7 +240,7 @@ def test_ws_broadcast_prunes_dead_socket(client):
 
         original = ws_mod._ws_send_safe
 
-        async def _boom(ws_, message):
+        async def _boom(ws_, message, room_key):
             # Emulate a socket whose send raises: the real helper catches the
             # error and returns False, which is what triggers pruning.
             return False

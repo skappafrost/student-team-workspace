@@ -37,6 +37,8 @@ WS_BAD_HANDSHAKE = 4400  # malformed upgrade (bad subprotocol format)
 # A raw browser ``new WebSocket(url)`` sends no subprotocol; the backend
 # therefore still accepts the session_token cookie/query fallback, but a
 # client that wants the negotiated path offers ``stw-ws`` explicitly.
+# A reply may only ever name a string the client offered — see
+# :func:`_ws_negotiate_subprotocol`.
 WS_SUBPROTOCOL = "stw-ws"
 
 
@@ -59,12 +61,19 @@ def _ws_room_size(room_key: str) -> int:
     return len(_ws_rooms.get(room_key, ()))
 
 
-async def _ws_send_safe(websocket, message: str) -> bool:
-    """Send one frame; return False if the socket is gone."""
+async def _ws_send_safe(websocket, message: str, room_key: str) -> bool:
+    """Send one frame; return False if the socket is gone.
+
+    The failure is logged because a silently-swallowed exception here was how
+    every browser socket in this app died: the handshake got far enough to join
+    a room, the first send raised, and a broadcast reported ``delivered=0``
+    while the room still looked populated.
+    """
     try:
         await websocket.send_text(message)
         return True
-    except Exception:  # noqa: BLE001 - any send failure means dead socket
+    except Exception as exc:  # noqa: BLE001 - any send failure means dead socket
+        logger.warning("ws send failed; dropping socket from room=%s: %s", room_key, exc)
         return False
 
 
@@ -84,7 +93,7 @@ async def _ws_broadcast(room_key: str, payload: dict[str, Any], exclude=None) ->
     for ws in list(room):
         if exclude is not None and ws is exclude:
             continue
-        if await _ws_send_safe(ws, message):
+        if await _ws_send_safe(ws, message, room_key):
             delivered += 1
         else:
             dead.append(ws)
@@ -158,18 +167,27 @@ def _ws_ticket_subprotocol(ticket: str) -> str:
     return f"{WS_SUBPROTOCOL}.{ticket}" if ticket else WS_SUBPROTOCOL
 
 
-def _ws_parse_ticket(header_value: str | None) -> str | None:
-    """Extract the ticket from a ``Sec-WebSocket-Protocol`` header value.
+def _ws_negotiate_subprotocol(header_value: str | None) -> tuple[str | None, str | None]:
+    """``(ticket, candidate_to_echo)`` for a ``Sec-WebSocket-Protocol`` header.
 
-    Returns None when the client did not offer our subprotocol (the cookie
-    / query fallback still applies) or the value is malformed.
+    The second element is the client's *verbatim* offered string, which is the
+    only thing the server may name in its reply: RFC 6455 §4.1 step 6 makes a
+    browser fail the handshake when ``Sec-WebSocket-Protocol`` names a protocol
+    it did not offer. Neither Starlette's ``accept()`` nor uvicorn checks this
+    (uvicorn's ``websockets_impl.process_subprotocol`` deliberately echoes
+    whatever the app sent), so the endpoint has to get it right itself.
+
+    Returns ``(None, None)`` when the client offered nothing we support — the
+    raw ``new WebSocket(url)`` browser case — in which case the server must
+    send no ``Sec-WebSocket-Protocol`` header at all.
     """
     if not header_value:
-        return None
+        return (None, None)
     for candidate in (c.strip() for c in header_value.split(",")):
         if candidate == WS_SUBPROTOCOL:
-            return ""
+            return ("", candidate)
         if candidate.startswith(WS_SUBPROTOCOL + "."):
             ticket = candidate[len(WS_SUBPROTOCOL) + 1 :]
-            return ticket or None
-    return None
+            if ticket:
+                return (ticket, candidate)
+    return (None, None)

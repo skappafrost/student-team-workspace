@@ -24,7 +24,6 @@ from dependencies import (
 from ws import (
     WS_FORBIDDEN,
     WS_NOT_FOUND,
-    WS_SUBPROTOCOL,
     _ws_broadcast_channel,
     _ws_room_join,
     _ws_room_key_channel,
@@ -278,7 +277,7 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
     finally:
         db.close()
 
-    await websocket.accept(subprotocol=subproto or WS_SUBPROTOCOL)
+    await websocket.accept(subprotocol=subproto)
 
     chan_key = _ws_room_key_channel(channel_id)
     user_key = _ws_room_key_user(user["id"])

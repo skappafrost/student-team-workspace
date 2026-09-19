@@ -18,9 +18,8 @@ import models
 from config import settings
 from database import get_db
 from ws import (
-    WS_SUBPROTOCOL,
     WS_UNAUTHENTICATED,
-    _ws_parse_ticket,
+    _ws_negotiate_subprotocol,
 )
 
 ALGORITHM = "HS256"
@@ -467,11 +466,15 @@ def _ws_resolve_user(websocket, db) -> tuple[dict | None, int | None, str | None
     BEFORE ``websocket.accept()``, so the client sees a refused upgrade
     carrying a documented 4xxx code instead of a session that opens then
     immediately dies with an ambiguous 1008.
+
+    ``accepted_subprotocol`` is the string the client actually offered, or
+    ``None`` when it offered none (the browser case). Callers must pass it to
+    ``accept()`` unchanged: naming anything else makes the browser fail the
+    handshake per RFC 6455 §4.1 step 6.
     """
     from authorization import Role
 
-    raw_subprotocol = websocket.headers.get("sec-websocket-protocol")
-    ticket = _ws_parse_ticket(raw_subprotocol)
+    ticket, offered = _ws_negotiate_subprotocol(websocket.headers.get("sec-websocket-protocol"))
     ticket_user_id = _user_from_ws_ticket(ticket)
     if ticket_user_id is not None:
         # Ticket path: the REST mint call already proved the JWT. The ticket
@@ -480,7 +483,7 @@ def _ws_resolve_user(websocket, db) -> tuple[dict | None, int | None, str | None
             {"id": ticket_user_id, "name": "", "email": "", "role": Role.MEMBER.value},
             None,
             None,
-            WS_SUBPROTOCOL,
+            offered,
         )
 
     token = _token_from_cookies(websocket.cookies) or _token_from_query(
@@ -492,7 +495,7 @@ def _ws_resolve_user(websocket, db) -> tuple[dict | None, int | None, str | None
         user = _ws_user_from_token(token, db)
     except HTTPException:
         return (None, WS_UNAUTHENTICATED, "Invalid session_token", None)
-    return (user, None, None, None)
+    return (user, None, None, offered)
 
 
 # ---------------------------------------------------------------------------
