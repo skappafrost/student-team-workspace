@@ -711,21 +711,30 @@ class TestAuthEdges:
             )
 
     def test_refresh_token_rotation_and_replay(self, client, db_session):
-        """Delta vs PR #123: rotation + replay detection is NOT on main yet.
+        """#123 landed: /auth/refresh now rotates and detects replay (TA1-1).
 
-        On main, ``create_refresh_token`` is stateless (no /auth/refresh
-        endpoint exists, no family id, no replay detection). This test pins
-        the CURRENT main behavior: a refresh token is a bearer secret that
-        cannot be redeemed for a new access token at all (404 on the missing
-        endpoint). When #123 lands, replace this test with the replay
-        assertion (old refresh token must be invalidated after rotation).
+        This delta test originally pinned main's pre-#123 behavior (404 — no
+        endpoint). As its own note directed, once rotation landed it becomes a
+        replay assertion: refreshing a real session rotates the pair, and
+        replaying the already-rotated refresh token is rejected (single-use,
+        family kill). Full rotation/replay coverage lives in
+        test_auth_refresh.py; this asserts the auth edge holds here too.
         """
-        from dependencies import create_refresh_token
+        from dependencies import create_session_pair
 
         make_user(db_session, "rotuser")
-        refresh = create_refresh_token("rotuser")
-        r = client.post("/auth/refresh", json={"refresh_token": refresh})
-        assert r.status_code == 404
+        _access, refresh = create_session_pair("rotuser", db_session)
+        db_session.commit()
+
+        first = client.post("/auth/refresh", json={"refresh_token": refresh})
+        assert first.status_code == 200, first.text
+        rotated = first.json()["refresh_token"]
+        assert rotated != refresh
+
+        # Replay the already-rotated original: rejected (reuse = theft signal).
+        assert client.post("/auth/refresh", json={"refresh_token": refresh}).status_code == 401
+        # Family kill: the rotated successor is dead too.
+        assert client.post("/auth/refresh", json={"refresh_token": rotated}).status_code == 401
 
     def test_test_auth_bypass_disabled_by_default(self, client, db_session):
         """The X-Test-User-* header bypass must stay OFF without STW_TEST_AUTH=1."""

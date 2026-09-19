@@ -13,6 +13,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from jose import JWTError
 from sqlalchemy.orm import sessionmaker
 
 # Use a file-based SQLite database for tests - it survives across connections.
@@ -151,8 +152,12 @@ class _EnsuringClient(TestClient):
                             display_name=uid,
                         ))
                         self._db.commit()
-                except Exception:
-                    pass  # malformed/expired token: let the app answer 401
+                except JWTError:
+                    # Malformed/expired token: let the app itself answer 401.
+                    # (Narrow on purpose: a blanket ``except Exception`` here
+                    # previously masked an import/signature regression in the
+                    # auth path and kept the suite falsely green.)
+                    pass
         return super().request(method, url, **kwargs)
 
 
