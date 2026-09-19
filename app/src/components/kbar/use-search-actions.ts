@@ -9,6 +9,10 @@ import { searchPages } from '@/features/wiki/api/service';
 
 export const SEARCH_CAP = 20;
 
+// Shared identity for the cleared state, so "already empty" can return the
+// same object instead of a fresh one.
+const EMPTY_RESULTS: { actions: Action[]; capped: boolean } = { actions: [], capped: false };
+
 const relativeTime = (iso?: string): string => {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
@@ -34,10 +38,24 @@ export function useSearchActions(routerPush: (url: string) => void) {
     capped: false
   });
 
+  // The caller passes an inline arrow (`(url) => router.push(url)`), so the
+  // function identity changes on every render. Keeping it in a ref takes it out
+  // of the dependency list, where it made this effect re-run on every render.
+  const pushRef = React.useRef(routerPush);
+  React.useEffect(() => {
+    pushRef.current = routerPush;
+  }, [routerPush]);
+
   React.useEffect(() => {
     const query = searchQuery.trim();
     if (query.length < 2) {
-      setResults({ actions: [], capped: false });
+      // Reset only when there is something to reset. Returning `prev` keeps the
+      // identity stable, so the setState cannot re-render the component that is
+      // already in this effect — that cycle (fresh object every run + the
+      // unstable `routerPush` dep this hook now neutralises) was producing
+      // React's "Maximum update depth exceeded" loop, ~6000 warnings per
+      // dev-server session.
+      setResults((prev) => (prev.actions.length === 0 && !prev.capped ? prev : EMPTY_RESULTS));
       return;
     }
 
@@ -60,7 +78,7 @@ export function useSearchActions(routerPush: (url: string) => void) {
           section: 'Tasks',
           subtitle: `${t.project_name} · ${relativeTime(t.updated_at)}`,
           icon: React.createElement(Icons.kanban, { className: 'h-4 w-4' }),
-          perform: () => routerPush('/dashboard/kanban')
+          perform: () => pushRef.current('/dashboard/kanban')
         }));
       const projectActions: Action[] = projects
         .filter((p) => p.name.toLowerCase().includes(lower))
@@ -71,7 +89,7 @@ export function useSearchActions(routerPush: (url: string) => void) {
           section: 'Projects',
           subtitle: `Project · ${relativeTime(p.updated_at)}`,
           icon: React.createElement(Icons.dashboard, { className: 'h-4 w-4' }),
-          perform: () => routerPush(`/dashboard/kanban?project=${p.id}`)
+          perform: () => pushRef.current(`/dashboard/kanban?project=${p.id}`)
         }));
       const pageActions: Action[] = pages.map((p) => ({
         id: `search-page-${p.id}`,
@@ -80,7 +98,7 @@ export function useSearchActions(routerPush: (url: string) => void) {
         section: 'Wiki',
         subtitle: 'Wiki page',
         icon: React.createElement(Icons.page, { className: 'h-4 w-4' }),
-        perform: () => routerPush('/dashboard/wiki')
+        perform: () => pushRef.current('/dashboard/wiki')
       }));
 
       const all = [...taskActions, ...projectActions, ...pageActions];
@@ -91,7 +109,7 @@ export function useSearchActions(routerPush: (url: string) => void) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [searchQuery, routerPush]);
+  }, [searchQuery]);
 
   useRegisterActions(results.actions, [results.actions]);
 
