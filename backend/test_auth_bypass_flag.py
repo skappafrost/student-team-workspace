@@ -6,8 +6,6 @@ toggle ``STW_TEST_AUTH``; every other test in the suite authenticates with real
 JWTs (see conftest.py).
 """
 
-import pytest
-from fastapi.testclient import TestClient
 
 
 def test_bypass_off_without_flag_returns_401(client, monkeypatch):

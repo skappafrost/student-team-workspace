@@ -9,19 +9,18 @@ an unauthenticated case. Tests hit every guarded endpoint asserting:
 Covers privilege escalation attempts (member calling admin-only route, guest POST).
 """
 
-import pytest
 import os
 import uuid
 from datetime import timedelta
 from typing import Optional
-from fastapi.testclient import TestClient
-from app import app, Role, ROLE_HIERARCHY, create_access_token, Base, _utcnow
-from conftest import make_user
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from starlette.websockets import WebSocketDisconnect
-import models  # noqa: F401  -- ensures all model tables are registered on Base.metadata
 
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+import models  # noqa: F401  -- ensures all model tables are registered on Base.metadata
+from app import ROLE_HIERARCHY, Role, _utcnow, app, create_access_token
+from conftest import make_user
 
 # ---------------------------------------------------------------------------
 # JWT helper for real-token negative tests
@@ -57,6 +56,7 @@ class RoleUser:
         # For unauthenticated users, return a completely fresh client
         if self.role is None:
             from fastapi.testclient import TestClient
+
             from app import app
             fresh_client = TestClient(app)
             return fresh_client

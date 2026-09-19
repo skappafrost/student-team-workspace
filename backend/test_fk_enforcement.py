@@ -10,12 +10,12 @@ so raw/bulk deletes and inserts are integrity-checked exactly like prod
 import os
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 import database
-from database import Base
 import models  # noqa: F401  - registers all models on Base.metadata
+from database import Base
 
 
 def _uses_postgres() -> bool:

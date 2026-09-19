@@ -17,9 +17,7 @@ shared ``testclient``-IP / ``owner`` buckets used by the rest of the suite.
 """
 
 import io
-import re
 import uuid
-from pathlib import Path
 
 import pytest
 from starlette.requests import Request

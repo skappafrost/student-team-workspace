@@ -28,12 +28,13 @@ from __future__ import annotations
 
 import gc
 
+from sqlalchemy.orm import sessionmaker
+
 import database
 import manage
 import models
 from app import verify_password
 from database import Base
-from sqlalchemy.orm import sessionmaker
 
 SEED_EMAILS = ("demo-owner@example.com", "demo-member@example.com")
 VALID_OLD_PASSWORD = "old-password-123"

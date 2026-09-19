@@ -1,12 +1,10 @@
 import datetime
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app import app, Role, _utcnow
-from conftest import as_user, clear_auth
-from models import Workspace, WorkspaceInvite, WorkspaceMembership
-
+from app import Role, _utcnow
+from conftest import as_user
+from models import WorkspaceInvite
 
 # ---------------------------------------------------------------------------
 # Auth helpers (shared, real-JWT based — see conftest.py)

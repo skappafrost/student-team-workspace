@@ -1,11 +1,8 @@
 """Tests for AI-assist endpoints (deterministic fallback, no LLM key)."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app import app, Role
 from conftest import as_user, clear_auth
-
 
 # ---------------------------------------------------------------------------
 # Auth helpers (shared, real-JWT based — see conftest.py)

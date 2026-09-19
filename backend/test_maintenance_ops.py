@@ -27,7 +27,6 @@ import retention
 from conftest import make_user
 from database import Base
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (mirror test_maintenance.py's isolation contract: local engines only)
 # ---------------------------------------------------------------------------

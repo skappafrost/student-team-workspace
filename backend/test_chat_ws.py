@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app import app
 from conftest import as_user
 
 

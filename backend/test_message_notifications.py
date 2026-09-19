@@ -11,11 +11,9 @@ one message is notified exactly once), and unread counters (GET
 /notifications?unread_only=true) reflect the new notifications.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 
 from conftest import as_user, make_user
-
 
 # ---------------------------------------------------------------------------
 # Helpers

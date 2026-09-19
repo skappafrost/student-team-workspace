@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import Base, Role, app, create_access_token
-from models import User, WorkspaceMembership
+from models import User
 
 
 @pytest.fixture(scope="function")

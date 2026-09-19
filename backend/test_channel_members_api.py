@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.websockets import WebSocketDisconnect
 
-from app import app, Role, Base
+from app import Base, Role, app
 from database import get_db, set_db_url
 from models import User
 

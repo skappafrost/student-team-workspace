@@ -1,14 +1,8 @@
 """Tests for Notification CRUD endpoints."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app import app, Role
 from conftest import as_user, make_user
-
-
-
-
 
 # ---------------------------------------------------------------------------
 # Auth helpers
