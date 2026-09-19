@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_PACK = HERE / "busy-workspace.json"
@@ -56,7 +57,7 @@ def api(method: str, url: str, token: str | None = None,
         return exc.code, parsed
 
 
-def fail(msg: str) -> "NoReturn":  # type: ignore[name-defined]
+def fail(msg: str) -> NoReturn:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(1)
 

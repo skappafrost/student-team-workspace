@@ -233,8 +233,8 @@ def cmd_create_user(args: argparse.Namespace) -> int:
         try:
             hashed = _hash_password(args.password)
         except Exception as exc:
-            detail = getattr(getattr(exc, "detail", None), "__str__", lambda: str(exc))()
-            print(f"invalid password: {detail}", file=sys.stderr)
+            detail = getattr(exc, "detail", None)
+            print(f"invalid password: {exc if detail is None else detail}", file=sys.stderr)
             return 2
         user = models.User(
             email=args.email, display_name=name, hashed_password=hashed
@@ -258,8 +258,8 @@ def cmd_reset_password(args: argparse.Namespace) -> int:
         try:
             user.hashed_password = _hash_password(args.password)
         except Exception as exc:
-            detail = getattr(getattr(exc, "detail", None), "__str__", lambda: str(exc))()
-            print(f"invalid password: {detail}", file=sys.stderr)
+            detail = getattr(exc, "detail", None)
+            print(f"invalid password: {exc if detail is None else detail}", file=sys.stderr)
             return 2
         db.commit()
         print(f"password reset for {args.email}")
@@ -396,7 +396,6 @@ def cmd_maintenance(args: argparse.Namespace) -> int:
         return maintenance.main(_maintenance_argv("integrity-check", args))
 
     # Default and --purge both run purge-orphans; --apply selects the mode.
-    argv = ["purge-orphans"]
     if args.apply and not args.purge:
         # --apply without --purge is ambiguous: default to the safe report.
         print(

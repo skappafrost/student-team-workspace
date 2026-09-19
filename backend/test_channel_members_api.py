@@ -408,7 +408,7 @@ def test_patch_public_to_private_adds_creator_membership(client, db_session):
 
 def test_patch_private_by_member_creator_requires_admin(client, db_session):
     ws = create_workspace(client, db_session, "owner")
-    channel = create_public_channel(client, ws["id"], "general")
+    create_public_channel(client, ws["id"], "general")
 
     as_user(client, "owner")
     client.post(f"/workspaces/{ws['id']}/channels", json={"name": "x", "type": "general"})

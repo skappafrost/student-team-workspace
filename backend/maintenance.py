@@ -172,7 +172,7 @@ def purge_orphans(
     unlink_errors: list[tuple[str, str]] = []
 
     if apply:
-        for file_id, storage_key in missing_bytes_rows:
+        for _file_id, storage_key in missing_bytes_rows:
             db.delete(rows_by_key[storage_key])
             dropped_rows.append(storage_key)
         for file_id in retention_rows:
@@ -227,7 +227,12 @@ def _print_report(report: Report) -> None:
         verb = "unlinked" if report["apply"] else "would unlink"
         print(f"[{mode}] {verb} {storage_key}: no row and older than the grace period")
 
-    for file_id, storage_key in zip(report["retention_rows"], report["retention_files"]):
+    # The two lists are appended as a pair (see the retention loop above), so
+    # equal length is an invariant; strict=True turns a broken pairing into a
+    # loud failure instead of a silently truncated report.
+    for file_id, storage_key in zip(
+        report["retention_rows"], report["retention_files"], strict=True
+    ):
         changed = True
         verb = "dropped row and unlinked" if report["apply"] else "would drop row and unlink"
         print(f"[{mode}] {verb} {file_id} ({storage_key}): older than retention window")

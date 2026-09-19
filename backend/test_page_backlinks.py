@@ -64,8 +64,8 @@ def _mk(client, ws_id, title, slug, content=""):
 def test_backlinks_match_title_and_slug(client, ws_id):
     as_user(client, "u1")
     target = _mk(client, ws_id, "Meeting Notes", "meeting-notes")
-    a = _mk(client, ws_id, "A", "a", "See [[Meeting Notes]] for details.")
-    b = _mk(client, ws_id, "B", "b", "Linked via [[meeting-notes]].")
+    _mk(client, ws_id, "A", "a", "See [[Meeting Notes]] for details.")
+    _mk(client, ws_id, "B", "b", "Linked via [[meeting-notes]].")
     _mk(client, ws_id, "C", "c", "No link here.")
 
     resp = client.get(f"/workspaces/{ws_id}/pages/{target['id']}/backlinks")

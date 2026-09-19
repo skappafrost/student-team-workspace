@@ -122,7 +122,7 @@ def test_summarize_requires_auth(client):
 
 
 def test_summarize_unknown_kind(client):
-    ws = create_workspace(client, "owner")
+    create_workspace(client, "owner")
     as_user(client, "owner")
     resp = client.post("/ai/summarize", json={"kind": "unknown", "ref_id": "x"})
     assert resp.status_code == 422
@@ -135,8 +135,8 @@ def test_summarize_unknown_kind(client):
 def test_search_tasks_pages_messages_ranked(client):
     ws = create_workspace(client, "owner")
     project = create_project(client, ws["id"])
-    task = create_task(client, project["id"], "Alpha task", "Contains the keyword uniquely alphaone.")
-    page = create_page(client, ws["id"], "Alpha page", "Alphaone is described here in the page body.")
+    create_task(client, project["id"], "Alpha task", "Contains the keyword uniquely alphaone.")
+    create_page(client, ws["id"], "Alpha page", "Alphaone is described here in the page body.")
     channel = create_channel(client, ws["id"], "alpha-channel")
     create_message(client, channel["id"], "Message about alphaone in this channel.")
 
