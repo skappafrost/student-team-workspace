@@ -53,7 +53,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 | PATCH, DELETE | `/workspaces/{id}/invites/{invite_id}` | |
 | POST | `/invites/accept` | `201`; accept by token |
 | POST | `/workspaces/{id}/transfer-ownership` | Owner only |
-| GET | `/workspaces/{id}/activity?limit=` | Activity feed (R03): actor, verb, target, ts. Default/max 100 |
+| GET | `/workspaces/{id}/activity?limit=` | Activity feed (R03): actor, verb, target, ts. Default 50, max 100, newest first, no offset |
 
 ### Projects & tasks
 
@@ -126,7 +126,7 @@ Workspace presence (Task LVT S4/S5). One `PresenceState` row per `(workspace, us
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/workspaces/{id}/presence` | Every member's presence. **Members only — guests get `403` on read too.** Unknown workspace `404` (checked first, so it wins over `403`). Returns a **bare JSON array**, no `{items,total}` envelope and no `response_model`; **not paginated and not ordered** (see Pagination below) — sort client-side. Item: `{user_id, name, status, status_message, last_seen}` |
-| POST | `/workspaces/{id}/presence/me` | Sets the **caller's own** status; there is no route to set someone else's. **`200`, never `201`.** Body `{status, status_message?}` with `status` in `online\|away\|dnd\|offline` (required, non-empty) and `status_message` ≤255 chars — sending `"status_message": null` **clears** it. Side effects beyond the row: writes an `Activity` entry (`verb=set_presence`, so it also appears in `GET /workspaces/{id}/activity` and `GET /workspaces/{id}/audit-log`) and broadcasts `presence_update` |
+| POST | `/workspaces/{id}/presence/me` | Sets the **caller's own** status; there is no route to set someone else's. **`200`, never `201`.** Body `{status, status_message?}` with `status` in `online\|away\|dnd\|offline` (required, non-empty) and `status_message` ≤255 chars — sending `"status_message": null` **clears** it. Side effects beyond the row: broadcasts `presence_update`. It deliberately writes **no** `Activity` entry — the socket path never did, so logging from HTTP made the feed depend on which transport a client happened to use, and `log_activity` has no cooldown, so every status click would permanently occupy one of the eight slots the overview shows. `PresenceState` is the record of status history |
 
 Three details about these two routes that will bite a client:
 
