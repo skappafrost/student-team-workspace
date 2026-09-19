@@ -119,7 +119,7 @@ stw/
 │   ├── ws.py                   # in-process room manager
 │   ├── services.py             # notify() + log_activity() entry points
 │   ├── rate_limit.py           # sliding-window limiter + middleware
-│   └── test_*.py               # 55 test files · 757 tests
+│   └── test_*.py               # 56 test files · 770 tests
 ├── scripts/demo-packs/         # CI-validated demo data
 ├── docs/                       # API reference, contributing, release checklist
 ├── .github/workflows/ci.yml    # CI jobs — see § Testing
@@ -173,7 +173,7 @@ bun run dev:webpack            # → http://localhost:3000
 ## Testing
 
 ```bash
-# Backend — 757 tests, runs identically on SQLite and PostgreSQL
+# Backend — 770 tests, runs identically on SQLite and PostgreSQL
 cd backend && ./.venv/Scripts/python -m pytest -q
 
 # Migrations — exactly one head expected
@@ -194,7 +194,7 @@ cd app && node e2e-notifications.mjs
 
 > There is **no automated frontend test suite**: no Vitest, no component tests, and Playwright is a devDependency with two specs in `app/tests/` that nothing runs in CI. Verification here is `typecheck` + `build` plus the manual `e2e-*.mjs` / `qa-*.ts` scripts whose screenshots land in `app/qa-evidence/`. Don't claim a frontend behavior is tested unless one of those scripts proves it.
 
-CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — currently `backend` (SQLite), `backend-pg` (Postgres 16), `frontend` (typecheck) and `demo-pack`; the pending lint PR adds `ruff`. All green before review.
+CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — `ruff` (lint), `backend` (SQLite), `backend-pg` (Postgres 16), `frontend` (typecheck) and `demo-pack`. All green before review.
 
 > **SQLite/Postgres parity is mandatory.** A migration that renders valid DDL on one engine can be invalid on the other (a boolean `server_default` must be `sa.false()` / `"false"`, not `sa.text("0")` — Postgres rejects an unquoted integer default on a boolean column). The `backend-pg` job is the safety net; local SQLite-only pytest does not catch this.
 
@@ -205,13 +205,13 @@ CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — currentl
 | Area | Status | Evidence |
 |---|---|---|
 | Feature surface | ✅ all core modules shipped | 51 HTTP paths · 2 WebSocket routes · 20 mapped tables · 15 backend routers (recount: walk `app.routes` after `import app`) |
-| Backend suite | ✅ 757 passing, 0 failing | `pytest -q` on SQLite; same suite on Postgres 16 in CI |
+| Backend suite | ✅ 770 collected, 769 passing | `pytest -q` on SQLite; same suite on Postgres 16 in CI |
 | Client tests | 🔶 **no automated suite** | CI runs `typecheck` only — no lint, build or tests; 2 Playwright specs exist but nothing runs them; verification is the manual `e2e-*.mjs` scripts |
 | Alembic | ✅ single head `prs01_presence_state` | `alembic heads`; `/readyz` 503s if it ever splits |
 | Type check | ✅ clean | `tsc --noEmit` |
-| Backend lint | 🔶 0 errors locally, **not yet gated in CI** | `ruff check .` from `backend/` — gate pending in `harden/ruff-debt-and-gate` |
+| Backend lint | ✅ 0 errors, gated in CI | `ruff` job runs `ruff check .` from `backend/` on every PR |
 | Contrast | 🔶 manual only | light/dark screenshots in `app/qa-evidence/`; no automated WCAG gate exists |
-| Realtime | 🔶 single-process rooms + presence refcount, both in-memory | no cross-worker fan-out; one uvicorn worker |
+| Realtime | 🔴 **peer delivery broken** + single-process rooms | Two accepted sockets on the same channel URL, `POST …/messages` 201, peer never renders it. Reproduces on `main`; see `PROJECT-STATUS.md` §6 and `app/qa-evidence/ws-transport-realtime-report.json`. Rooms + presence refcount are in-memory → one uvicorn worker |
 | Storage | ✅ ingress hardening + quota + authenticated read path | #128, #130, #132 merged |
 | AI assist | 🔶 provider-pluggable, offline fallback | no LLM wired yet |
 
