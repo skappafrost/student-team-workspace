@@ -66,6 +66,24 @@ def make_user(db, user_id: str, email: str | None = None, display_name: str | No
     return user
 
 
+def drain_until_reply(session) -> list[dict]:
+    """Frames already in flight, read up to a heartbeat acknowledgement.
+
+    ``WebSocketTestSession.receive_json()`` has no timeout: a test that reads a
+    fixed number of frames hangs forever when the server sends fewer, and a hung
+    CI job reports nothing. Both sockets answer a plain-text heartbeat with a
+    ``pong``, so the drain is bounded whichever way the assertion goes — a missing
+    frame becomes a failure with the frames it did see.
+    """
+    session.send_text("ping")
+    frames: list[dict] = []
+    while True:
+        frame = session.receive_json()
+        if frame.get("type") == "pong":
+            return frames
+        frames.append(frame)
+
+
 def as_user(client: TestClient, user_id: str) -> None:
     """Authenticate ``client`` as ``user_id`` with a real JWT."""
     client.headers["Authorization"] = auth_headers(user_id)["Authorization"]

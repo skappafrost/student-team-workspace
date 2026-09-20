@@ -229,6 +229,15 @@ Client -> server:
 Server -> client:
 
 - `{"type": "new_message", "message": MessageOut}` — on `POST /channels/{id}/messages`
+- `{"type": "message_updated", "message": MessageOut}` — on `PATCH /messages/{id}`,
+  the whole corrected row (including its current `reactions`), so a client
+  replaces by id instead of guessing what changed. A row the cache has never seen
+  is left alone: the list query stays the source of truth.
+- `{"type": "message_deleted", "channel_id": ..., "message_ids": [...]}` — on
+  `DELETE /messages/{id}`. `message_ids` is every row the request removed, not just
+  the one named in the path: `messages.parent_id` is `ondelete="CASCADE"`, so
+  deleting a thread parent takes its replies with it and a frame naming only the
+  parent would leave every peer rendering ghosts.
 - `{"type": "reaction_update", "message_id": ..., "reactions": [...]}` — on reaction toggle
 - `{"type": "typing", "channel_id": ..., "user_id": ..., "user_name": ...}`
 - `{"type": "notification_created", "notification": NotificationOut}` — pushed to
@@ -407,6 +416,14 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 ### TA4-1 — message notification fan-out (additive)
 
 `POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by **both** sockets (`routers/channels.py:channel_websocket` and `routers/presence.py:presence_websocket` each join their own room *and* the user room) — so a client sees `{"type": "notification_created", "notification": NotificationOut}` on whichever it has open, and a chat page that holds both gets it twice. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+
+### S6-RT6 — edits and deletes now reach the room (additive frames)
+
+`PATCH /messages/{id}` and `DELETE /messages/{id}` committed and said nothing: only create and react broadcast. A peer kept rendering corrected text as the original, and kept rendering a deleted message, until something else refetched the list. Two new frames close it — `{"type":"message_updated","message":MessageOut}` (the whole corrected row, current `reactions` included, so the client replaces by id rather than guessing what changed) and `{"type":"message_deleted","channel_id":…,"message_ids":[…]}`.
+
+`message_ids` is a list because `messages.parent_id` is `ondelete="CASCADE"`: deleting a thread parent removes its replies in the database, so a frame naming only the parent would leave every peer rendering ghosts. The ids are collected before the delete, while the rows still exist.
+
+No response shape changed; both frames are additive for clients that ignore unknown frame types.
 
 ### S6-RT4 — one wedged peer cannot hold the room (latency behaviour change, no shape change)
 

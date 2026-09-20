@@ -17,7 +17,7 @@ from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 
-from conftest import as_user, auth_headers, make_user
+from conftest import as_user, auth_headers, drain_until_reply, make_user
 from ws import _ws_room_join, _ws_room_key_user, _ws_room_leave
 
 # ---------------------------------------------------------------------------
@@ -357,23 +357,6 @@ def _token_of(user_id: str) -> str:
     return auth_headers(user_id)["Authorization"].removeprefix("Bearer ")
 
 
-def _drain_until_pong(session) -> list[dict]:
-    """Frames received so far, read through a heartbeat barrier.
-
-    ``receive_json()`` has no timeout: a test that reads a fixed number of
-    frames hangs forever when the server sends fewer, which is exactly the
-    failure mode a missing push has. Both sockets answer a plain-text
-    heartbeat with a ``pong``, so the drain is bounded either way.
-    """
-    session.send_text("ping")
-    frames: list[dict] = []
-    while True:
-        frame = session.receive_json()
-        if frame.get("type") == "pong":
-            return frames
-        frames.append(frame)
-
-
 def test_channel_socket_receives_the_dm_push(client, db_session):
     ws = _setup_workspace(client, db_session)
     _invite_member(client, db_session, ws["id"], "member")
@@ -384,7 +367,7 @@ def test_channel_socket_receives_the_dm_push(client, db_session):
     ) as peer:
         as_user(client, "owner")
         assert _post_message(client, dm["id"], "over the wire").status_code == 201
-        frames = _drain_until_pong(peer)
+        frames = drain_until_reply(peer)
 
     types = [f.get("type") for f in frames]
     assert "new_message" in types, frames
@@ -413,7 +396,7 @@ def test_presence_socket_receives_the_dm_push(client, db_session):
         assert peer.receive_json()["type"] == "presence_update"
         as_user(client, "owner")
         assert _post_message(client, dm["id"], "on the dashboard").status_code == 201
-        frames = _drain_until_pong(peer)
+        frames = drain_until_reply(peer)
 
     pushed = [f for f in frames if f.get("type") == "notification_created"]
     assert [p["notification"]["type"] for p in pushed] == ["dm"], (

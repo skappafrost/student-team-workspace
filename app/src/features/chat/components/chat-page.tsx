@@ -203,6 +203,8 @@ export default function ChatPage() {
         message?: Message;
         message_id?: string;
         reactions?: Message['reactions'];
+        channel_id?: string;
+        message_ids?: string[];
         user_id?: string;
         user_name?: string;
       };
@@ -246,8 +248,37 @@ export default function ChatPage() {
         const { message_id, reactions } = payload;
         void queryClient.setQueryData<Message[]>(
           [...channelKeys.messages(selectedChannel.id), searchQuery],
-          (old) =>
-            (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
+          (old) => (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
+        );
+      } else if (payload.type === 'message_updated' && payload.message) {
+        const msg = payload.message;
+        if (msg.channel_id !== selectedChannel?.id) return;
+        void queryClient.setQueryData<Message[]>(
+          [...channelKeys.messages(msg.channel_id), searchQuery],
+          (old) => {
+            const list = old ?? [];
+            // A row this cache never saw is not a reason to invent one: the list
+            // query stays the source of truth, and a message edited from another
+            // surface may simply not be loaded here yet.
+            if (!list.some((m) => m.id === msg.id)) return list;
+            return list.map((m) => (m.id === msg.id ? msg : m));
+          }
+        );
+      } else if (payload.type === 'message_deleted' && payload.message_ids) {
+        const channelId = payload.channel_id ?? selectedChannel?.id;
+        if (!channelId) return;
+        // The id list covers the CASCADE too: deleting a thread parent removes its
+        // replies in the database, so naming only the parent would leave ghosts.
+        const removed = new Set(payload.message_ids);
+        void queryClient.setQueryData<Message[]>(
+          [...channelKeys.messages(channelId), searchQuery],
+          (old) => {
+            const list = old ?? [];
+            const kept = list.filter((m) => !removed.has(m.id));
+            // Same array back means no re-render for a frame about a row that was
+            // not here.
+            return kept.length === list.length ? list : kept;
+          }
         );
       }
     }
@@ -295,7 +326,9 @@ export default function ChatPage() {
               <header className='border-border/40 bg-background/80 flex items-center justify-between rounded-2xl border px-4 py-3 backdrop-blur sm:px-6'>
                 <div>
                   <h2 className='text-foreground text-base font-semibold sm:text-lg'>
-                    {selectedDM ? (selectedDM.peer_name ?? 'Direct message') : `#${selectedChannel.name}`}
+                    {selectedDM
+                      ? (selectedDM.peer_name ?? 'Direct message')
+                      : `#${selectedChannel.name}`}
                   </h2>
                   <p className='text-muted-foreground text-xs capitalize'>
                     {selectedDM ? 'Direct message' : `${selectedChannel.type} channel`}
@@ -352,10 +385,7 @@ export default function ChatPage() {
                 />
               )}
 
-              <div
-                aria-live='polite'
-                className='text-muted-foreground h-4 px-1 text-xs'
-              >
+              <div aria-live='polite' className='text-muted-foreground h-4 px-1 text-xs'>
                 {Object.values(typingUsers).length > 0 &&
                   `${Object.values(typingUsers).join(', ')} ${
                     Object.values(typingUsers).length === 1 ? 'is' : 'are'
@@ -376,9 +406,7 @@ export default function ChatPage() {
                       : `Message #${selectedChannel.name}`
                 }
                 disabled={sendMessageMutation.isPending}
-                replyingTo={
-                  replyingTo ? replyingTo.author_name || replyingTo.author_id : null
-                }
+                replyingTo={replyingTo ? replyingTo.author_name || replyingTo.author_id : null}
                 onCancelReply={() => setReplyingTo(null)}
               />
             </>

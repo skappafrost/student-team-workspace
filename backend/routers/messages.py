@@ -304,8 +304,13 @@ async def update_message(
     message = (
         db.query(models.Message)
         .filter(models.Message.id == message.id)
-        .options(selectinload(models.Message.author))
+        .options(selectinload(models.Message.author), selectinload(models.Message.reactions))
         .first()
+    )
+
+    updated = schemas.MessageOut.model_validate(message).model_dump(mode="json")
+    await _ws_broadcast_channel(
+        message.channel_id, {"type": "message_updated", "message": updated}
     )
 
     return message
@@ -369,6 +374,29 @@ async def toggle_reaction(
     return summary
 
 
+def _message_subtree_ids(db: Session, message_id: str) -> list[str]:
+    """Every id ``CASCADE`` will remove along with this message.
+
+    ``messages.parent_id`` is ``ondelete="CASCADE"``, so deleting a thread parent
+    takes its replies with it silently. A ``message_deleted`` frame naming only the
+    parent would leave every peer rendering ghosts, so the whole set is collected
+    *before* the delete — afterwards the rows are gone.
+    """
+    found = [message_id]
+    seen = {message_id}
+    frontier = [message_id]
+    while frontier:
+        rows = (
+            db.query(models.Message.id)
+            .filter(models.Message.parent_id.in_(frontier))
+            .all()
+        )
+        frontier = [row[0] for row in rows if row[0] not in seen]
+        seen.update(frontier)
+        found.extend(frontier)
+    return found
+
+
 @router.delete("/messages/{message_id}", status_code=204)
 async def delete_message(
     message_id: str,
@@ -387,6 +415,13 @@ async def delete_message(
     if not (is_owner or is_admin_plus):
         raise HTTPException(status_code=403, detail="Not allowed to delete this message")
 
+    channel_id = message.channel_id
+    removed = _message_subtree_ids(db, message_id)
     db.delete(message)
     db.commit()
+
+    await _ws_broadcast_channel(
+        channel_id,
+        {"type": "message_deleted", "channel_id": channel_id, "message_ids": removed},
+    )
     return None

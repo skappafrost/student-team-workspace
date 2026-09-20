@@ -27,6 +27,25 @@ export async function apiPost(
   return { status: res.status(), json };
 }
 
+/** Any verb against the backend, for paths the UI cannot reach (edit, delete). */
+export async function apiSend(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  pathname: string,
+  opts: { body?: unknown; token?: string } = {}
+): Promise<{ status: number; json: any }> {
+  const ctx = await request.newContext({
+    baseURL: API,
+    extraHTTPHeaders: opts.token ? { Authorization: `Bearer ${opts.token}` } : {}
+  });
+  const res = await ctx.fetch(pathname, {
+    method,
+    data: opts.body === undefined ? undefined : opts.body
+  });
+  const json = await res.json().catch(() => null);
+  await ctx.dispose();
+  return { status: res.status(), json };
+}
+
 export async function registerUser(tag: string): Promise<{ email: string; token: string }> {
   const email = `${tag}-${Date.now()}@example.com`;
   const res = await apiPost('/auth/register', { email, password: PASSWORD });

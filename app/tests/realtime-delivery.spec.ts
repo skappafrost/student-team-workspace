@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import {
   APP,
   apiPost,
+  apiSend,
   createWorkspace,
   inviteAndAccept,
   openAuthContext,
@@ -48,7 +49,11 @@ function watchSockets(page: import('@playwright/test').Page) {
   return { channel, presence, errored, frames };
 }
 
-async function openChat(browser: import('@playwright/test').Browser, token: string, channelName: string) {
+async function openChat(
+  browser: import('@playwright/test').Browser,
+  token: string,
+  channelName: string
+) {
   const { context, page } = await openAuthContext(browser, token);
   const sockets = watchSockets(page);
   // The first hit on a route triggers a webpack compile on a cold cache.
@@ -139,6 +144,88 @@ test('a browser WebSocket completes its handshake and delivers frames', async ({
   // not merely asserted, so the delivery run records both pages.
   await b.page.screenshot({ path: 'qa-evidence/rt-01-peer-received.png', fullPage: true });
   await a.page.screenshot({ path: 'qa-evidence/rt-02-sender-single.png', fullPage: true });
+
+  await a.context.close();
+  await b.context.close();
+});
+
+/**
+ * Edits and deletes have to reach the room too.
+ *
+ * `PATCH /messages/{id}` and `DELETE /messages/{id}` used to commit and say
+ * nothing — only create and react broadcast — so a peer kept rendering text that
+ * had been corrected, and kept rendering a message that had been deleted, until
+ * something else refetched the list. The delivery is asserted on both pages: the
+ * actor's own tab changes through no mutation of its own (the edit goes over the
+ * API, because the UI has no edit affordance yet), so if it updates, the frame is
+ * what did it.
+ */
+test('a corrected message and a deleted one change every open channel view without a reload', async ({
+  browser
+}) => {
+  test.setTimeout(240_000);
+
+  const author = await registerUser('edit-a');
+  const peer = await registerUser('edit-b');
+  const workspaceId = await createWorkspace(author.token, `edit-${Date.now()}`);
+  await inviteAndAccept(author.token, workspaceId, peer.email, peer.token);
+  const channel = await apiPost(
+    `/workspaces/${workspaceId}/channels`,
+    { name: `room-${Date.now()}`, type: 'general' },
+    author.token
+  );
+  expect(channel.status).toBe(201);
+  const channelName = channel.json.name as string;
+
+  const a = await openChat(browser, author.token, channelName);
+  const b = await openChat(browser, peer.token, channelName);
+  await expect.poll(() => b.sockets.channel.length).toBe(1);
+
+  const stamp = Date.now();
+  const original = `edit-${stamp}`;
+  await a.page.getByPlaceholder(`Message #${channelName}`).fill(original);
+  await a.page.keyboard.press('Enter');
+  await expect(b.page.getByText(original, { exact: false }).first()).toBeVisible({
+    timeout: 20_000
+  });
+
+  const listed = await apiSend('GET', `/channels/${channel.json.id}/messages`, {
+    token: author.token
+  });
+  const target = listed.json.find((m: { content: string }) => m.content === original);
+  expect(target, `the posted message is not in the list: ${listed.status}`).toBeTruthy();
+
+  const corrected = `corrected-${stamp}`;
+  const edited = await apiSend('PATCH', `/messages/${target.id}`, {
+    body: { content: corrected },
+    token: author.token
+  });
+  expect(edited.status).toBe(200);
+
+  for (const [who, page] of [
+    ['author', a.page],
+    ['peer', b.page]
+  ] as const) {
+    await expect(page.getByText(corrected, { exact: false }).first(), `on ${who}`).toBeVisible({
+      timeout: 20_000
+    });
+    await expect(
+      page.getByText(original, { exact: false }),
+      `${who} still shows the old text`
+    ).toHaveCount(0);
+  }
+
+  const removed = await apiSend('DELETE', `/messages/${target.id}`, { token: author.token });
+  expect(removed.status).toBe(204);
+  for (const [who, page] of [
+    ['author', a.page],
+    ['peer', b.page]
+  ] as const) {
+    await expect(
+      page.getByText(corrected, { exact: false }),
+      `${who} still shows a deleted row`
+    ).toHaveCount(0);
+  }
 
   await a.context.close();
   await b.context.close();
