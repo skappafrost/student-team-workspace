@@ -14,6 +14,10 @@ Fixtures use real JWTs (conftest.make_user / as_user); no X-Test-User-*
 headers anywhere.
 """
 
+import asyncio
+import logging
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -279,6 +283,67 @@ def test_ws_broadcast_prunes_dead_socket(client):
 
         # The dead socket was evicted by the broadcast; the empty room is gone.
         assert chan_key not in _ws_rooms
+
+
+class _StallingSocket:
+    """A peer that only accepts a frame after `delay`.
+
+    `delay` is finite on purpose: a test whose fake socket never resolves hangs
+    the suite instead of reporting the missing bound, and CI should never see a
+    stuck job for a bug this small.
+    """
+
+    def __init__(self, delay: float):
+        self.delay = delay
+        self.received = 0
+
+    async def send_text(self, message: str) -> None:
+        await asyncio.sleep(self.delay)
+        self.received += 1
+
+
+def test_broadcast_bounds_one_stalled_peer(caplog, monkeypatch):
+    """One half-open socket must not decide how long everyone else waits.
+
+    Measured with `bench/ws_stall_probe.py`, before this test existed: a peer
+    that holds its send for 5s in a room of two made the broadcast take
+    **5.00s**, and the *next three* messages in that room took **15.03s** — the
+    stalled socket stayed in the room and was paid for again per message, on the
+    request path of `POST /channels/{id}/messages`. With three such peers it was
+    15.02s and 45.08s. After the bound: 2.00s then 0.00s, and 6.03s then 0.00s,
+    because the wedged peers are pruned the first time they are seen.
+    """
+    import ws as ws_mod
+
+    monkeypatch.setattr(ws_mod, "WS_SEND_TIMEOUT_SECONDS", 0.05, raising=False)
+    stall = _StallingSocket(0.5)
+    healthy = _StallingSocket(0.0)
+    key = _ws_room_key_channel("probe-room")
+    ws_mod._ws_room_join(key, stall)
+    ws_mod._ws_room_join(key, healthy)
+    try:
+        async def drive():
+            started = time.perf_counter()
+            delivered = await ws_mod._ws_broadcast(key, {"type": "new_message"})
+            return delivered, time.perf_counter() - started
+
+        with caplog.at_level(logging.WARNING):
+            delivered, elapsed = asyncio.run(drive())
+    finally:
+        ws_mod._ws_room_leave(key, stall)
+        ws_mod._ws_room_leave(key, healthy)
+
+    assert healthy.received == 1, "the frame never reached the healthy peer"
+    assert delivered == 1, f"the stalled socket was counted as delivered: {delivered}"
+    assert elapsed < 0.4, f"fan-out waited {elapsed:.2f}s on a 0.05s budget"
+    assert key not in _ws_rooms, "the stalled socket kept its delivery slot"
+    assert "timed out" in caplog.text, (
+        "the socket was pruned but nothing was logged, which is also what a "
+        "stalled send helper would do: "
+        f"helper={ws_mod._ws_send_safe!r} "
+        f"timeout={getattr(ws_mod, 'WS_SEND_TIMEOUT_SECONDS', None)!r} "
+        f"elapsed={elapsed:.2f}s records={caplog.records}"
+    )
 
 
 def test_ws_reconnect_after_disconnect_joins_rooms_again(client):

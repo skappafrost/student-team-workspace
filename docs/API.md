@@ -278,9 +278,12 @@ Server -> client. Four kinds:
 
 On disconnect each socket leaves **every** room it joined in the endpoint's
 `finally` — the chat socket the channel room and the user room, the presence
-socket the workspace room and the user room. Broadcasts additionally evict any
-socket whose send fails, so a client that dies before its cleanup still cannot
-keep a phantom delivery slot.
+socket the workspace room and the user room. Each peer's send is bounded by
+`ws.WS_SEND_TIMEOUT_SECONDS` (2s): a socket that raises, times out, or otherwise
+fails to accept a frame is logged and pruned by the broadcast itself, so a
+client that dies before its cleanup cannot keep a phantom delivery slot — and
+cannot charge its stall to the rest of the room on every later message either.
+One wedged peer therefore costs a sender at most 2s, once.
 
 **Presence lifecycle is refcounted per `(workspace, user)`, not per socket.**
 The user's *first* presence socket in a workspace writes `online`; a second tab
@@ -404,6 +407,24 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 ### TA4-1 — message notification fan-out (additive)
 
 `POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by **both** sockets (`routers/channels.py:channel_websocket` and `routers/presence.py:presence_websocket` each join their own room *and* the user room) — so a client sees `{"type": "notification_created", "notification": NotificationOut}` on whichever it has open, and a chat page that holds both gets it twice. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+
+### S6-RT4 — one wedged peer cannot hold the room (latency behaviour change, no shape change)
+
+`ws._ws_broadcast` awaited each peer's `send_text` in a `for` loop with no bound. A half-open TCP does not raise, it stalls, so one wedged socket decided how long every other member waited — and stayed in the room, to be paid for again on the next message. Measured with `backend/bench/ws_stall_probe.py`, peers holding their send for 5s alongside one healthy peer:
+
+| wedged peers | first broadcast | the three that follow |
+|---|---|---|
+| 1 | 5.00s | 15.03s |
+| 3 | 15.02s | 45.08s |
+
+and `POST /channels/{id}/messages` awaits that broadcast on its own request path.
+
+Each send is now wrapped in `asyncio.wait_for(ws.WS_SEND_TIMEOUT_SECONDS = 2.0)`, and a timeout is treated exactly like a send that raised: logged at `WARNING` ("ws send timed out…"), counted as not delivered, pruned from the room. Same probe after: 1 wedged peer costs **2.00s** then **0.00s**; 3 cost **6.03s** then **0.00s** — 2s per wedged peer, once, because they are gone the next time around.
+
+Two things this deliberately does not do:
+
+- **It is not concurrent.** `asyncio.gather` was tried and rejected: gathering wraps each send in a task, which defers the frame by a scheduler tick, and a `TestClient` websocket session runs *each socket on its own portal event loop*. A deferred cross-loop send lands in a peer stream whose receiver has already parked and anyio never wakes it — measured as `test_presence_service.py::test_ws_connect_broadcasts_online` hanging with the peer blocked in `receive_json()`. `wait_for` has been a timeout context around the await since 3.12 rather than a task wrapper, so it keeps the call inline and costs nothing the old code did not already do. The reason is recorded in `_ws_broadcast`'s docstring because someone will reach for `gather` again.
+- **The broadcast still sits on the sender's request path.** `create_task` per message would let a later message's frame overtake an earlier one, which the client appends in arrival order; a per-room ordered queue has to survive a test client that builds a new event loop per test. The residual worst case is therefore 2s per wedged peer per message, charged only while some peer is already broken.
 
 ### S6-RT3 — presence frames: a keepalive is not a status change (behaviour change)
 

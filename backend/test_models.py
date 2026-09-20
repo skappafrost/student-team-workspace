@@ -1,5 +1,6 @@
 """Database roundtrip tests for SQLAlchemy models and Alembic migration."""
 
+import logging
 import os
 from datetime import UTC, datetime
 
@@ -172,6 +173,38 @@ def test_model_rejects_duplicate_membership(db_session):
 MIGRATION_DB = os.path.join(os.path.dirname(__file__), "test_stw_migration_t015.db")
 
 
+def _alembic(action, *args):
+    """Run one alembic command, then restore the logging it clobbered.
+
+    ``command.upgrade()`` executes ``alembic/env.py``, and that module calls
+    ``fileConfig(alembic.ini)`` on import. The ini declares a root logger with a
+    single console handler, so applying it *replaces the root logger's handler
+    list* — where pytest's logging plugin keeps its capture handler — and marks
+    every already-existing ``stw.*`` logger disabled. Measured: the next
+    ``caplog``-asserting test in the session (collection order puts this file
+    before ``test_ws.py``) reported ``records=[]`` for a log line that had
+    demonstrably been emitted, and any later log assertion would pass on nothing.
+
+    Restored here rather than fixed in ``env.py``: a developer running
+    ``alembic upgrade head`` in a terminal does want the ini's console logging.
+    """
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    disabled = {
+        name: logger.disabled
+        for name, logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+    }
+    try:
+        action(*args)
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if isinstance(logger, logging.Logger) and name in disabled:
+                logger.disabled = disabled[name]
+
+
 def test_migration_dedupes_and_enforces_unique():
     """Round-trip the T015 migration on a seeded db that contains dup rows.
 
@@ -193,8 +226,8 @@ def test_migration_dedupes_and_enforces_unique():
     os.environ["DATABASE_URL"] = db_url
     try:
         # 1) Schema at the revision BEFORE the T015 unique constraint.
-        command.downgrade(cfg, "base")
-        command.upgrade(cfg, "101f600f1926")
+        _alembic(command.downgrade, cfg, "base")
+        _alembic(command.upgrade, cfg, "101f600f1926")
 
         # 2) Seed users/workspace plus duplicate memberships.
         engine = create_engine(db_url)
@@ -218,7 +251,7 @@ def test_migration_dedupes_and_enforces_unique():
             )
 
         # 3) Upgrade to head — dedupe then add the unique constraint.
-        command.upgrade(cfg, "head")
+        _alembic(command.upgrade, cfg, "head")
 
         # 4) Dedupe kept the most privileged role (u1 -> admin, latest join)
         #    and the earliest joined_at among equal roles (u2 -> 2026-01-01).
@@ -242,8 +275,8 @@ def test_migration_dedupes_and_enforces_unique():
                 )
 
         # 6) Alembic round-trip: downgrade below the constraint and back up.
-        command.downgrade(cfg, "101f600f1926")
-        command.upgrade(cfg, "head")
+        _alembic(command.downgrade, cfg, "101f600f1926")
+        _alembic(command.upgrade, cfg, "head")
         with engine.connect() as conn:
             count = conn.execute(text("SELECT COUNT(*) FROM workspace_members")).scalar()
         assert count == 2
