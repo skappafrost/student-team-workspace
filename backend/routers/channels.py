@@ -239,9 +239,10 @@ async def list_dms(
 async def channel_websocket(websocket: WebSocket, channel_id: str):
     """Authenticated channel socket: chat frames in, broadcast frames out.
 
-    Handshake order matters: every rejection happens BEFORE ``accept()`` so
-    the client observes a refused upgrade with a documented 4xxx code
-    (see docs/API.md) instead of a session that opens and instantly dies.
+    Handshake order matters: every rejection happens BEFORE ``accept()``. What
+    the client then observes is an HTTP 403 — the 4xxx code is discarded by the
+    transport, as docs/API.md § Handshake rejection explains — but nothing ever
+    becomes a live socket that opens and instantly dies.
 
     Auth precedence: negotiated ``stw-ws.<ticket>`` subprotocol (one-shot
     ticket from ``POST /auth/ws-ticket``, never in a URL) > ``session_token``

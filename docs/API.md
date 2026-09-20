@@ -204,20 +204,60 @@ sends no `Sec-WebSocket-Protocol` header at all when the client offered none
 it was not offered, and neither Starlette's `accept()` nor uvicorn checks it —
 `ws.py:_ws_negotiate_subprotocol` is the single place that decides the value.
 
-### Handshake rejection codes
+### Handshake rejection: what a client can actually observe
 
-Every rejection happens **before** the upgrade is accepted, so the client
-sees a refused handshake with a documented code (not an ambiguous 1008):
+Every rejection happens **before** the upgrade is accepted — answering an
+unauthenticated `GET /ws/...` with a live socket would put a client into a room it
+may not read. That choice has a consequence a client has to design around: **a
+close code sent before `accept()` never reaches anyone.** uvicorn's
+`websockets_sansio_impl` turns one into `conn.reject(HTTPStatus.FORBIDDEN, "")`,
+so the handshake fails as an ordinary HTTP 403 and the code and reason are
+discarded. Measured against a running server with a `websockets` client:
+
+| Case | What the client sees |
+|---|---|
+| no credential | `HTTP 403`, empty body, no close code |
+| invalid / expired / revoked token | `HTTP 403`, empty body, no close code |
+| channel does not exist | `HTTP 403`, empty body, no close code |
+| authenticated but not a member | `HTTP 403` whose body is `{"detail": "Not a workspace member"}` |
+| member, valid credential | `101` and a working socket |
+
+That last row's body is not a design. It happens because the membership check
+raises an `HTTPException` through a dependency, and Starlette answers an
+un-accepted upgrade with an HTTP response, while the endpoints that call
+`close(code=…)` themselves get the empty `403` described above. **Do not branch on
+it** — it is one code path out of four, and the shape is uvicorn-version
+behaviour, not a contract.
+
+In a browser the same failure arrives as whatever that implementation reports for
+a refused upgrade — a `WebSocket connection … failed` console line and a `close`
+event with no application code. (The text differs per browser and is not part of
+this contract; what is measured above is the status.) **There is no way to branch
+on 4401 vs 4403 vs 4404 from a browser**, and a client that retries on all of
+them will retry forever on a permission problem.
+
+The codes still exist server-side, because the distinction is real and the
+endpoint has to decide *something*:
 
 | Code | Meaning |
 |---|---|
-| 4400 | Reserved, **never sent today**. `WS_BAD_HANDSHAKE` is defined in `ws.py` and no code path raises it; bad subprotocol formats are simply ignored and the cookie/query credential is used instead. Listed for completeness so a client does not have to guess what it means if it ever appears. |
-| 4401 | No credential, or invalid/expired/revoked token |
-| 4403 | Authenticated but not allowed: not a workspace member, guest role, or no private-channel access (chat). On presence, guests are refused here too |
+| 4401 | No credential, or invalid/expired/revoked token. Revoked sessions (S02) land here — the `jti` lookup returns None |
+| 4403 | Authenticated but not allowed: not a workspace member, guest role, or no private-channel access (chat). Guests are refused presence here too |
 | 4404 | Target does not exist — the channel (chat) or the workspace (presence) |
 
-Revoked sessions (S02) fail with 4401 — the token decode returns None once
-the `jti` is revoked.
+`backend/test_ws_handshake_rejection.py` pins them at the only layer where they
+are visible: the ASGI message the application emits, and that no
+`websocket.accept` precedes it. (`WS_BAD_HANDSHAKE` / 4400 was deleted: it was
+documented as reserved, no code path could raise it, and a malformed
+`Sec-WebSocket-Protocol` offer is simply ignored — see the subprotocol note
+above.)
+
+**To learn the reason, ask over HTTP before or after the socket fails.**
+`GET /channels/{id}/messages` answers `401` with no valid session, `403` for a
+member of another workspace, `404` for a channel that does not exist and `200` for
+one the caller can read; `GET /workspaces/{id}/presence` answers `403` for a guest.
+Measured against a running server. Those are ordinary responses with ordinary
+semantics, and they are the only place the distinction survives.
 
 ### Frames — chat socket
 
@@ -315,7 +355,8 @@ the single uvicorn worker this deployment runs and wrong the moment it is scaled
 out; multi-worker fan-out needs a shared store, not more sockets.
 
 A session revoked *after* the handshake is not re-checked: the socket stays open
-until it closes. `4401` guards connection, not the connection's lifetime.
+until it closes. The 4401 refusal guards connection, not the connection's
+lifetime (see § Handshake rejection for what a client can observe of it).
 
 ## Health, readiness & observability
 
@@ -416,6 +457,18 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 ### TA4-1 — message notification fan-out (additive)
 
 `POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by **both** sockets (`routers/channels.py:channel_websocket` and `routers/presence.py:presence_websocket` each join their own room *and* the user room) — so a client sees `{"type": "notification_created", "notification": NotificationOut}` on whichever it has open, and a chat page that holds both gets it twice. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+
+### S6-RT9 — what a refused handshake really looks like (documentation correction)
+
+The handshake section promised that a rejection arrives as a documented `4401`/`4403`/`4404` close code. No client can ever see one. A `websocket.close` sent *before* `accept()` is converted by uvicorn's `websockets_sansio_impl` into `conn.reject(HTTPStatus.FORBIDDEN, "")`, so the upgrade fails as an **HTTP 403** with no code and no reason — measured against a live server with a `websockets` client: no credential, invalid token, unknown channel and non-member all produce `http_status=403, close_code=None`, while a member produces a working socket. `TestClient` raises `WebSocketDisconnect(code=…)` straight from the ASGI message, which is why the whole green WS suite never contradicted the claim; the same wording had also spread into `CONTRIBUTING.md`, `app/env.example.txt`, the host-guard spec and two router docstrings.
+
+Refusing before `accept()` is the correct behaviour and is unchanged. What changed:
+
+- The section now says what a client observes, that the distinction is *not* reachable from a browser, and that the way to learn the reason is an HTTP preflight (`GET /channels/{id}/messages` → `401`/`403`/`404`/`200`, `GET /workspaces/{id}/presence` → `403` for a guest; all measured).
+- `WS_BAD_HANDSHAKE` (4400) deleted. It was documented as "reserved, never sent today", no code path could raise it, and a malformed `Sec-WebSocket-Protocol` offer is ignored by design — a dead constant in a contract table is a promise nobody can keep.
+- `backend/test_ws_handshake_rejection.py` pins the half that *is* ours: the `websocket.close` message and its code, and that no `websocket.accept` precedes it, for 4401/4403/4404 on both sockets.
+
+No behaviour change: same codes emitted, same refusals, same HTTP statuses.
 
 ### S6-RT7 — a reconnecting client refetches, and says so (client behaviour; no contract change)
 

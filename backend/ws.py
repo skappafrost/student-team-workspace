@@ -35,12 +35,14 @@ logger = logging.getLogger("stw.ws")
 #: be charged for someone else's broken connection.
 WS_SEND_TIMEOUT_SECONDS = 2.0
 
-# Close codes (documented in docs/API.md). 4xxx range = application errors,
-# so browsers/proxies do not confuse them with protocol failures.
+# Close codes. The values are the application's own vocabulary and are asserted
+# by `test_ws_handshake_rejection.py`, but read § Handshake rejection codes in
+# docs/API.md before treating them as something a browser can observe: a close
+# sent before `accept()` never reaches a client, because the transport turns it
+# into an HTTP 403 rejection.
 WS_UNAUTHENTICATED = 4401  # no usable credential at handshake
 WS_FORBIDDEN = 4403  # authenticated but not allowed in this channel
 WS_NOT_FOUND = 4404  # channel does not exist
-WS_BAD_HANDSHAKE = 4400  # malformed upgrade (bad subprotocol format)
 
 # Subprotocol the client MUST offer to prove it read the WS contract.
 # A raw browser ``new WebSocket(url)`` sends no subprotocol; the backend

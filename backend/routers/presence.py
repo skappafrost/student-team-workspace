@@ -23,8 +23,9 @@ the owner's ``user:<id>`` room, which is what lets a dashboard tab with no
 channel socket receive its own ``notification_created`` frames. Inbound frame
 rules are in :func:`_parse_presence_frame`: only an explicit status frame may
 change a status, everything else is a keepalive that refreshes ``last_seen``.
-The handshake reuses ``dependencies._ws_resolve_user`` and the documented
-4401/4403/4404 close codes.
+The handshake reuses ``dependencies._ws_resolve_user``, whose 4401/4403/4404
+codes are what the application sends, not what a browser receives — a refusal
+before ``accept()`` reaches the client as an HTTP 403 (docs/API.md).
 """
 
 from __future__ import annotations
@@ -317,8 +318,9 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
 
     A frame that is not a ``presence`` frame is a keepalive: it refreshes
     ``last_seen`` and changes nothing else. Rejection happens before
-    ``accept()`` so the client sees a documented 4xxx close code, matching the
-    channel socket's contract.
+    ``accept()`` so no session is ever opened to be torn down, matching the
+    channel socket's contract. The 4xxx code itself is for the ASGI layer and the
+    tests: the transport reports the refusal as an HTTP 403 (docs/API.md).
     """
     db = next(get_db())
     try:
