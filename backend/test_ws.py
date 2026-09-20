@@ -161,6 +161,31 @@ def _post(client, channel_id: str, content: str, parent_id: str | None = None) -
     return resp.json()["id"]
 
 
+def test_reaction_update_frame_names_its_channel(client):
+    """The frame used to be unguardable: it arrived, but said nothing about where.
+
+    A client keeps several channels' message lists in one cache, so a
+    `reaction_update` without a `channel_id` has to be written into whichever
+    channel is on screen — or dropped. `new_message` and `message_deleted` both
+    name their channel; this did not. No test in the suite asserted the frame's
+    shape at all, which is how the omission survived.
+    """
+    channel = _make_channel(client, "ws-react-owner")
+    as_user(client, "ws-react-owner")
+    with _connect(client, channel["id"], _token("ws-react-owner")) as sock:
+        message_id = _post(client, channel["id"], "react to me")
+        drain_until_reply(sock)  # clears the new_message frame
+        resp = client.post(f"/messages/{message_id}/reactions", json={"emoji": "🎯"})
+        assert resp.status_code == 200, resp.text
+        frames = drain_until_reply(sock)
+
+    frame = next((f for f in frames if f.get("type") == "reaction_update"), None)
+    assert frame is not None, f"no reaction frame reached the room: {[f.get('type') for f in frames]}"
+    assert frame["channel_id"] == channel["id"], frame
+    assert frame["message_id"] == message_id, frame
+    assert frame["reactions"] == [{"emoji": "🎯", "count": 1, "user_ids": ["ws-react-owner"]}], frame
+
+
 def test_message_edit_reaches_the_channel_room(client):
     """`PATCH /messages/{id}` currently commits and says nothing.
 

@@ -367,6 +367,10 @@ async def toggle_reaction(
         message.channel_id,
         {
             "type": "reaction_update",
+            # The room is the channel, but a client keeps several channels' lists
+            # in one cache and must not write into the one it happens to be
+            # looking at. `new_message` carries `channel_id` for the same reason.
+            "channel_id": message.channel_id,
             "message_id": message_id,
             "reactions": [s.model_dump() for s in summary],
         },

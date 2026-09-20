@@ -278,7 +278,7 @@ Server -> client:
   the one named in the path: `messages.parent_id` is `ondelete="CASCADE"`, so
   deleting a thread parent takes its replies with it and a frame naming only the
   parent would leave every peer rendering ghosts.
-- `{"type": "reaction_update", "message_id": ..., "reactions": [...]}` — on reaction toggle
+- `{"type": "reaction_update", "channel_id": ..., "message_id": ..., "reactions": [...]}` — on reaction toggle
 - `{"type": "typing", "channel_id": ..., "user_id": ..., "user_name": ...}`
 - `{"type": "notification_created", "notification": NotificationOut}` — pushed to
   the user's `user:<id>` room, which both sockets join, so it arrives once per
@@ -457,6 +457,16 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 ### TA4-1 — message notification fan-out (additive)
 
 `POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by **both** sockets (`routers/channels.py:channel_websocket` and `routers/presence.py:presence_websocket` each join their own room *and* the user room) — so a client sees `{"type": "notification_created", "notification": NotificationOut}` on whichever it has open, and a chat page that holds both gets it twice. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+
+### S6-RT8 — cache and lifecycle hygiene in the chat surface (additive frame field)
+
+- `reaction_update` now carries `channel_id`, like `new_message` and `message_deleted` already did. Without it a client cannot tell whether the frame concerns what it is looking at, and had to either write into the wrong channel's cache or drop the update. `backend/test_ws.py::test_reaction_update_frame_names_its_channel` is the first test to assert that frame's shape at all.
+- The chat view now ignores a `reaction_update` whose channel is not the one on screen, and never writes a reactions list for a message its cache does not already hold. `setQueryData` with `[]` is a *real answer* to the messages query for the whole `staleTime` — the channel would read as emptied rather than as never visited.
+- Typing indicators are dropped when the reader switches channel (and on unmount), together with their 3s clear-timers. They used to be component state that no transition reset, so a name from the channel you had been reading could sit above the composer of the one you switched to. Pinned by `app/tests/typing-indicator.spec.ts`, which asserts absence with a 500ms budget on purpose: the page default is 120s for webpack's cold compile, and an unbounded `toHaveCount(0)` retries until a leaked timer expires by itself — it passed with the fix removed.
+- The optimistic send settles by its own row id instead of restoring a whole-list snapshot taken before *that* mutation ran. With two sends in flight, the second one's failure used to resurrect the first one's placeholder and discard the real row that had replaced it.
+- The presence context no longer carries `onlineCount`, `isLoading` or `queryKey`: three consumers read `byUser` and `hidden`, and nothing else. `queryKey` in particular was the cache key of the provider's own query, leaked to everyone.
+
+No HTTP route, request or response shape changed; `reaction_update` gained a field.
 
 ### S6-RT9 — what a refused handshake really looks like (documentation correction)
 
