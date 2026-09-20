@@ -192,10 +192,26 @@ export default function ChatPage() {
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const typingTimersRef = useRef<Record<string, number>>({});
   const lastTypingSentRef = useRef(0);
+  const typingNames = Object.values(typingUsers);
+  const typingLine =
+    typingNames.length === 0
+      ? null
+      : `${typingNames.join(', ')} ${typingNames.length === 1 ? 'is' : 'are'} typing…`;
 
   // Realtime WebSocket: append incoming messages for the selected channel.
-  const { sendTyping } = useChannelWebSocket({
+  const { sendTyping, status: socketStatus } = useChannelWebSocket({
     channelId: selectedChannel?.id ?? undefined,
+    onOpen: () => {
+      // Whatever was posted while this tab was offline is missing, and a
+      // reconnect is the moment to learn it. Presence already does this; chat
+      // did not, so messages sent during an outage stayed invisible in the open
+      // tab indefinitely — the list query is `staleTime: 60s` with no polling.
+      if (selectedChannel) {
+        void queryClient.invalidateQueries({
+          queryKey: channelKeys.messages(selectedChannel.id)
+        });
+      }
+    },
     onMessage: (data: unknown) => {
       if (!data || typeof data !== 'object') return;
       const payload = data as {
@@ -386,10 +402,13 @@ export default function ChatPage() {
               )}
 
               <div aria-live='polite' className='text-muted-foreground h-4 px-1 text-xs'>
-                {Object.values(typingUsers).length > 0 &&
-                  `${Object.values(typingUsers).join(', ')} ${
-                    Object.values(typingUsers).length === 1 ? 'is' : 'are'
-                  } typing…`}
+                {typingLine ??
+                  // The same slot, the same styling: a list that stopped
+                  // updating is the one failure this surface must not let look
+                  // like a quiet success. `idle` means no channel is selected,
+                  // and `connecting` is the first attempt — neither is worth
+                  // interrupting the user for; `reconnecting` is.
+                  (socketStatus === 'reconnecting' && 'Connection lost — reconnecting…')}
               </div>
               <MessageInput
                 value={draft}
