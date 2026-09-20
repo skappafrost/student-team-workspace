@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -55,6 +55,9 @@ function cookieWillReach(url: string): boolean {
   }
 }
 
+/** What the caller needs to render instead of a silently stale list. */
+export type RealtimeStatus = 'idle' | 'connecting' | 'open' | 'reconnecting';
+
 export interface UseRealtimeSocketOptions {
   /** Full `ws://` URL, or null to stay disconnected. */
   url: string | null | undefined;
@@ -64,8 +67,12 @@ export interface UseRealtimeSocketOptions {
 }
 
 /**
- * One reconnecting WebSocket for `url`, shared by every caller that reads the
- * same URL.
+ * One reconnecting WebSocket for `url`, per hook instance.
+ *
+ * Not shared: two components calling this with the same URL get two sockets,
+ * and each receives the room's frames. `PresenceProvider` exists because that is
+ * too many for the surfaces that draw a dot — it owns one socket and hands the
+ * cache writes down through context.
  *
  * Callbacks are held in a ref rather than in the effect's dependency list:
  * callers pass inline arrows, so depending on their identity tore the socket
@@ -76,13 +83,24 @@ export function useRealtimeSocket({ url, onMessage, onOpen, onClose }: UseRealti
   const timerRef = useRef<number | null>(null);
   const delayRef = useRef<number>(RECONNECT_MIN_MS);
   const handlersRef = useRef({ onMessage, onOpen, onClose });
+  const [status, setStatus] = useState<RealtimeStatus>(url ? 'connecting' : 'idle');
 
   useEffect(() => {
     handlersRef.current = { onMessage, onOpen, onClose };
   });
 
   useEffect(() => {
-    if (!url) return;
+    if (!url) {
+      setStatus('idle');
+      return;
+    }
+
+    // A fresh URL is a fresh connection, not the next attempt at the old one.
+    // Without this the escalating delay outlives the switch: open a channel that
+    // has been flapping, then click a healthy one, and its first handshake
+    // failure makes the user wait 5s for a retry that would have cost 1s.
+    delayRef.current = RECONNECT_MIN_MS;
+    setStatus('connecting');
 
     if (!cookieWillReach(url)) {
       const host = typeof window !== 'undefined' ? window.location.hostname : '?';
@@ -92,6 +110,7 @@ export function useRealtimeSocket({ url, onMessage, onOpen, onClose }: UseRealti
           'handshake would be rejected. Set NEXT_PUBLIC_API_URL to the same ' +
           'hostname as the app (localhost, not 127.0.0.1) — see CONTRIBUTING.md.'
       );
+      setStatus('idle');
       return;
     }
 
@@ -105,19 +124,26 @@ export function useRealtimeSocket({ url, onMessage, onOpen, onClose }: UseRealti
 
         socket.addEventListener('open', () => {
           delayRef.current = RECONNECT_MIN_MS;
+          setStatus('open');
           handlersRef.current.onOpen?.();
         });
 
         socket.addEventListener('message', (event) => {
+          let data: unknown;
           try {
-            const data = JSON.parse(event.data);
-            handlersRef.current.onMessage?.(data);
+            data = JSON.parse(event.data);
           } catch {
-            // Ignore malformed payloads.
+            // A frame that is not JSON is not a payload anyone can act on.
+            return;
           }
+          // Deliberately outside the `try`: when a consumer throws, the parse
+          // used to look like the cause, and the real bug — a bad cache write,
+          // an undefined field — was unreproducible from the console.
+          handlersRef.current.onMessage?.(data);
         });
 
         socket.addEventListener('close', () => {
+          setStatus('reconnecting');
           handlersRef.current.onClose?.();
           if (!cancelled) scheduleReconnect();
         });
@@ -158,5 +184,5 @@ export function useRealtimeSocket({ url, onMessage, onOpen, onClose }: UseRealti
     }
   }, []);
 
-  return { send, socketRef };
+  return { send, socketRef, status };
 }
