@@ -334,6 +334,19 @@ client that dies before its cleanup cannot keep a phantom delivery slot — and
 cannot charge its stall to the rest of the room on every later message either.
 One wedged peer therefore costs a sender at most 2s, once.
 
+**No single request may spend its own CPU on the loop that carries the sockets.**
+A 12-round bcrypt measures 264–352 ms here, and `POST /auth/register`,
+`POST /auth/login` and `DELETE /users/me` each do one, so those three run it on a
+worker thread (`dependencies.verify_password_async` / `get_password_hash_async`).
+Measured with `backend/bench/loop_blocking_probe.py`, 12 concurrent
+registrations: before, 4945 ms of wall and a **4904 ms** gap in which a 10 ms
+ticker on the same loop could not tick — every open socket unserved for the
+whole batch; after, 1106–1288 ms and a 110–211 ms gap. What remains scales with
+the request count (≈11 ms each), so it is the synchronous SQLAlchemy on every
+request path, not the hashing — see the S6-RT5 changelog entry for that, for the
+presence socket's writes (measured, deliberately left inline) and for the
+engine's connection-pool ceiling, all from the same probe.
+
 **Presence lifecycle is refcounted per `(workspace, user)`, not per socket.**
 The user's *first* presence socket in a workspace writes `online`; a second tab
 writes **nothing** (otherwise it would clobber a `dnd` the user chose over HTTP);
@@ -499,6 +512,26 @@ Verified by `app/tests/reconnect.spec.ts`: it warms the socket with a delivered 
 `message_ids` is a list because `messages.parent_id` is `ondelete="CASCADE"`: deleting a thread parent removes its replies in the database, so a frame naming only the parent would leave every peer rendering ghosts. The ids are collected before the delete, while the rows still exist.
 
 No response shape changed; both frames are additive for clients that ignore unknown frame types.
+
+### S6-RT5 — bcrypt leaves the event loop (latency behaviour change, no shape change)
+
+Three endpoints hash a password inside `async def` — `POST /auth/register`, `POST /auth/login`, `DELETE /users/me` — and one 12-round bcrypt measured 264–352 ms. The process has one event loop, and it also owns every chat and presence socket, so each of those requests froze all realtime traffic for the length of a hash; because a hash on the loop cannot overlap with the next one, a signup wave cost the sum of its hashes. `backend/bench/loop_blocking_probe.py` drives 12 concurrent registrations through the ASGI app and reports both the batch wall clock and the longest gap a 10 ms ticker on the same loop could not cross:
+
+| | 12 concurrent registrations | worst loop gap |
+|---|---|---|
+| before | 4945 ms (14.7 hashes) | 4904 ms |
+| after | 1106–1288 ms (4.1–4.7 hashes) | 110–211 ms |
+
+The offload is `dependencies.verify_password_async` / `get_password_hash_async` — thin `run_in_threadpool` wrappers, so the sync `verify_password` / `get_password_hash` stay exactly as `manage.py` and any other sync caller need them. The 4904 ms gap is not hypothetical either: `app._loop_stall_watchdog` calls anything over `LOOP_STALL_WARN_SECONDS` (2 s) a stall, and this was 2.5× that.
+
+Two things this does **not** fix, both from the same probe:
+
+- The residue scales with the request count (4 → 54 ms, 8 → 92 ms, 12 → ~130 ms), i.e. ≈11 ms of synchronous SQLAlchemy per request, still on the loop. Every read path in this app is `async def` + sync ORM; moving it is a wider change than a PR.
+- **The engine's QueuePool is `size 5 + overflow 10`.** At 20 concurrent registrations exactly 5 return 500, each after 151.5 s — far past the pool's own 30 s `pool_timeout`, which the measurement does not explain — and the teardown then raises `sqlite3.ProgrammingError: Cannot operate on a closed database`, so pool exhaustion returns a broken connection to the pool rather than only a late 500. Pre-existing, and unaffected in direction by this PR (a shorter request holds its connection for less time). Tracked as an open defect, not written off as a deployment caveat.
+
+The presence socket's two writes (`_set_and_publish`, `_touch`) were tried here and **reverted**: they cost p50 8–11 ms against a 20 s heartbeat period per tab, and putting `_set_and_publish` behind a thread hop made its fan-out a resumed step instead of the same task step, which parks a send into another portal's socket — `test_ws_connect_broadcasts_online` hung rather than failed. The measurement and the harness constraint are recorded in `routers/presence.py:_set_and_publish`.
+
+No route, status code or payload shape changed. `test_event_loop_blocking.py` pins the invariant by thread rather than by duration: bcrypt must execute where no event loop is running, because a timing assertion on a CI runner measures the runner.
 
 ### S6-RT4 — one wedged peer cannot hold the room (latency behaviour change, no shape change)
 

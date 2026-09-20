@@ -201,7 +201,21 @@ async def _publish(workspace_id: str, out: dict) -> None:
 
 
 async def _set_and_publish(workspace_id: str, user_id: str, status: str, message=None) -> None:
-    """Persist a presence transition and fan it out (used by the socket)."""
+    """Persist a presence transition and fan it out (used by the socket).
+
+    Deliberately *not* offloaded to a worker thread the way
+    `dependencies.verify_password_async` offloads bcrypt. Two reasons, both
+    measured: the write costs p50 8–11 ms (`touch_presence` / `set_presence` +
+    commit on temp SQLite — `bench/loop_blocking_probe.py` prints it next to the
+    bcrypt numbers) against a 20 s heartbeat period per tab, and
+    `run_in_threadpool` here makes the `_publish` below a resumed step rather
+    than the same task step — which parks a cross-socket send under
+    `TestClient`, because every websocket session has its own portal loop (the
+    same harness constraint that rules out `asyncio.gather` in
+    `ws._ws_broadcast`). A thread hop buys ~10 ms and costs the suite its only
+    live two-socket delivery test: with the offload in place,
+    `test_ws_connect_broadcasts_online` does not fail, it hangs.
+    """
     db = next(get_db())
     try:
         row = set_presence(
@@ -304,7 +318,14 @@ def touch_presence(db: Session, *, user_id: str, workspace_id: str) -> None:
 
 
 async def _touch(workspace_id: str, user_id: str) -> None:
-    """``touch_presence`` on its own session, for the socket's event loop."""
+    """``touch_presence`` on its own session, for the socket's event loop.
+
+    Also left on the loop. Unlike :func:`_set_and_publish` this one fans out to
+    nobody, so a thread hop here would be safe — but it buys p50 ~9 ms once per
+    20 s per tab, and the two writes are the same work at the same frequency;
+    offloading only the convenient one would leave the loop identical and the
+    code with two rules.
+    """
     db = next(get_db())
     try:
         touch_presence(db, user_id=user_id, workspace_id=workspace_id)

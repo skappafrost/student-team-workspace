@@ -16,11 +16,11 @@ from dependencies import (
     _token_from_request,
     create_session_pair,
     get_current_user,
-    get_password_hash,
+    get_password_hash_async,
     revoke_all_sessions,
     revoke_session,
     rotate_session,
-    verify_password,
+    verify_password_async,
 )
 
 router = APIRouter()
@@ -75,7 +75,7 @@ async def register(payload: RegisterIn, response: Response, db: Session = Depend
     user = models.User(
         email=payload.email,
         display_name=payload.email.split("@")[0],
-        hashed_password=get_password_hash(payload.password),
+        hashed_password=await get_password_hash_async(payload.password),
     )
     db.add(user)
     db.commit()
@@ -98,7 +98,7 @@ async def login(payload: LoginIn, response: Response, db: Session = Depends(get_
     user = db.query(models.User).filter(models.User.email == payload.email).first()
     if not user or not user.hashed_password:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    if not verify_password(payload.password, user.hashed_password):
+    if not await verify_password_async(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     access_token, refresh_token = create_session_pair(user.id, db)
