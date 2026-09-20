@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import PageContainer from '@/components/layout/page-container';
@@ -139,7 +139,6 @@ export default function ChatPage() {
       if (!selectedChannel) return;
       const key = [...channelKeys.messages(selectedChannel.id), searchQuery];
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<Message[]>(key);
       const optimistic = buildOptimisticMessage(
         content,
         selectedChannel.id,
@@ -147,16 +146,20 @@ export default function ChatPage() {
         currentUserId ?? 'you'
       );
       queryClient.setQueryData<Message[]>(key, (old) => [...(old ?? []), optimistic]);
-      return { previous, key };
+      return { key, optimisticId: optimistic.id };
     },
-    onError: (err, _content, context) => {
-      if (context?.key) {
-        queryClient.setQueryData<Message[]>(context.key, context.previous ?? []);
-      }
+    onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to send message');
     },
     onSettled: (_data, _error, _content, context) => {
       if (context?.key) {
+        // Settle by this mutation's own id. Restoring a whole-list snapshot used
+        // to resurrect another in-flight send's placeholder (and drop the real
+        // row that had already replaced it), because each mutation captured the
+        // list as it looked before *its* insert.
+        queryClient.setQueryData<Message[]>(context.key, (old) =>
+          (old ?? []).filter((m) => m.id !== context.optimisticId)
+        );
         void queryClient.invalidateQueries({ queryKey: context.key });
       }
       setDraft('');
@@ -197,6 +200,19 @@ export default function ChatPage() {
     typingNames.length === 0
       ? null
       : `${typingNames.join(', ')} ${typingNames.length === 1 ? 'is' : 'are'} typing…`;
+
+  useEffect(() => {
+    // Leaving a channel — or unmounting the view — drops both its typers and the
+    // 3s timers that were going to clear them. Without this, a name from the
+    // channel you were just reading can sit above the composer of the one you
+    // switched to for up to three seconds, and the timer still fires after the
+    // component is gone.
+    return () => {
+      Object.values(typingTimersRef.current).forEach((id) => window.clearTimeout(id));
+      typingTimersRef.current = {};
+      setTypingUsers({});
+    };
+  }, [selectedChannel?.id]);
 
   // Realtime WebSocket: append incoming messages for the selected channel.
   const { sendTyping, status: socketStatus } = useChannelWebSocket({
@@ -260,11 +276,17 @@ export default function ChatPage() {
           }
         );
       } else if (payload.type === 'reaction_update' && payload.message_id) {
-        if (!selectedChannel) return;
+        if (payload.channel_id !== selectedChannel?.id) return;
+        const key = [...channelKeys.messages(selectedChannel.id), searchQuery];
+        const current = queryClient.getQueryData<Message[]>(key);
+        // Patch a row that is already here, and nothing otherwise. Writing an
+        // empty list would create cache for a channel whose messages never
+        // loaded, and `[]` is a real answer to that query for the whole
+        // `staleTime` — the channel would read as emptied rather than unvisited.
+        if (!current?.some((m) => m.id === payload.message_id)) return;
         const { message_id, reactions } = payload;
-        void queryClient.setQueryData<Message[]>(
-          [...channelKeys.messages(selectedChannel.id), searchQuery],
-          (old) => (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
+        queryClient.setQueryData<Message[]>(key, (old) =>
+          (old ?? []).map((m) => (m.id === message_id ? { ...m, reactions } : m))
         );
       } else if (payload.type === 'message_updated' && payload.message) {
         const msg = payload.message;

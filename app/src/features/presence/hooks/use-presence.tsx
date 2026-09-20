@@ -22,9 +22,6 @@ const PRESENCE_HEARTBEAT_MS = 20_000;
 
 interface PresenceContextValue {
   byUser: ReadonlyMap<string, PresenceRow>;
-  onlineCount: number;
-  queryKey: readonly unknown[];
-  isLoading: boolean;
   /** True for a guest: the server refuses presence entirely, so draw nothing. */
   hidden: boolean;
   report: (row: PresenceRow) => void;
@@ -98,17 +95,14 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, [send]);
 
-  const value = useMemo<PresenceContextValue>(() => {
-    const rows = query.data ?? [];
-    return {
-      byUser: new Map(rows.map((row) => [row.user_id, row])),
-      onlineCount: rows.filter((row) => row.status === 'online').length,
-      queryKey,
-      isLoading: query.isLoading,
+  const value = useMemo<PresenceContextValue>(
+    () => ({
+      byUser: new Map((query.data ?? []).map((row) => [row.user_id, row])),
       hidden: forbidden,
       report
-    };
-  }, [query.data, query.isLoading, forbidden, queryKey, report]);
+    }),
+    [query.data, forbidden, report]
+  );
 
   return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;
 }
