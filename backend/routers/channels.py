@@ -1,5 +1,7 @@
 """Channel CRUD + channel WebSocket endpoint."""
 
+import logging
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -30,6 +32,8 @@ from ws import (
     _ws_room_key_user,
     _ws_room_leave,
 )
+
+logger = logging.getLogger("stw.ws.channels")
 
 router = APIRouter()
 
@@ -309,8 +313,12 @@ async def channel_websocket(websocket: WebSocket, channel_id: str):
                 continue
             # Echo back a heartbeat acknowledgement.
             await websocket.send_json({"type": "pong", "channel_id": channel_id})
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as exc:
+        # The code is the diagnosis: 1011 is uvicorn's keepalive deadline, 1006
+        # is an abrupt TCP teardown, 1005 is what the app sees when the server
+        # failed the connection itself. Without this line every dropped socket is
+        # a mystery to whoever is reading logs.
+        logger.info("channel socket closed: code=%s", exc.code)
     finally:
         # Both rooms: leaving one without the other would strand the socket
         # in the user room (leaked delivery slot) or the channel room

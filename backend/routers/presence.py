@@ -25,6 +25,7 @@ change reaches members on any surface they have open. The handshake reuses
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -42,6 +43,8 @@ from ws import (
     _ws_room_key_workspace,
     _ws_room_leave,
 )
+
+logger = logging.getLogger("stw.ws.presence")
 
 router = APIRouter()
 
@@ -278,8 +281,8 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
             if status in PRESENCE_STATUSES:
                 await _set_and_publish(workspace_id, user["id"], status, message)
             await websocket.send_json({"type": "pong"})
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as exc:
+        logger.info("presence socket closed: code=%s", exc.code)
     finally:
         _ws_room_leave(key, websocket)
         if _presence_leave(workspace_id, user["id"], websocket):

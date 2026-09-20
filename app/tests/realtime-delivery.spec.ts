@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-import { apiPost, createWorkspace, inviteAndAccept, openPage, registerUser } from './helpers';
+import {
+  APP,
+  apiPost,
+  createWorkspace,
+  inviteAndAccept,
+  openAuthContext,
+  registerUser
+} from './helpers';
 
 /**
  * Real-time delivery, measured where the bug lived: the WebSocket protocol.
@@ -18,25 +25,35 @@ import { apiPost, createWorkspace, inviteAndAccept, openPage, registerUser } fro
  * client's console would silently assert nothing in CI.
  */
 
-/** Watches only the app's own sockets; Next's HMR socket shares the page. */
+/**
+ * Watches the app's own sockets, split by namespace.
+ *
+ * Two filters matter. Next's HMR socket lives on :3000 and would inflate every
+ * count. And since #211 a chat page holds TWO backend sockets — the channel
+ * room and the workspace presence room — so filtering on `:8000` alone measures
+ * "how many sockets this page has" as one undifferentiated number, which is
+ * exactly what made the reconnect question unanswerable.
+ */
 function watchSockets(page: import('@playwright/test').Page) {
-  const opened: string[] = [];
+  const channel: string[] = [];
+  const presence: string[] = [];
   const errored: string[] = [];
   const frames: string[] = [];
   page.on('websocket', (ws) => {
     if (!ws.url().includes(':8000')) return;
-    opened.push(ws.url());
+    (ws.url().includes('/ws/workspaces/') ? presence : channel).push(ws.url());
     ws.on('socketerror', (text) => errored.push(text));
     ws.on('framereceived', () => frames.push(ws.url()));
   });
-  return { opened, errored, frames };
+  return { channel, presence, errored, frames };
 }
 
 async function openChat(browser: import('@playwright/test').Browser, token: string, channelName: string) {
-  const { context, page } = await openPage(browser, token, '/dashboard/chat');
+  const { context, page } = await openAuthContext(browser, token);
   const sockets = watchSockets(page);
   // The first hit on a route triggers a webpack compile on a cold cache.
   page.setDefaultTimeout(120_000);
+  await page.goto(`${APP}/dashboard/chat`);
   const row = page.getByText(channelName, { exact: false }).first();
   await row.waitFor();
   await row.click();
@@ -61,25 +78,29 @@ test('a browser WebSocket completes its handshake and delivers frames', async ({
   const a = await openChat(browser, author.token, channelName);
   const b = await openChat(browser, peer.token, channelName);
 
-  // Both pages hold a socket on the same channel room, and neither handshake
-  // was aborted. An exact count is not asserted: the hook is designed to
-  // reconnect after a close, and under parallel load a reconnect is legitimate
-  // client behaviour rather than a defect.
-  await expect.poll(() => a.sockets.opened.length).toBeGreaterThan(0);
-  await expect.poll(() => b.sockets.opened.length).toBeGreaterThan(0);
-  expect(a.sockets.opened[0]).toBe(b.sockets.opened[0]);
+  // One channel socket per page, on the same room, with no aborted handshake.
+  // The count is exact now that the watcher is attached before navigation:
+  // Playwright only surfaces sockets opened after `page.on('websocket')` was
+  // bound, so an earlier version of this spec could not see a socket that
+  // connected during first paint and reported a healthy page either way.
+  await expect.poll(() => a.sockets.channel.length).toBe(1);
+  await expect.poll(() => b.sockets.channel.length).toBe(1);
+  expect(a.sockets.channel[0]).toBe(b.sockets.channel[0]);
+  // The chat page also holds a presence socket; conflating the two under one
+  // `:8000` filter is what made "2→3 sockets" impossible to interpret.
+  expect(a.sockets.presence.length).toBeGreaterThanOrEqual(1);
 
   // The reconnect-per-render regression. Not asserted as "no new socket": under
   // parallel load a socket does close, and reconnecting is what the hook is for.
   // The defect being guarded is one socket per render, which 40 keystrokes used
   // to produce, so the bound is generous and still decisive.
   const composer = a.page.getByPlaceholder(`Message #${channelName}`);
-  const socketsBeforeTyping = a.sockets.opened.length;
+  const socketsBeforeTyping = a.sockets.channel.length;
   await composer.pressSequentially('x'.repeat(40));
   await composer.fill('');
   expect(
-    a.sockets.opened.length,
-    `typing opened ${a.sockets.opened.length - socketsBeforeTyping} sockets in ${socketsBeforeTyping}`
+    a.sockets.channel.length,
+    `typing opened ${a.sockets.channel.length - socketsBeforeTyping} sockets in ${socketsBeforeTyping}`
   ).toBeLessThanOrEqual(socketsBeforeTyping + 3);
 
   const stamp = Date.now();

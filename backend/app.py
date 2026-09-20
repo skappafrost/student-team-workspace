@@ -4,9 +4,10 @@ Domain endpoints live in ``routers/``; shared plumbing in ``dependencies.py``
 (auth, tokens, resource getters) and ``authorization.py`` (Role, RBAC checks).
 """
 
+import asyncio
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -71,6 +72,34 @@ def _require_production_jwt_secret() -> None:
         )
 
 
+#: uvicorn pings each WebSocket every ``ws_ping_interval`` seconds and fails the
+#: connection when no pong arrives within ``ws_ping_timeout`` (both default 20.0,
+#: and neither is configured anywhere here). A browser cannot answer a ping while
+#: the event loop is busy, so blocking work inside an ``async def`` handler shows
+#: up first as a socket dying with 1011 — logged by uvicorn at TRACE, i.e.
+#: invisibly. Measuring the stall directly is what turns "the socket closed under
+#: load" from an observation into a diagnosis.
+LOOP_STALL_CHECK_SECONDS = 1.0
+LOOP_STALL_WARN_SECONDS = 2.0
+
+
+async def _loop_stall_watchdog() -> None:
+    log = logging.getLogger("stw.loop")
+    loop = asyncio.get_running_loop()
+    previous = loop.time()
+    while True:
+        await asyncio.sleep(LOOP_STALL_CHECK_SECONDS)
+        now = loop.time()
+        drift = now - previous - LOOP_STALL_CHECK_SECONDS
+        if drift > LOOP_STALL_WARN_SECONDS:
+            log.warning(
+                "event loop stalled %.1fs: WebSocket keepalive cannot be answered "
+                "while the loop is blocked",
+                drift,
+            )
+        previous = now
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _require_production_jwt_secret()  # TA1-2: refuse to boot on a known secret
@@ -81,7 +110,13 @@ async def lifespan(app: FastAPI):
             "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
             "auth bypass is ENABLED. Never run with this combination outside tests."
         )
-    yield
+    watchdog = asyncio.create_task(_loop_stall_watchdog())
+    try:
+        yield
+    finally:
+        watchdog.cancel()
+        with suppress(asyncio.CancelledError):
+            await watchdog
 
 
 app = FastAPI(title="Student Team Workspace API", lifespan=lifespan)
