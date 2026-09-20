@@ -238,26 +238,38 @@ Server -> client:
 
 ### Frames — presence socket
 
-Client -> server. Text frames only, and the server's parser is permissive in
-ways that matter:
+Client -> server. Text frames only. **Only an explicit status frame may change a
+status** — everything else is a keepalive:
 
 - `{"type": "presence", "status": "away", "status_message": "BRB"}` -> stores that
-  status, broadcasts `presence_update`, replies `{"type": "pong"}`.
-- `{"type": "presence"}` with no `status` -> defaults to **`online`** and
-  **clears** `status_message`.
-- **Any other frame also writes `online`** with a cleared message. A bare `ping`,
-  a `{"type": "ping"}`, or anything else that is not a `presence` frame all land
-  on the same defaults, so treat *every* send as a heartbeat.
-- A `status` outside `online|away|dnd|offline` -> nothing is stored and nothing
-  is broadcast, but you still get `{"type": "pong"}`.
-- Text starting with `{` that is not valid JSON -> the frame is skipped
-  **without a `pong`**. A client that waits for a pong after every send can hang
-  on its own malformed frame.
+  status and message, broadcasts `presence_update`, replies `{"type": "pong"}`.
+  Omitting `status_message` clears it; it must be a string of at most 255 chars.
+- `{"type": "presence"}` with no `status` -> **`presence_error` /
+  `missing_status`**. It no longer defaults to `online`: a frame that says nothing
+  must not overwrite the status the user chose.
+- A `status` that is not one of `online|away|dnd|offline`, or not a string ->
+  **`presence_error` / `invalid_status`**, and **no `pong`**. A `pong` for a frame
+  that changed nothing was how a client learned the wrong thing.
+- `{"type": "bye"}` -> the server closes the socket, and the caller's last socket
+  going away writes `offline` (the same teardown a close triggers). The bundled
+  browser client does not send it — it closes the socket instead, which the
+  server sees as a disconnect; `bye` exists for clients that want to say so
+  before tearing the transport down.
+- **Anything else is a heartbeat**: bare text (`ping`), `{"type": "ping"}`, a JSON
+  object with another `type`. It refreshes `last_seen` only — the stored status and
+  message are untouched and **nothing is broadcast** — and replies
+  `{"type": "pong"}`. Send one well inside `AWAY_AFTER_SECONDS` (300s); the client
+  sends every 20s. A tab that never sends anything goes `away` after five minutes
+  and its dot greys out while the user is still looking at it.
+- Text starting with `{` that is not a valid JSON object -> **`presence_error` /
+  `malformed_json`**. It used to be dropped in silence, which hung any client
+  waiting for a reply to its own bad frame.
 
-Server -> client. Three kinds:
+Server -> client. Four kinds:
 
 - `{"type": "presence_update", "workspace_id": ..., "user_id": ..., "name": ..., "status": ..., "status_message": ..., "last_seen": ...}` — the five HTTP item fields plus the workspace id. **Broadcasts include the sender's own socket** (unlike chat's `typing`, which excludes it), so a client must be ready to apply its own change coming back at it.
 - `{"type": "pong"}`
+- `{"type": "presence_error", "reason": "missing_status" | "invalid_status" | "invalid_status_message" | "malformed_json"}`
 - `{"type": "notification_created", "notification": NotificationOut}` — this socket
   is in the caller's `user:<id>` room too, which is what lets a dashboard tab
   with no channel socket react to new activity.
@@ -392,6 +404,19 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 ### TA4-1 — message notification fan-out (additive)
 
 `POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by **both** sockets (`routers/channels.py:channel_websocket` and `routers/presence.py:presence_websocket` each join their own room *and* the user room) — so a client sees `{"type": "notification_created", "notification": NotificationOut}` on whichever it has open, and a chat page that holds both gets it twice. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+
+### S6-RT3 — presence frames: a keepalive is not a status change (behaviour change)
+
+The presence socket's receive loop seeded `status = "online"` **before** it looked at the payload, so the socket's own documented keepalive overwrote whatever the user had chosen: a bare `ping` wrote `online`, cleared `status_message`, and rebroadcast it to every member socket. A `{"type": "presence"}` with no `status` did the same, and an unknown `status` got a `pong` that claimed success while writing nothing. A non-string `status` raised inside the `frozenset` membership test and killed the socket. Malformed JSON was dropped without any reply, so a client waiting for the answer to its own bad frame hung.
+
+Now (full rules in § Frames — presence socket):
+
+- Only `{"type":"presence","status":"online|away|dnd|offline"}` changes a status; anything else is a heartbeat.
+- A heartbeat refreshes `last_seen` and nothing else — no status write, no message clear, **no broadcast** — and answers `pong`. The bundled client sends one every 20s (`app/src/features/presence/hooks/use-presence.tsx`), which is what keeps an idle tab's dot green instead of decaying to `away` after `AWAY_AFTER_SECONDS`.
+- Rejections answer `{"type":"presence_error","reason":...}` (`missing_status`, `invalid_status`, `invalid_status_message`, `malformed_json`) instead of a `pong`.
+- `{"type":"bye"}` is honoured: the server closes the socket and runs the normal last-socket-`offline` teardown. It was already advertised by the endpoint docstring and never implemented.
+
+Breaking for any client that relied on the permissive form: a frame with a typo'd status now gets an error instead of a `pong`, and `{"type":"presence"}` no longer means "come online". `PresenceRow`, `GET/POST /presence`, and the HTTP `422` envelopes are unchanged.
 
 ### TA4-2 — the notification push reaches a socket (fix, no shape change)
 

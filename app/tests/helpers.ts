@@ -117,3 +117,37 @@ export async function openPage(
   await page.goto(`${APP}${path}`);
   return { context, page };
 }
+
+/** The id of the user a token belongs to. */
+export async function userId(token: string): Promise<string> {
+  const ctx = await request.newContext({
+    baseURL: API,
+    extraHTTPHeaders: { Authorization: `Bearer ${token}` }
+  });
+  const res = await ctx.get('/auth/me');
+  const body = await res.json();
+  await ctx.dispose();
+  if (!res.ok()) throw new Error(`/auth/me failed: ${res.status()} ${JSON.stringify(body)}`);
+  return body.id as string;
+}
+
+/**
+ * Call a BFF route handler with `token` as the session cookie.
+ *
+ * The specs need this because the BFF resolves "the current workspace" as the
+ * first `/workspaces` row: anything the page itself would do is reachable here
+ * and nowhere else, so a spec that skipped it would not be testing the layer the
+ * browser actually talks to.
+ */
+export async function bff(
+  pathname: string,
+  token: string,
+  init?: { method?: string; body?: unknown }
+): Promise<{ status: number; body: any }> {
+  const res = await fetch(`${APP}${pathname}`, {
+    method: init?.method ?? 'GET',
+    headers: { 'Content-Type': 'application/json', Cookie: `session_token=${token}` },
+    body: init?.body === undefined ? undefined : JSON.stringify(init.body)
+  });
+  return { status: res.status, body: await res.json().catch(() => null) };
+}

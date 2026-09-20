@@ -13,7 +13,14 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // One worker, everywhere. Measured on a 16 GB machine with 34 specs: four
+  // workers crashed the dev server (`RangeError: Array buffer allocation
+  // failed`, then `net::ERR_CONNECTION_REFUSED` for every later test, which
+  // reads as eleven unrelated failures); two workers lost one spec to its own
+  // 120s timeout while webpack compiled routes; one worker was 34/34 green in
+  // the *same* wall clock as two, because the bottleneck is the shared dev
+  // server, not the CPU. Override with PLAYWRIGHT_WORKERS on a bigger machine.
+  workers: Number(process.env.PLAYWRIGHT_WORKERS) || 1,
   reporter: [['html', { open: 'never' }], ['list']],
   // `dev:webpack` compiles a route on its first hit, which on this project's
   // globals.css takes far longer than the 30s default — a cold compile reads to

@@ -1,25 +1,25 @@
 import { expect, test } from '@playwright/test';
 
-import { API, apiPost, createWorkspace, inviteAndAccept, openPage, registerUser } from './helpers';
+import {
+  apiPost,
+  createWorkspace,
+  inviteAndAccept,
+  openPage,
+  registerUser,
+  userId
+} from './helpers';
 
 /**
  * A notification that only exists as a row is not one the user sees.
  *
- * The push helper used to re-query the rows it had just written with a
- * predicate the fan-out could never satisfy, so it silently returned nothing
- * while every backend test still passed — they all asserted on the row. This
- * asserts the other half: a peer sitting on an unrelated dashboard page, whose
- * only open socket is the presence one, learns about the message without a
- * reload. `staleTime` is 60s and nothing polls, so the socket is the only
- * thing that can move this list.
+ * The push helper used to re-query the rows it had just written with a predicate
+ * the fan-out could never satisfy, so it silently returned nothing while every
+ * backend test still passed — they all asserted on the row. This asserts the
+ * other half: a peer sitting on an unrelated dashboard page, whose only open
+ * socket is the presence one, learns about the message without a reload.
+ * `staleTime` is 60s and nothing polls, so the socket is the only thing that can
+ * move this list.
  */
-async function userId(token: string): Promise<string> {
-  const res = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
-  const body = await res.json();
-  expect(res.status).toBe(200);
-  return body.id as string;
-}
-
 test('a DM reaches a dashboard tab that has no channel socket open', async ({ browser }) => {
   test.setTimeout(120_000);
 

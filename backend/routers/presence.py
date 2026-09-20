@@ -18,14 +18,20 @@ TTL column, no sweeper: both transitions are computed at read/broadcast time.
 
 Realtime fan-out reuses the in-process ``ws`` room manager on a dedicated
 ``workspace:<id>`` room (every member socket of one workspace), so a status
-change reaches members on any surface they have open. The handshake reuses
-``dependencies._ws_resolve_user`` and the documented 4401/4403/4404 close codes.
+change reaches members on any surface they have open. The socket *also* joins
+the owner's ``user:<id>`` room, which is what lets a dashboard tab with no
+channel socket receive its own ``notification_created`` frames. Inbound frame
+rules are in :func:`_parse_presence_frame`: only an explicit status frame may
+change a status, everything else is a keepalive that refreshes ``last_seen``.
+The handshake reuses ``dependencies._ws_resolve_user`` and the documented
+4401/4403/4404 close codes.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -239,12 +245,80 @@ def _presence_leave(workspace_id: str, user_id: str, websocket) -> bool:
     return True
 
 
+#: Same ceiling as the HTTP schema's ``Field(max_length=255)``, enforced here too
+#: because PostgreSQL would otherwise raise on a long socket-supplied message.
+STATUS_MESSAGE_MAX = 255
+
+
+def _parse_presence_frame(raw: str) -> tuple[str, Any]:
+    """``("heartbeat"|"bye"|"presence"|"error", payload)`` for one inbound frame.
+
+    Only an explicit ``{"type": "presence", "status": ...}`` may change a
+    status. The loop used to seed ``status = "online"`` *before* inspecting the
+    payload, so every other frame — the documented plain-text keepalive, a
+    ``{"type": "ping"}``, a misspelled status, ``{"type": "presence"}`` with no
+    status at all — wrote ``online`` and broadcast it. A non-string status then
+    raised inside the ``frozenset`` membership test, which killed the socket.
+    """
+    if not raw.strip().startswith("{"):
+        return ("heartbeat", None)
+    try:
+        frame = json.loads(raw)
+    except ValueError:
+        return ("error", "malformed_json")
+    if not isinstance(frame, dict):
+        return ("error", "malformed_json")
+    kind = frame.get("type")
+    if kind == "bye":
+        return ("bye", None)
+    if kind != "presence":
+        return ("heartbeat", None)
+    status = frame.get("status")
+    if status is None:
+        return ("error", "missing_status")
+    if not isinstance(status, str) or status not in PRESENCE_STATUSES:
+        return ("error", "invalid_status")
+    message = frame.get("status_message")
+    if message is not None and (
+        not isinstance(message, str) or len(message) > STATUS_MESSAGE_MAX
+    ):
+        return ("error", "invalid_status_message")
+    return ("presence", (status, message))
+
+
+def touch_presence(db: Session, *, user_id: str, workspace_id: str) -> None:
+    """Refresh ``last_seen`` and nothing else.
+
+    A keepalive proves the member is present; it does not choose a status.
+    Without this the idle→away decay would grey out every dot five minutes
+    after a tab opened, since ``last_seen`` previously moved only on a status
+    write — which is the thing the heartbeat must stop doing.
+    """
+    row = get_presence(db, user_id, workspace_id)
+    if row is None:
+        set_presence(db, user_id=user_id, workspace_id=workspace_id, status="online")
+        return
+    row.last_seen = _utcnow()
+    db.commit()
+
+
+async def _touch(workspace_id: str, user_id: str) -> None:
+    """``touch_presence`` on its own session, for the socket's event loop."""
+    db = next(get_db())
+    try:
+        touch_presence(db, user_id=user_id, workspace_id=workspace_id)
+    finally:
+        db.close()
+
+
 @router.websocket("/ws/workspaces/{workspace_id}/presence")
 async def presence_websocket(websocket: WebSocket, workspace_id: str):
-    """Presence socket: first connect→online, frame→set status, last bye→offline.
+    """Presence socket: first connect→online, status frame→set, last close→offline.
 
-    Rejection happens before ``accept()`` so the client sees a documented 4xxx
-    close code, matching the channel socket's contract.
+    A frame that is not a ``presence`` frame is a keepalive: it refreshes
+    ``last_seen`` and changes nothing else. Rejection happens before
+    ``accept()`` so the client sees a documented 4xxx close code, matching the
+    channel socket's contract.
     """
     db = next(get_db())
     try:
@@ -275,17 +349,24 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
             await _set_and_publish(workspace_id, user["id"], "online")
         while True:
             raw = await websocket.receive_text()
-            status, message = "online", None
-            if raw.strip().startswith("{"):
-                try:
-                    frame = json.loads(raw)
-                except ValueError:
-                    continue
-                if frame.get("type") == "presence":
-                    status = frame.get("status", "online")
-                    message = frame.get("status_message")
-            if status in PRESENCE_STATUSES:
-                await _set_and_publish(workspace_id, user["id"], status, message)
+            verdict, payload = _parse_presence_frame(raw)
+            if verdict == "bye":
+                # Close explicitly. The endpoint *returning* sends no close
+                # frame, so the client's socket would stay open with nothing on
+                # the other end — visible here as a test that blocks forever on
+                # `receive_json()`. The `finally` below still owns the room
+                # leaves and the offline write.
+                await websocket.close()
+                break
+            if verdict == "error":
+                await websocket.send_json({"type": "presence_error", "reason": payload})
+                continue
+            if verdict == "heartbeat":
+                await _touch(workspace_id, user["id"])
+                await websocket.send_json({"type": "pong"})
+                continue
+            status, message = payload
+            await _set_and_publish(workspace_id, user["id"], status, message)
             await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect as exc:
         logger.info("presence socket closed: code=%s", exc.code)

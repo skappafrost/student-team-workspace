@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 
 import { notificationKeys } from '@/features/notifications/api/queries';
 import { useWorkspace } from '@/features/workspace/hooks/use-workspace';
@@ -11,6 +11,14 @@ import { realtimeUrl, useRealtimeSocket } from '@/lib/realtime/use-websocket';
 import { presenceKeys, presenceQueryOptions } from '../api/queries';
 import { setMyPresence } from '../api/service';
 import type { PresenceRow } from '../api/types';
+
+/**
+ * Keepalive period. The server's idle→away decay is 300s (`AWAY_AFTER_SECONDS`),
+ * so 20s leaves fifteen retries inside the budget and still fits the ~1/min
+ * throttling a background tab gets. It is also short enough for the browser spec
+ * in `tests/presence-heartbeat.spec.ts` to observe a real tick.
+ */
+const PRESENCE_HEARTBEAT_MS = 20_000;
 
 interface PresenceContextValue {
   byUser: ReadonlyMap<string, PresenceRow>;
@@ -53,7 +61,7 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
     [queryClient, queryKey]
   );
 
-  useRealtimeSocket({
+  const { send } = useRealtimeSocket({
     // `workspace?.id` must not reach the URL as the literal "undefined": the
     // socket hook keys its effect on `url`, so a stable-but-wrong string would
     // open a connection that fails forever instead of waiting for the workspace.
@@ -79,6 +87,16 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey });
     }
   });
+
+  useEffect(() => {
+    // The server derives `away` from a stale `last_seen` on a stored `online`
+    // row, and this heartbeat is the only frame a tab nobody is typing in ever
+    // sends: without it every dot greys out five minutes after the page opened,
+    // socket and all. `send` is a no-op while the socket is not OPEN, so a tick
+    // that lands mid-reconnect is simply skipped and the next one counts.
+    const timer = window.setInterval(() => send({ type: 'ping' }), PRESENCE_HEARTBEAT_MS);
+    return () => window.clearInterval(timer);
+  }, [send]);
 
   const value = useMemo<PresenceContextValue>(() => {
     const rows = query.data ?? [];
