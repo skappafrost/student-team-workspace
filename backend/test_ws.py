@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app import create_access_token
-from conftest import as_user, make_user
+from conftest import as_user, drain_until_reply, make_user
 from ws import _ws_room_key_channel, _ws_room_key_user, _ws_rooms
 
 
@@ -150,6 +150,83 @@ def test_ws_broadcast_new_message_to_member(client):
     assert frame["type"] == "new_message"
     assert frame["message"]["content"] == "hello realtime"
     assert frame["message"]["author_id"] == "ws-auth-owner9"
+
+
+def _post(client, channel_id: str, content: str, parent_id: str | None = None) -> str:
+    payload: dict = {"content": content}
+    if parent_id:
+        payload["parent_id"] = parent_id
+    resp = client.post(f"/channels/{channel_id}/messages", json=payload)
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def test_message_edit_reaches_the_channel_room(client):
+    """`PATCH /messages/{id}` currently commits and says nothing.
+
+    Peers keep showing the old text until something else refetches the list, so
+    an edit is invisible in the one place it is supposed to appear.
+    """
+    channel = _make_channel(client, "ws-edit-owner")
+    as_user(client, "ws-edit-owner")
+    with _connect(client, channel["id"], _token("ws-edit-owner")) as sock:
+        message_id = _post(client, channel["id"], "original text")
+        drain_until_reply(sock)  # clear the new_message frame
+        resp = client.patch(f"/messages/{message_id}", json={"content": "corrected"})
+        assert resp.status_code == 200, resp.text
+        frames = drain_until_reply(sock)
+
+    edited = [f for f in frames if f.get("type") == "message_updated"]
+    assert len(edited) == 1, f"no edit frame reached the room; got {[f.get('type') for f in frames]}"
+    assert edited[0]["message"]["id"] == message_id
+    assert edited[0]["message"]["content"] == "corrected"
+
+
+def test_message_delete_reaches_the_channel_room(client):
+    """Same for a delete, and the frame has to name every row CASCADE removed.
+
+    `messages.parent_id` is `ondelete="CASCADE"`, so deleting a thread parent
+    silently deletes its replies in the database while every peer keeps rendering
+    them — a frame carrying only the parent id would leave the same ghosts.
+    """
+    channel = _make_channel(client, "ws-del-owner")
+    as_user(client, "ws-del-owner")
+    with _connect(client, channel["id"], _token("ws-del-owner")) as sock:
+        parent = _post(client, channel["id"], "ask a question")
+        reply_a = _post(client, channel["id"], "answer one", parent_id=parent)
+        reply_b = _post(client, channel["id"], "answer two", parent_id=parent)
+        drain_until_reply(sock)
+        resp = client.delete(f"/messages/{parent}")
+        assert resp.status_code == 204, resp.text
+        frames = drain_until_reply(sock)
+
+    deleted = [f for f in frames if f.get("type") == "message_deleted"]
+    assert len(deleted) == 1, (
+        f"no delete frame reached the room; got {[f.get('type') for f in frames]}"
+    )
+    assert deleted[0]["channel_id"] == channel["id"]
+    assert set(deleted[0]["message_ids"]) == {parent, reply_a, reply_b}, (
+        "the frame must list the CASCADE-removed replies too, or peers keep them"
+    )
+
+
+def test_message_edit_of_another_channels_message_stays_in_its_room(client):
+    """An edit must not be broadcast into a channel that never had the message."""
+    a = _make_channel(client, "ws-editiso-owner", name="edit-a")
+    b = _make_channel(client, "ws-editiso-owner", name="edit-b")
+    as_user(client, "ws-editiso-owner")
+    with _connect(client, a["id"], _token("ws-editiso-owner")) as sa, _connect(
+        client, b["id"], _token("ws-editiso-owner")
+    ) as sb:
+        message_id = _post(client, a["id"], "in channel a")
+        drain_until_reply(sa)
+        drain_until_reply(sb)
+        assert client.patch(f"/messages/{message_id}", json={"content": "edited in a"}).status_code == 200
+        in_a = [f.get("type") for f in drain_until_reply(sa)]
+        in_b = [f.get("type") for f in drain_until_reply(sb)]
+
+    assert in_a.count("message_updated") == 1, in_a
+    assert "message_updated" not in in_b, in_b
 
 
 def test_ws_typing_excludes_sender(client, db_session):
