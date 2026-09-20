@@ -78,16 +78,20 @@ export async function inviteAndAccept(
 }
 
 /**
- * A page that is already signed in as `token`.
+ * A context and page that are already signed in as `token`, NOT yet navigated.
+ *
+ * Split out from `openPage` because `page.on('websocket')` only reports sockets
+ * opened after it is attached — a page that connected during the first load was
+ * invisible to the watcher, which is how a healthy connection got measured as
+ * zero frames. Attach listeners here, then `page.goto(...)`.
  *
  * The cookie is written for the page's own hostname on purpose: `session_token`
  * is SameSite=Lax and host-scoped, so a page served from `localhost` with a
  * socket aimed at `127.0.0.1` authenticates as nobody.
  */
-export async function openPage(
+export async function openAuthContext(
   browser: Browser,
-  token: string,
-  path: string
+  token: string
 ): Promise<{ context: import('@playwright/test').BrowserContext; page: Page }> {
   const context = await browser.newContext();
   await context.addCookies([
@@ -101,6 +105,15 @@ export async function openPage(
     }
   ]);
   const page = await context.newPage();
+  return { context, page };
+}
+
+export async function openPage(
+  browser: Browser,
+  token: string,
+  path: string
+): Promise<{ context: import('@playwright/test').BrowserContext; page: Page }> {
+  const { context, page } = await openAuthContext(browser, token);
   await page.goto(`${APP}${path}`);
   return { context, page };
 }

@@ -101,6 +101,16 @@ async def _ws_broadcast(room_key: str, payload: dict[str, Any], exclude=None) ->
         room.discard(ws)
         if not room:
             _ws_rooms.pop(room_key, None)
+    # DEBUG, not INFO: this fires on every frame, so at chat volume an INFO line
+    # costs more than it tells anyone. It exists because a `delivered` of 0 in a
+    # room that still looks populated is the exact signature of a handshake that
+    # the browser refused, and that is worth being able to see with one flag.
+    logger.debug(
+        "broadcast room=%s delivered=%d room_size_after=%d",
+        room_key,
+        delivered,
+        len(room),
+    )
     return delivered
 
 
