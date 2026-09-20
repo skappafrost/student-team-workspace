@@ -7,6 +7,7 @@ session (same engine as conftest's db_session), so writes are visible to reads.
 """
 
 import json
+import time
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
@@ -162,6 +163,168 @@ def test_ws_status_frame_updates_and_pings(client):
             assert dnd["status"] == "dnd" and dnd["status_message"] == "heads down"
 
 
+# ---------------------------------------------------------------------------
+# Frame contract: only an explicit presence frame may change a status
+# ---------------------------------------------------------------------------
+
+
+def _collect(session, *frames) -> list[dict]:
+    """Send ``frames``, then read everything the server answers.
+
+    ``receive_json()`` has no timeout, so a test that reads a fixed number of
+    frames hangs forever when the server answers with fewer — which is how the
+    malformed-JSON case behaves today. The plain-text heartbeat is the barrier:
+    it is answered under the old contract and the new one alike, so the drain
+    terminates either way and a missing reply becomes an assertion instead of a
+    stuck CI job.
+    """
+    for frame in frames:
+        session.send_text(frame)
+    session.send_text("ping")
+    seen: list[dict] = []
+    while True:
+        frame = session.receive_json()
+        if frame.get("type") == "pong":
+            return seen
+        seen.append(frame)
+
+
+def _terminated(session) -> bool:
+    """True when the server closed the socket, False while it keeps answering."""
+    while True:
+        try:
+            frame = session.receive_json()
+        except WebSocketDisconnect:
+            return True
+        if frame.get("type") in ("pong", "presence_error"):
+            return False
+
+
+def test_heartbeat_preserves_a_deliberate_dnd(client):
+    """The documented keepalive must not undo the status the user picked.
+
+    The receive loop initialised ``status = "online"`` *before* looking at the
+    payload, so every frame that was not a well-formed presence frame — a bare
+    ``ping``, a ``{"type":"ping"}``, a typo in a status — wrote ``online``.
+    """
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "keeper")
+    with client.websocket_connect(_presence_url(ws["id"], tok)) as w:
+        assert w.receive_json()["type"] == "presence_update"  # connect -> online
+        as_user(client, "keeper")
+        assert client.post(
+            f"/workspaces/{ws['id']}/presence/me", json={"status": "dnd"}
+        ).status_code == 200
+        _collect(w)
+        assert _status_of(client, ws["id"], tok, "keeper") == "dnd"
+
+
+def test_heartbeat_broadcasts_nothing(client):
+    """A keepalive that re-broadcast puts a frame on every peer's socket for a
+    status that did not change."""
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "ticker")
+    viewer = _member(client, ws["id"], "watcher")
+    with client.websocket_connect(_presence_url(ws["id"], viewer)) as vs, client.websocket_connect(
+        _presence_url(ws["id"], tok)
+    ) as w:
+        _collect(vs)
+        _collect(w)  # drains the join broadcasts for both sockets
+        about_me = [f for f in _collect(w) if f.get("user_id") == "ticker"]
+        assert about_me == [], f"a heartbeat was broadcast to peers: {about_me}"
+
+
+def test_heartbeat_keeps_an_idle_tab_online(client, monkeypatch):
+    """The other half of the rule: the keepalive has to keep *something* alive.
+
+    ``effective_status`` derives ``away`` from a stale ``last_seen`` on a stored
+    ``online`` row, so a heartbeat that wrote nothing at all would grey out
+    every dot five minutes after the tab opened, socket alive or not. This
+    passes before the fix too — deliberately: it is the control that stops the
+    fix from being "make the heartbeat a no-op".
+    """
+    monkeypatch.setattr(presence, "AWAY_AFTER_SECONDS", 0.2)
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "idler")
+    with client.websocket_connect(_presence_url(ws["id"], tok)) as w:
+        assert w.receive_json()["type"] == "presence_update"
+        time.sleep(0.3)
+        assert _status_of(client, ws["id"], tok, "idler") == "away"
+        assert _collect(w) == []
+        assert _status_of(client, ws["id"], tok, "idler") == "online"
+
+
+def test_presence_frame_without_status_is_rejected(client):
+    """``{"type":"presence"}`` used to mean "become online and lose your
+    status message" — a default nobody asked for."""
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "chooser")
+    with client.websocket_connect(_presence_url(ws["id"], tok)) as w:
+        assert w.receive_json()["type"] == "presence_update"
+        as_user(client, "chooser")
+        assert client.post(
+            f"/workspaces/{ws['id']}/presence/me",
+            json={"status": "away", "status_message": "lunch"},
+        ).status_code == 200
+        _collect(w)
+        assert _collect(w, json.dumps({"type": "presence"})) == [
+            {"type": "presence_error", "reason": "missing_status"}
+        ]
+        assert _status_of(client, ws["id"], tok, "chooser") == "away"
+
+
+def test_unknown_status_answers_presence_error_not_pong(client):
+    """A ``pong`` for a frame that changed nothing tells the client a lie."""
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "sleeper")
+    with client.websocket_connect(_presence_url(ws["id"], tok)) as w:
+        assert w.receive_json()["type"] == "presence_update"
+        _collect(w)
+        assert _collect(w, json.dumps({"type": "presence", "status": "sleeping"})) == [
+            {"type": "presence_error", "reason": "invalid_status"}
+        ]
+
+
+def test_non_string_status_is_not_stored(client):
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "typist")
+    with client.websocket_connect(_presence_url(ws["id"], tok)) as w:
+        assert w.receive_json()["type"] == "presence_update"
+        _collect(w)
+        assert _collect(w, json.dumps({"type": "presence", "status": ["online"]})) == [
+            {"type": "presence_error", "reason": "invalid_status"}
+        ]
+
+
+def test_malformed_json_is_answered(client):
+    """Silence on a frame the server could not read is how a client hangs."""
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "breaker")
+    with client.websocket_connect(_presence_url(ws["id"], tok)) as w:
+        assert w.receive_json()["type"] == "presence_update"
+        _collect(w)
+        assert _collect(w, '{"type": "presence", "status": "dnd"') == [
+            {"type": "presence_error", "reason": "malformed_json"}
+        ]
+        assert _status_of(client, ws["id"], tok, "breaker") == "online"
+
+
+def test_bye_frame_ends_the_session_and_goes_offline(client):
+    """The endpoint docstring promised "last bye->offline" and never read a bye.
+
+    Explicit leave matters because a tab that is being torn down should not have
+    to wait for TCP teardown to be seen as gone.
+    """
+    ws = _ws(client)
+    tok = _member(client, ws["id"], "leaver")
+    with client.websocket_connect(_presence_url(ws["id"], tok)) as w:
+        assert w.receive_json()["type"] == "presence_update"
+        _collect(w)
+        w.send_text(json.dumps({"type": "bye"}))
+        assert _terminated(w), "the server answered instead of closing on bye"
+    assert _status_of(client, ws["id"], tok, "leaver") == "offline"
+
+
 def test_ws_rejects_non_member(client):
     ws = _ws(client, owner="alice", slug="wA")
     outsider = _plain_token(client, "bob")  # member of nothing
@@ -216,14 +379,14 @@ def _close(session):
 def _sync(session):
     """Block until ``session``'s task has processed everything queued on it.
 
-    A frame with an unknown status is a pure no-op server-side (it fails the
-    ``PRESENCE_STATUSES`` guard so nothing is written or broadcast) yet still
-    earns a ``pong``, which is what makes it usable as a barrier.
+    A frame with an unknown status is a pure no-op server-side — it is rejected
+    with ``presence_error`` and writes nothing — yet it is always answered,
+    which is what makes it usable as a barrier.
     """
     session.send_text(json.dumps({"type": "presence", "status": "sleeping"}))
     while True:
         frame = session.receive_json()
-        if frame["type"] == "pong":
+        if frame["type"] in ("pong", "presence_error"):
             return
 
 

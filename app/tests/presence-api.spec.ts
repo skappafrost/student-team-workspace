@@ -1,8 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { createWorkspace, inviteAndAccept, registerUser } from './helpers';
-
-const APP = process.env.TEST_APP_URL ?? 'http://localhost:3000';
+import { bff, createWorkspace, inviteAndAccept, registerUser } from './helpers';
 
 /**
  * The presence BFF, as a contract layer between the browser and the backend.
@@ -13,18 +11,6 @@ const APP = process.env.TEST_APP_URL ?? 'http://localhost:3000';
  * handler that turned 403 into `[]` would make a guest's UI look like "nobody is
  * online", which is a fabrication, not an absence.
  */
-async function bff(pathname: string, token: string, init?: { method?: string; body?: unknown }) {
-  const res = await fetch(`${APP}${pathname}`, {
-    method: init?.method ?? 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: `session_token=${token}`
-    },
-    body: init?.body === undefined ? undefined : JSON.stringify(init.body)
-  });
-  return { status: res.status, body: await res.json().catch(() => null) };
-}
-
 test('presence roster lists members, and a guest is refused rather than answered empty', async () => {
   test.setTimeout(120_000);
 
