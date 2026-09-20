@@ -220,6 +220,28 @@ def test_ws_disconnect_leaves_both_rooms(client):
     assert _ws_room_key_user("ws-cleanup-owner") not in _ws_rooms
 
 
+def test_presence_socket_leaves_the_user_room_too(client):
+    """The presence socket joins two rooms, so it has to leave both.
+
+    It shares ``user:<id>`` with the notification pushes; a socket left behind
+    there is a phantom delivery slot on every push to that user, and the room
+    never empties, so it is never dropped either.
+    """
+    as_user(client, "ws-presence-owner")
+    ws = client.post(
+        "/workspaces", json={"name": "WSP", "slug": "wsp", "description": "x"}
+    )
+    assert ws.status_code == 201
+    user_key = _ws_room_key_user("ws-presence-owner")
+
+    with client.websocket_connect(
+        f"/ws/workspaces/{ws.json()['id']}/presence?session_token={_token('ws-presence-owner')}"
+    ):
+        assert len(_ws_rooms.get(user_key, ())) == 1
+
+    assert user_key not in _ws_rooms
+
+
 def test_ws_broadcast_prunes_dead_socket(client):
     """A socket whose send fails is evicted by the broadcast itself, so a
     client that died before its endpoint ``finally`` cannot keep a phantom

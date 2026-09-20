@@ -1,21 +1,16 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  type ReactNode
-} from 'react';
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 
+import { notificationKeys } from '@/features/notifications/api/queries';
 import { useWorkspace } from '@/features/workspace/hooks/use-workspace';
 import { ApiError } from '@/lib/api-client';
 import { realtimeUrl, useRealtimeSocket } from '@/lib/realtime/use-websocket';
 
 import { presenceKeys, presenceQueryOptions } from '../api/queries';
 import { setMyPresence } from '../api/service';
-import type { PresenceRow, PresenceUpdateFrame } from '../api/types';
+import type { PresenceRow } from '../api/types';
 
 interface PresenceContextValue {
   byUser: ReadonlyMap<string, PresenceRow>;
@@ -64,12 +59,20 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
     // open a connection that fails forever instead of waiting for the workspace.
     url: workspace && !forbidden ? realtimeUrl(`/ws/workspaces/${workspace.id}/presence`) : null,
     onMessage: (message) => {
-      const frame = message as PresenceUpdateFrame;
+      const frame = message as Partial<PresenceRow> & { type?: string };
+      if (frame?.type === 'notification_created') {
+        // This socket is the only one a dashboard tab holds, and the backend
+        // joins it to the user's own room for exactly this frame. Only the fact
+        // that something arrived is used: refetching keeps the server as the
+        // source of truth for read/unread instead of merging a partial row.
+        void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+        return;
+      }
       if (frame?.type !== 'presence_update' || !frame.user_id) return;
       // Applied straight into the cache rather than invalidated: the room
       // broadcast includes the acting user's own socket, so a busy workspace
       // would turn invalidate-per-frame into a refetch storm.
-      report(frame);
+      report(frame as PresenceRow);
     },
     onOpen: () => {
       // Covers whatever changed while this socket was down.

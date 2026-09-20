@@ -167,14 +167,18 @@ close-code table, so authentication and rejection semantics below apply to both:
 - `GET /ws/channels/{channel_id}` — chat. Joins **two** rooms for the caller:
   `chan:<channel_id>` (channel frames: messages, typing, reactions) and
   `user:<user_id>` (the caller's own `notification_created` frames).
-- `GET /ws/workspaces/{workspace_id}/presence` — presence. Joins **one** room,
-  `workspace:<workspace_id>`: every presence socket of every member of that
-  workspace.
+- `GET /ws/workspaces/{workspace_id}/presence` — presence. Joins **two** rooms:
+  `workspace:<workspace_id>` (every presence socket of every member of that
+  workspace) and `user:<user_id>`, so a tab that only shows a dashboard still
+  hears about its own notifications.
 
-The three room namespaces are disjoint, which is the thing most likely to be
-assumed wrongly: `presence_update` never arrives on the chat socket, and
-`notification_created` never arrives on the presence socket. A client that wants
-both realtime feeds opens both sockets.
+`chan:` and `workspace:` are disjoint: `presence_update` never arrives on the
+chat socket, and `new_message`/`typing`/`reaction_update` never arrive on the
+presence socket. `user:<user_id>` is deliberately **not** disjoint — both
+sockets join it, because either one may be the only connection a tab holds.
+A chat page therefore receives each `notification_created` twice, once per
+socket: treat the frame as "something changed, refetch" and not as a delta to
+merge, or the unread count doubles.
 
 ### Authentication (TA4-2)
 
@@ -228,9 +232,9 @@ Server -> client:
 - `{"type": "reaction_update", "message_id": ..., "reactions": [...]}` — on reaction toggle
 - `{"type": "typing", "channel_id": ..., "user_id": ..., "user_name": ...}`
 - `{"type": "notification_created", "notification": NotificationOut}` — pushed to
-  the user's `user:<id>` room, which only this chat socket joins, so it arrives
-  per open channel socket. Same shape as `GET /notifications`, so a client can
-  merge it without a second request.
+  the user's `user:<id>` room, which both sockets join, so it arrives once per
+  open socket. Same shape as `GET /notifications`, so a client can merge it
+  without a second request.
 
 ### Frames — presence socket
 
@@ -250,17 +254,21 @@ ways that matter:
   **without a `pong`**. A client that waits for a pong after every send can hang
   on its own malformed frame.
 
-Server -> client. Exactly two kinds:
+Server -> client. Three kinds:
 
 - `{"type": "presence_update", "workspace_id": ..., "user_id": ..., "name": ..., "status": ..., "status_message": ..., "last_seen": ...}` — the five HTTP item fields plus the workspace id. **Broadcasts include the sender's own socket** (unlike chat's `typing`, which excludes it), so a client must be ready to apply its own change coming back at it.
 - `{"type": "pong"}`
+- `{"type": "notification_created", "notification": NotificationOut}` — this socket
+  is in the caller's `user:<id>` room too, which is what lets a dashboard tab
+  with no channel socket react to new activity.
 
 ### Connection semantics
 
-On disconnect the chat socket leaves **both** the channel room and the user room
-in the endpoint's `finally`; broadcasts additionally evict any socket whose
-send fails, so a client that dies before its cleanup still cannot keep a
-phantom delivery slot.
+On disconnect each socket leaves **every** room it joined in the endpoint's
+`finally` — the chat socket the channel room and the user room, the presence
+socket the workspace room and the user room. Broadcasts additionally evict any
+socket whose send fails, so a client that dies before its cleanup still cannot
+keep a phantom delivery slot.
 
 **Presence lifecycle is refcounted per `(workspace, user)`, not per socket.**
 The user's *first* presence socket in a workspace writes `online`; a second tab
@@ -383,7 +391,16 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 ### TA4-1 — message notification fan-out (additive)
 
-`POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by the **chat** socket (`routers/channels.py:channel_websocket` joins the channel room *and* the user room) — so a client only sees `{"type": "notification_created", "notification": NotificationOut}` while it has a channel socket open. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+`POST /channels/{id}/messages` now creates notifications it previously swallowed (`_notify_message_fanout`, `routers/messages.py`). Three triggers, one recipient precedence so a user never gets duplicates for the same message: **DM** channels notify the peer (the member who is not the author); **@mentions** notify members whose *full display name* appears as a token — matched as a token, so mentioning `@AliceBlueprint` never resolves to `Alice`; **thread replies** notify the parent message's author. Types come from the existing `NotificationType` vocabulary: `dm`, `mention`, `thread`. Delivery is push-only: `_ws_notify_user` broadcasts to the recipient's `user:<id>` room, which is joined by **both** sockets (`routers/channels.py:channel_websocket` and `routers/presence.py:presence_websocket` each join their own room *and* the user room) — so a client sees `{"type": "notification_created", "notification": NotificationOut}` on whichever it has open, and a chat page that holds both gets it twice. `GET /notifications` is unchanged and stays the source of truth after a reconnect. No response shape changed.
+
+### TA4-2 — the notification push reaches a socket (fix, no shape change)
+
+`_ws_notify_recipients` (`routers/messages.py`) used to re-derive the recipients a second time and then look each one up with `type == "message"` plus `content LIKE '%<message id>%'`. The fan-out writes types `dm|mention|thread` and prose content that never contains a message id, so the lookup returned nothing on every path and the push silently sent zero frames — while every existing test passed, because they all asserted on the notification *row*. Now `_notify_message_fanout` returns the ids it wrote and `_ws_push_notifications` pushes exactly those rows, which also closes two recipient holes for free: `@mentions` were never pushed at all, and `elif message.parent_id` meant a DM that also mentioned someone delivered one frame instead of two.
+
+Two behaviour changes to plan around:
+
+- A frame that cannot be sent is logged and swallowed. The message is already committed and the sender has their `201`; failing the write over a dead socket would report a delivered message as lost.
+- The presence socket joins `user:<user_id>` in addition to `workspace:<workspace_id>`, which is what makes the frame visible to a dashboard tab. `NotificationOut` is unchanged.
 
 ### TA3-2 — ilike wildcard escaping + channels type validation
 - **Search filters now treat `%` and `_` as literal characters.** `GET /workspaces/{id}/pages?search=`, `GET /channels/{id}/messages?q=` and `GET /workspaces/{id}/audit-log?q=` previously interpolated the raw term into a `%...%` SQL LIKE pattern, so a user searching `50%` also matched `50 dollars` (wildcard `%`) and `A_B` matched `AxB` (wildcard `_`). A shared helper (`backend/query_utils.py`: `escape_like`/`contains_pattern` + `escape=LIKE_ESCAPE`) is now applied at every like/ilike site. Behavior change: searches containing `%`/`_` return exact literal matches on both SQLite and PostgreSQL; plain-text searches are unchanged (still case-insensitive).
