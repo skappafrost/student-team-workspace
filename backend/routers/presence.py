@@ -40,6 +40,7 @@ from ws import (
     WS_NOT_FOUND,
     _ws_broadcast_workspace,
     _ws_room_join,
+    _ws_room_key_user,
     _ws_room_key_workspace,
     _ws_room_leave,
 )
@@ -263,7 +264,12 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
 
     await websocket.accept(subprotocol=subproto)
     key = _ws_room_key_workspace(workspace_id)
+    # The user room too: ``notification_created`` is keyed to a person, not a
+    # workspace, and a dashboard tab keeps only this socket open. Joining here
+    # is what lets the unread badge move without a channel socket.
+    user_key = _ws_room_key_user(user["id"])
     _ws_room_join(key, websocket)
+    _ws_room_join(user_key, websocket)
     try:
         if _presence_join(workspace_id, user["id"], websocket):
             await _set_and_publish(workspace_id, user["id"], "online")
@@ -285,5 +291,6 @@ async def presence_websocket(websocket: WebSocket, workspace_id: str):
         logger.info("presence socket closed: code=%s", exc.code)
     finally:
         _ws_room_leave(key, websocket)
+        _ws_room_leave(user_key, websocket)
         if _presence_leave(workspace_id, user["id"], websocket):
             await _set_and_publish(workspace_id, user["id"], "offline")

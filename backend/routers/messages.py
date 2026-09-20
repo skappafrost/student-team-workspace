@@ -1,5 +1,6 @@
 """Message CRUD with WebSocket broadcast."""
 
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,8 @@ from services import log_activity, notify
 from ws import _ws_broadcast_channel, _ws_notify_user
 
 router = APIRouter()
+
+logger = logging.getLogger("stw.messages")
 
 
 def _resolve_mentions(db: Session, workspace_id: str, content: str) -> list[str]:
@@ -81,7 +84,7 @@ def _notify_message_fanout(
     channel: models.Channel,
     message: models.Message,
     author_id: str,
-) -> None:
+) -> list[str]:
     """Create notifications for a freshly created message (TA4-1).
 
     Fan-out rules:
@@ -91,6 +94,10 @@ def _notify_message_fanout(
     Dedupe: each user is notified at most once per message, and the author
     never notifies themselves. Notification types reuse the existing
     ``NotificationType`` vocabulary: "dm", "mention", "thread".
+
+    Returns the ids written. The caller pushes ``notification_created`` for
+    exactly those rows: re-deriving the recipients here a second time is what
+    let the two lists drift apart, and the push silently stopped firing.
     """
     recipients: dict[str, str] = {}  # user_id -> notification type
 
@@ -117,6 +124,7 @@ def _notify_message_fanout(
     author = db.get(models.User, author_id)
     author_name = author.display_name if author else "Someone"
     link = f"/dashboard/chat?channel={channel.id}"
+    created: list[str] = []
     for user_id, note_type in recipients.items():
         if note_type == "dm":
             title = f"New message from {author_name}"
@@ -127,14 +135,17 @@ def _notify_message_fanout(
         else:
             title = f"{author_name} mentioned you"
             content = f"{author_name} mentioned you in #{channel.name}."
-        notify(
-            db,
-            user_id=user_id,
-            type=note_type,
-            title=title,
-            content=content,
-            link=link,
+        created.append(
+            notify(
+                db,
+                user_id=user_id,
+                type=note_type,
+                title=title,
+                content=content,
+                link=link,
+            ).id
         )
+    return created
 
 
 @router.get("/channels/{channel_id}/messages", response_model=list[schemas.MessageOut])
@@ -215,7 +226,7 @@ async def create_message(
         target_id=channel.id,
         target_label=f"#{channel.name}",
     )
-    _notify_message_fanout(
+    note_ids = _notify_message_fanout(
         db, channel=channel, message=message, author_id=current_user["id"]
     )
     db.commit()
@@ -233,55 +244,34 @@ async def create_message(
     message_out = schemas.MessageOut.model_validate(message).model_dump(mode="json")
     await _ws_broadcast_channel(channel_id, {"type": "new_message", "message": message_out})
 
-    # Fan out notifications to any open socket owned by each recipient
-    # (TA4-2). The notification row is created by the caller (fan-out PR)
-    # or the notify() service; here we only push the already-serialized
-    # shape so a client can merge it without an extra request.
-    await _ws_notify_recipients(db, channel, message, current_user["id"])
+    # Push notification_created to each recipient's open sockets (TA4-2). The
+    # message is committed and the sender has their 201 by now: a push that
+    # raises would 500 a write that succeeded, so it logs instead. The
+    # recipient's badge still catches up on the next GET /notifications.
+    try:
+        await _ws_push_notifications(db, note_ids)
+    except Exception:  # noqa: BLE001 - never fail a committed write
+        logger.exception("notification push failed for message %s", message.id)
 
     return message
 
 
-async def _ws_notify_recipients(db, channel, message, author_id: str) -> None:
-    """Push ``notification_created`` to the sockets of users who care.
-
-    Mirrors the message-fan-out rules (DM peer, thread parent author) so a
-    user with an open tab learns about a new message immediately even when
-    they are not viewing that channel. Non-members are never notified and
-    the author never notifies themselves.
-    """
-    recipients: list[str] = []
-    if channel.type == "dm":
-        peer = (
-            db.query(models.ChannelMember.user_id)
-            .filter(
-                models.ChannelMember.channel_id == channel.id,
-                models.ChannelMember.user_id != author_id,
-            )
-            .first()
-        )
-        if peer:
-            recipients.append(peer[0])
-    elif message.parent_id:
-        parent = db.get(models.Message, message.parent_id)
-        if parent and parent.author_id != author_id:
-            recipients.append(parent.author_id)
-
-    for user_id in recipients:
-        notification = (
-            db.query(models.Notification)
-            .filter(
-                models.Notification.user_id == user_id,
-                models.Notification.type == "message",
-                models.Notification.content.like(f"%{message.id}%"),
-            )
-            .first()
-        )
-        if notification is None:
-            continue
+async def _ws_push_notifications(db: Session, notification_ids: list[str]) -> None:
+    """Push one ``notification_created`` frame per id, to that row's user."""
+    if not notification_ids:
+        return
+    rows = (
+        db.query(models.Notification)
+        .filter(models.Notification.id.in_(notification_ids))
+        .all()
+    )
+    for row in rows:
+        # Re-read from the database rather than serializing the in-memory rows
+        # the fan-out returned: the commit expired them, and the frame has to
+        # carry exactly what GET /notifications hands back for the same id.
         await _ws_notify_user(
-            user_id,
-            schemas.NotificationOut.model_validate(notification).model_dump(mode="json"),
+            row.user_id,
+            schemas.NotificationOut.model_validate(row).model_dump(mode="json"),
         )
 
 

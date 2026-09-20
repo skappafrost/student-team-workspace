@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
@@ -8,6 +8,14 @@ import { Icons } from '@/components/icons';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty';
 import { notificationKeys, notificationsQueryOptions } from '../api/queries';
 import { markAllNotificationsAsRead, markNotificationAsRead } from '../api/service';
 import { Notification as NotificationType, NotificationStatus } from '../api/types';
@@ -43,7 +51,17 @@ interface NotificationListProps {
 }
 
 export function NotificationList({ filter = 'all' }: NotificationListProps) {
-  const { data: notifications = [] } = useSuspenseQuery(notificationsQueryOptions());
+  // Plain useQuery, not useSuspenseQuery: the suspense form fetches during
+  // server render, where the relative '/api/notifications' URL cannot be
+  // parsed, and the page dies on the global error boundary. file-list.tsx
+  // documents the same React #419 failure for the same reason.
+  const {
+    data: notifications = [],
+    isPending,
+    isError,
+    error,
+    refetch
+  } = useQuery(notificationsQueryOptions());
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -84,6 +102,33 @@ export function NotificationList({ filter = 'all' }: NotificationListProps) {
     filter === 'all' ? notifications : notifications.filter((n) => n.status === filter);
 
   const unreadCount = notifications.filter((n) => n.status === 'unread').length;
+
+  if (isPending) {
+    return <div className='text-muted-foreground text-sm'>Loading notifications</div>;
+  }
+
+  // Without this branch a failed fetch would fall through to "No
+  // notifications", which reports an empty inbox rather than a broken one.
+  if (isError) {
+    return (
+      <Empty className='border py-16'>
+        <EmptyHeader>
+          <EmptyMedia variant='icon' className='size-12 rounded-full'>
+            <Icons.warning className='size-6' />
+          </EmptyMedia>
+          <EmptyTitle>Failed to load notifications</EmptyTitle>
+          <EmptyDescription>
+            {error instanceof Error ? error.message : 'Something went wrong.'}
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button variant='outline' size='sm' onClick={() => refetch()}>
+            Try again
+          </Button>
+        </EmptyContent>
+      </Empty>
+    );
+  }
 
   if (notifications.length === 0) {
     return (
