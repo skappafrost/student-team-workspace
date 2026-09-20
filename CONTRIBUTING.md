@@ -1,5 +1,7 @@
 # Contributing
 
+> 🧊 **Repo đang ở trạng thái bảo trì (đóng băng từ 2026-09-20).** Đọc `PROJECT-STATUS.md` §0 trước: 17 PR đang mở đã bị `gh pr lock` để giữ nguyên hiện trạng, và mọi work mới cần lệnh mở băng. Nếu bạn được giao việc trong lúc này, đó là việc trong §0/§6 — không phải "dọn tiếp whatever bạn thấy".
+
 ## Setup
 
 1. Backend: `cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt` (Windows; on Linux/macOS use `.venv/bin/pip`)

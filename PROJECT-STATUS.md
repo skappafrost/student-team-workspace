@@ -1,9 +1,52 @@
 # Student Team Workspace — Project Status
 
 > **Ngày cập nhật:** 20/09/2026 (GMT+7)
-> **Trạng thái:** 🟢 W0–W10 + UI redesign + toàn bộ T-wave/TA-wave (hardening) + S-wave presence (S3–S5 backend, S6 UI #210/#211) + vòng sửa realtime S6-RT1…RT9 đã merge trên `main`; việc còn lại là các mục nợ có số đo ở §6, không còn blocker cho UI.
+> **Trạng thái:** 🧊 **BẢO TRÌ — đóng băng từ 2026-09-20.** Ảnh chụp `main` ở `9105cdc` (kế hoạch realtime 9 PR đã chạy xong, #212–#220). Đọc §0 trước khi làm bất cứ việc gì.
 > **Repo:** `skappafrost/student-team-workspace`, public, GitHub Flow (`feat/*` + `harden/*` branches → draft PR → Skappa squash-merge)
-> **Verified on:** `cd backend && .venv/Scripts/python -m pytest -q` → **810 passed / 60 file** (SQLite; `test_manage.py::test_seed_demo_fresh_recreates_sqlite_file` vẫn là flake Windows tmp-file-lock đã biết — lần chạy này không tái hiện, xanh trên CI Linux) · `--cov` → coverage **91.98%** với floor `fail_under = 90` (`backend/pyproject.toml:50`) · `alembic heads` = 1 (`prs01_presence_state`) · `cd app && bunx playwright test --workers=1` → **37 passed / 10 spec file** · CI **6 jobs** (`ruff`, `backend`, `backend-pg`, `frontend`, `frontend-e2e`, `demo-pack`) — đo ngày 20/09/2026 trên nhánh `fix/offload-blocking-calls` (= `main` @ `c5a2a5d` + thay đổi của PR này; `workers=1` vì 4 worker làm Next dev server crash — số đo 4/2/1 ghi trong `app/playwright.config.ts`). Chạy lại lệnh trước khi quote.
+> **Verified on:** `cd backend && .venv/Scripts/python -m pytest -q` → **810 passed / 60 file** (SQLite; `test_manage.py::test_seed_demo_fresh_recreates_sqlite_file` vẫn là flake Windows tmp-file-lock đã biết — lần chạy này không tái hiện, xanh trên CI Linux) · `--cov` → coverage **91.98%** với floor `fail_under = 90` (`backend/pyproject.toml:50`) · `alembic heads` = 1 (`prs01_presence_state`) · `cd app && bunx playwright test --workers=1` → **37 passed / 10 spec file** · CI **6 jobs** (`ruff`, `backend`, `backend-pg`, `frontend`, `frontend-e2e`, `demo-pack`) — đo ngày 20/09/2026 trên `main` @ `9105cdc` (CI của PR cũng chạy đúng các lệnh đó trên Linux, nên mỗi số đo có hai lần xác nhận; `workers=1` vì 4 worker làm Next dev server crash — số đo 4/2/1 ghi trong `app/playwright.config.ts`). Chạy lại lệnh trước khi quote.
+
+---
+
+## 0. Đóng băng để bảo trì (từ 2026-09-20)
+
+Repo ngừng nhận thay đổi cho tới khi có lệnh mở lại. Phần này là **ảnh chụp tại thời điểm dừng**, không phải kế hoạch đang chạy — mỗi mục đều kèm lệnh chạy lại để kiểm chứng, vì số liệu trong doc này cũ rất nhanh.
+
+**Ảnh chụp `main`:** `9105cdc` = #220, item cuối của kế hoạch sửa realtime 9 PR (#212–#220, mỗi cái một PR, đều squash-merge, CI 6/6 xanh). Không còn PR nào mở của riêng wave này, không có worktree nào sống, working tree sạch.
+
+**17 PR đang mở — đóng băng tại chỗ bằng `gh pr lock`, giữ nguyên branch và nội dung**, không merge, không đóng, không rebase: #85, #121, #137, #176–#184, #190–#194 (nội dung từng cái ở bảng §5). Mở khoá khi nối lại:
+
+```
+gh pr list --state open --json number --jq '.[].number' | xargs -n1 gh pr unlock
+```
+
+Hệ quả phụ phải biết: PR bị lock thì author không push thêm được, nên Dependabot không update nổi #85/#190–#194; nếu nó tự đóng PR vì bị lock, branch vẫn còn trên remote và chạy lại workflow là lấy lại được. #176–#184 là vòng rehash của những hành vi đã landing từ #1–#175 — đối chiếu danh sách merged ở §3 trước khi quyết định, đừng merge.
+
+**Việc dở dang** (mô tả đầy đủ ở §6; cột cuối là lý do dừng, để người mở lại không phải đoán lại từ đầu):
+
+| # | Việc | Dừng ở đâu |
+|---|---|---|
+| 12 | S6 UI còn nợ: roster sắp theo presence, dot trong dialog New DM, chữ "N online" ở overview | Chưa làm vì *luật*, không vì kỹ thuật: 2/3 bề mặt chưa có record trong `app/design-references/catalogs/usages.json`, mà `AGENTS.md` bắt tìm nguồn + chép catalog trước khi thi công. Bẫy riêng: `onlineCount` đã bị bỏ khỏi presence context trong #219, nên hoặc tính từ `byUser`, hoặc đưa field về kèm test chứng minh có consumer |
+| 32 | `alembic` và app trỏ hai DB khác nhau (`alembic.ini` = Postgres, app default = `sqlite:///./stw.db`) | Nguyên nhân và đường sửa đã rõ (fallback `settings.database_url` trong `alembic/env.py`, truyền `DATABASE_URL` vào webServer của `app/playwright.config.ts`, ghi chú rằng `create_all` không thêm cột vào bảng có sẵn). Chưa làm vì ngoài phạm vi wave realtime |
+| 33 | Đưa WS fan-out khỏi request path của POST, **giữ thứ tự** | Hai hình thái đã bị loại kèm số đo: `asyncio.gather` (park receiver — xem docstring `ws._ws_broadcast`) và `create_task` cho từng message (frame sau vượt frame trước, còn `chat-page.tsx` append theo thứ tự nhận). Hình đúng là hàng đợi theo room với một task drain mỗi room; phần khó nhất là **loop affinity**, vì mỗi TestClient portal có event loop riêng |
+| 34 | Hai hình thái của một socket bị từ chối (403 rỗng vs 403 + `{"detail":…}`) | Không phải bug với client (không mã close nào sống sót cả) nên mới chỉ được ghi vào docs. Đường thống nhất nếu cần: bắt `HTTPException` ở `channels.py:channel_websocket` giống `presence.py` đã làm |
+| 35 | Trần connection pool: `QueuePool(5 + 10)` → 20 request đồng thời thì 5 cái 500 sau **151.5 s**, kèm `Cannot operate on a closed database` khi rollback | Phát hiện tình cờ khi đo cho #220. Chưa sửa vì cần quyết định cấu hình (nâng pool, hay đừng giữ connection suốt request, hay `pool_timeout`, và Postgres trong `docker-compose.yml` cho phép bao nhiêu). Repro: `cd backend && .venv/Scripts/python bench/loop_blocking_probe.py 20` |
+
+**Số đo hiệu năng trong doc này là máy Windows cục bộ.** bcrypt 264–352 ms, loop gap 4904 ms… là của một laptop cụ thể; CI không chạy probe nên không có lần đo thứ hai. Cái đáng tin là **tỉ lệ trước/sau** và lệnh chạy lại, không phải con số tuyệt đối.
+
+**Flake đã biết — đừng đi săn lại:**
+- `test_manage.py::test_seed_demo_fresh_recreates_sqlite_file` → `PermissionError` khoá file tmp trên Windows; xanh khi chạy lẻ và xanh trên CI Linux.
+- `realtime-delivery.spec.ts` (mục edit/delete) fail **một lần** trong khoảng sáu lần chạy đầy đủ, kèm dev overlay `Runtime SyntaxError: Unexpected end of JSON input` và dòng `ConnectionResetError: [WinError 10054]` trong log webServer. Chạy lẻ 1 spec: pass 9.2 s; chạy lại cả suite: 37/37. Triệu chứng thuộc dev server + backend trên loopback Windows, không phải sản phẩm.
+
+**Bẫy harness đã tốn thời gian, ghi lại để không phải trả lần nữa:**
+1. `TestClient` chạy **mỗi** websocket session trên **một portal event loop riêng**. Bất kỳ thứ gì làm trì hoãn send sang socket khác (`gather`, thread hop trước `_publish`, `create_task`) đều có thể park receiver vĩnh viễn — test sẽ **treo**, không fail.
+2. `receive_json()` không có timeout. Đọc socket trong test thì dùng `conftest.drain_until_reply(session)` (gửi `ping`, trả về các frame trước `pong`): bao giờ cũng fail thay vì treo.
+3. Playwright `workers=1`: 4 worker làm Next dev server crash (`RangeError: Array buffer allocation failed`) và 11 fail dây chuyền trông như hỏng thật.
+4. `-p no:logging` làm `caplog` biến mất (9 test "error" oan). `alembic` gọi `fileConfig()` và thay root handler → mọi assertion `caplog` sau đó hỏng, nên `test_models.py::_alembic()` snapshot/restore handler.
+5. Chạy e2e ghi đè PNG trong `app/qa-evidence/`; nhớ `git checkout -- app/qa-evidence/` trước khi commit.
+
+**Artifact chỉ có trên máy này, git không mang theo** (đã gitignore): `backend/stw.stale-20260920.db` — DB dev cũ được xoay sang tên này vì thiếu cột `notifications.link` (chính là #32); `backend/stw.db` hiện tại; `backend/probe_ta32.db`; 27 file `backend/test_stw*.db` (mỗi test module tự đặt `DATABASE_URL` riêng, và một số để lại file sau khi chạy); `app/.next/`, `app/playwright-report/`, `app/test-results/`. Muốn lấy lại DB dev cũ: dừng app, `mv backend/stw.db backend/stw.broken.db && mv backend/stw.stale-20260920.db backend/stw.db`, rồi migrate hoặc để `create_all` dựng lại.
+
+**Nối lại:** đọc §6 theo thứ tự bảng ở trên → `git pull --ff-only origin main` → `gh pr list --state open` (danh sách có thể đã đổi) → chạy `cd backend && .venv/Scripts/python -m pytest -q` và `cd app && bunx playwright test --workers=1` để lấy số hiện tại → mở khoá các PR.
 
 ---
 
