@@ -9,7 +9,8 @@ const APP = process.env.TEST_APP_URL ?? 'http://localhost:3000';
  *
  * `session_token` is SameSite=Lax and host-scoped, so a page served from
  * `127.0.0.1` whose socket URL names `localhost` authenticates as nobody and
- * every handshake is refused with 4401 before `accept()`. That reads to a
+ * every handshake is refused before `accept()` (4401 at the ASGI layer, which the
+ * transport flattens into an HTTP 403 for the browser). That reads to a
  * developer as "realtime is broken" with nothing in the console, which is why
  * the hook logs and refuses to connect rather than retrying quietly forever.
  *

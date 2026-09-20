@@ -39,7 +39,8 @@ export function realtimeUrl(path: string): string | null {
  * `session_token` cookie — which is `SameSite=Lax` and host-scoped. Serving the
  * app on `localhost` while pointing the socket at `127.0.0.1` (different
  * hostnames, same machine) means the cookie is never attached and every
- * handshake is rejected with 4401 *before* `accept()`. That reads to a
+ * handshake is refused *before* `accept()` — the application sends 4401 and the
+ * transport reports it to the browser as an HTTP 403. That reads to a
  * developer as "realtime is broken" with nothing in the console, which is why
  * it says so loudly here instead of reconnecting quietly forever.
  *

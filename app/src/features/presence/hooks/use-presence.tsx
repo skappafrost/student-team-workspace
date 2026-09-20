@@ -117,7 +117,7 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
  * Who is online in this workspace.
  *
  * Guests get `hidden: true` and callers draw nothing. The backend refuses guests
- * on presence read (`403`), write, and socket (`4403` before `accept()`), so a
+ * on presence read (`403`), write, and socket (refused before `accept()`), so a
  * dot for a guest would be invented rather than missing, and an error banner
  * would advertise a feature the reader cannot use.
  */
