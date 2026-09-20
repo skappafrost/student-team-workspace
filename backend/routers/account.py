@@ -24,7 +24,7 @@ from database import get_db
 from dependencies import (
     _clear_session_cookie,
     get_current_user,
-    verify_password,
+    verify_password_async,
 )
 
 router = APIRouter()
@@ -137,7 +137,7 @@ async def delete_my_account(
     user = db.query(models.User).filter(models.User.id == current_user["id"]).first()
     if not user or not user.hashed_password:
         raise HTTPException(status_code=404, detail="User not found")
-    if not verify_password(payload.password, user.hashed_password):
+    if not await verify_password_async(payload.password, user.hashed_password):
         raise HTTPException(status_code=403, detail="Invalid password")
 
     # Purge uploaded files (rows + blobs on disk).

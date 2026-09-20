@@ -13,6 +13,7 @@ from fastapi import Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
+from starlette.concurrency import run_in_threadpool
 
 import models
 from config import settings
@@ -249,6 +250,28 @@ def verify_password(plain: str, hashed: str) -> bool:
 def get_password_hash(password: str) -> str:
     raw = _password_bytes(password)
     return bcrypt.hashpw(raw, bcrypt.gensalt()).decode("utf-8")
+
+
+async def verify_password_async(plain: str, hashed: str) -> bool:
+    """:func:`verify_password` on a worker thread, for use from ``async def``.
+
+    A 12-round bcrypt measures 264–352 ms here (`bench/loop_blocking_probe.py`;
+    the absolute drifts with CPU frequency, the ratios do not). Run from an
+    ``async def`` endpoint, that is the process's single event loop spending a
+    third of a second nowhere near a socket: every chat and presence frame in
+    flight, and the ``WS_SEND_TIMEOUT_SECONDS`` deadline that prunes wedged
+    peers, waits behind it. And it does not overlap with the next one either —
+    12 concurrent registrations measured 4945 ms of wall and a 4904 ms gap
+    in which a 10 ms ticker on the same loop could not tick.
+
+    The sync form stays for ``manage.py``, which has no loop to protect.
+    """
+    return await run_in_threadpool(verify_password, plain, hashed)
+
+
+async def get_password_hash_async(password: str) -> str:
+    """:func:`get_password_hash` off the event loop; see :func:`verify_password_async`."""
+    return await run_in_threadpool(get_password_hash, password)
 
 
 # ---------------------------------------------------------------------------
