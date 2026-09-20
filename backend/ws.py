@@ -13,18 +13,27 @@ Both namespaces share one registry so disconnect cleanup is uniform.
 Connection lifecycle contract (kept out of this module, enforced by
 ``routers/channels.py``): a socket joins a room only AFTER the handshake
 was accepted, and the endpoint's ``finally`` must call :func:`_ws_room_leave`
-so no room ever retains a closed socket. Broadcasts additionally prune
-sockets whose ``send`` raises, so a socket killed between joins and its
-cleanup still cannot leak a delivery slot.
+so no room ever retains a closed socket. Broadcasts send to every peer of a
+room concurrently, and prune any socket whose ``send`` raises or exceeds
+:data:`WS_SEND_TIMEOUT_SECONDS`, so a socket killed between joins and its
+cleanup — or one whose TCP is simply wedged — cannot leak a delivery slot or
+charge its latency to the rest of the room.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
 
 logger = logging.getLogger("stw.ws")
+
+#: How long one peer gets to accept a frame before it is treated as dead.
+#: A healthy local send is sub-millisecond, so this only ever fires on a socket
+#: that is wedged or gone — and it bounds the worst case a *sender's* request can
+#: be charged for someone else's broken connection.
+WS_SEND_TIMEOUT_SECONDS = 2.0
 
 # Close codes (documented in docs/API.md). 4xxx range = application errors,
 # so browsers/proxies do not confuse them with protocol failures.
@@ -62,16 +71,29 @@ def _ws_room_size(room_key: str) -> int:
 
 
 async def _ws_send_safe(websocket, message: str, room_key: str) -> bool:
-    """Send one frame; return False if the socket is gone.
+    """Send one frame within :data:`WS_SEND_TIMEOUT_SECONDS`; False if we could not.
 
     The failure is logged because a silently-swallowed exception here was how
     every browser socket in this app died: the handshake got far enough to join
     a room, the first send raised, and a broadcast reported ``delivered=0``
     while the room still looked populated.
+
+    The timeout is the other half of that story. A half-open TCP does not raise,
+    it stalls: ``await websocket.send_text`` never returns, so without a bound a
+    single wedged peer decided how long every *other* member waited — and paid
+    for it again on every subsequent message, on the request path of
+    ``POST /channels/{id}/messages``.
     """
     try:
-        await websocket.send_text(message)
+        await asyncio.wait_for(websocket.send_text(message), WS_SEND_TIMEOUT_SECONDS)
         return True
+    except TimeoutError:
+        logger.warning(
+            "ws send timed out after %.1fs; dropping socket from room=%s",
+            WS_SEND_TIMEOUT_SECONDS,
+            room_key,
+        )
+        return False
     except Exception as exc:  # noqa: BLE001 - any send failure means dead socket
         logger.warning("ws send failed; dropping socket from room=%s: %s", room_key, exc)
         return False
@@ -80,23 +102,29 @@ async def _ws_send_safe(websocket, message: str, room_key: str) -> bool:
 async def _ws_broadcast(room_key: str, payload: dict[str, Any], exclude=None) -> int:
     """Fan out ``payload`` to every socket in ``room_key``.
 
-    Returns the number of sockets that received the frame. Sockets whose
-    send raises are pruned from the room (defensive cleanup for sockets
-    that died before their endpoint ``finally`` ran).
+    Returns the number of sockets that received the frame. Sockets whose send
+    raises or times out are pruned from the room (defensive cleanup for sockets
+    that died before their endpoint ``finally`` ran), so one wedged peer is paid
+    for once instead of on every message.
+
+    The sends are deliberately inline, not ``asyncio.gather``: gathering wraps
+    each one in a task, which defers the frame by a scheduler tick, and a
+    ``TestClient`` websocket session runs *each socket on its own portal event
+    loop*. A deferred cross-loop send then lands in a peer stream whose receiver
+    has already parked, and anyio never wakes it — measured as
+    ``test_ws_connect_broadcasts_online`` hanging with the peer blocked in
+    ``receive_json()``. `asyncio.wait_for` keeps the call inline (since 3.12 it
+    is just a timeout context around the await), so the bound costs nothing the
+    old code did not already do.
     """
     room = _ws_rooms.get(room_key)
     if not room:
         return 0
     message = json.dumps(payload, ensure_ascii=False)
-    dead: list = []
-    delivered = 0
-    for ws in list(room):
-        if exclude is not None and ws is exclude:
-            continue
-        if await _ws_send_safe(ws, message, room_key):
-            delivered += 1
-        else:
-            dead.append(ws)
+    targets = [ws for ws in list(room) if exclude is None or ws is not exclude]
+    delivered_flags = [await _ws_send_safe(ws, message, room_key) for ws in targets]
+    dead = [ws for ws, ok in zip(targets, delivered_flags, strict=True) if not ok]
+    delivered = len(targets) - len(dead)
     for ws in dead:
         room.discard(ws)
         if not room:
