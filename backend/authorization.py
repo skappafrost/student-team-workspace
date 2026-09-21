@@ -1,8 +1,9 @@
 """Role model and RBAC checks shared by all routers."""
 
 from enum import StrEnum
+from typing import Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Path
 from sqlalchemy.orm import Session
 
 import models
@@ -90,18 +91,21 @@ def _require_min_role(current_user: dict, required_role: Role) -> None:
 
 
 def require_role(required_role: Role):
-    """Dependency factory that requires a minimum workspace role."""
+    """Dependency factory that requires a minimum role in the request's workspace.
+
+    `workspace_id` is a **path parameter and nothing else**. Declared as a plain
+    optional argument it became a query parameter on any route whose path lacks
+    the segment, which is the cross-tenant shape T001/T002 already fixed once
+    (ARC-05): a new route in that shape would silently let the caller name the
+    workspace the guard checks. A route that forgets the segment now fails with
+    a missing-path-parameter 422 instead of reading the client's value.
+    """
 
     def _check_role(
+        workspace_id: Annotated[str, Path()],
         current_user: dict = Depends(get_current_user),
-        workspace_id: str = None,
         db: Session = Depends(get_db),
     ) -> dict:
-        # If workspace_id is not provided, check global role (from token)
-        if workspace_id is None:
-            _require_min_role(current_user, required_role)
-            return current_user
-
         # First check if workspace exists
         workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
         if not workspace:
@@ -126,8 +130,30 @@ def require_role(required_role: Role):
     return _check_role
 
 
-def require_permission(permission: str):
-    """Dependency factory that requires a specific permission."""
+def require_global_role(required_role: Role):
+    """Dependency factory for platform-level actions, i.e. routes with no workspace in the path.
+
+    It compares against the role claim in the token, which `get_current_user`
+    always issues as ``member`` — so in practice this means "any authenticated
+    user", never "a platform admin". There is no platform-admin concept in the
+    role model; anything that needs one must say so explicitly, not by leaving
+    `workspace_id` out of the path.
+    """
+
+    def _check_global_role(current_user: dict = Depends(get_current_user)) -> dict:
+        _require_min_role(current_user, required_role)
+        return current_user
+
+    return _check_global_role
+
+
+def require_permission(permission: str, *, platform_level: bool = False):
+    """Dependency factory that requires a specific permission.
+
+    `platform_level=True` is for the routes that act on no workspace (today only
+    `POST /workspaces`); every other permission resolves the caller's role inside
+    the workspace named by the path (ARC-05).
+    """
     # Map permissions to required roles
     PERMISSION_ROLES = {
         # Workspace permissions
@@ -149,4 +175,4 @@ def require_permission(permission: str):
     }
 
     required_role = PERMISSION_ROLES.get(permission, Role.OWNER)
-    return require_role(required_role)
+    return require_global_role(required_role) if platform_level else require_role(required_role)

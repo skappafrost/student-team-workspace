@@ -17,7 +17,7 @@ router = APIRouter()
 @router.post("/workspaces", response_model=schemas.WorkspaceDetailOut, status_code=201)
 async def create_workspace(
     payload: schemas.WorkspaceCreate,
-    current_user: dict = Depends(require_permission("workspace.create")),
+    current_user: dict = Depends(require_permission("workspace.create", platform_level=True)),
     db: Session = Depends(get_db),
 ):
     """Create a new workspace and set the creator as owner."""

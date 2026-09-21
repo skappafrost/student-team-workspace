@@ -15,7 +15,7 @@ red rather than merely dropping a coverage line.
 """
 
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 
 import authorization
 from authorization import ROLE_HIERARCHY, Role, require_permission, require_role
@@ -258,18 +258,22 @@ def test_require_role_workspace_role_falls_back_on_bogus_stored_role(db_session)
     assert "insufficient in this workspace" in exc.value.detail
 
 
-def test_require_role_global_path_uses_token_role(db_session):
-    """No workspace_id -> the token's global role decides (used by workspace.create)."""
+def test_require_global_role_uses_token_role(db_session):
+    """The token's global role decides for platform-level actions (`workspace.create`).
+
+    ARC-05 moved this out of `require_role` — where a missing path parameter
+    silently fell through to it — into a factory a route has to ask for.
+    """
     _mk_user(db_session, "owner")
-    checker = _checker_for(db_session, None, Role.MEMBER)
+    checker = authorization.require_global_role(Role.MEMBER)
     # A token role that satisfies MEMBER.
-    assert _call(checker, db_session, None, {"id": "x", "role": Role.ADMIN.value})
+    assert checker(current_user={"id": "x", "role": Role.ADMIN.value})
 
 
-def test_require_role_global_path_rejects_guest_token_role(db_session):
-    checker = _checker_for(db_session, None, Role.ADMIN)
+def test_require_global_role_rejects_guest_token_role(db_session):
+    checker = authorization.require_global_role(Role.ADMIN)
     with pytest.raises(HTTPException) as exc:
-        _call(checker, db_session, None, {"id": "x", "role": Role.GUEST.value})
+        checker(current_user={"id": "x", "role": Role.GUEST.value})
     assert exc.value.status_code == 403
     assert "insufficient. Requires 'admin'." in exc.value.detail
 
@@ -333,3 +337,85 @@ def test_invalid_bearer_is_401_not_500(client):
     client.headers["Authorization"] = "Bearer not.a.jwt"
     resp = client.get("/workspaces/abc/members")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# ARC-05 — the workspace a guard checks comes from the path, never the client
+# ---------------------------------------------------------------------------
+
+
+def _query_scoped_routes(spec):
+    """OpenAPI operations that take `workspace_id` as a QUERY parameter."""
+    hits = []
+    for path, operations in (spec.get("paths") or {}).items():
+        for method, operation in (operations or {}).items():
+            for param in operation.get("parameters") or []:
+                if param.get("name") == "workspace_id" and param.get("in") == "query":
+                    hits.append(f"{method.upper()} {path}")
+    return sorted(hits)
+
+
+def test_no_route_takes_its_workspace_scope_from_the_query_string():
+    """A guard whose workspace can be named in a URL is a cross-tenant hole waiting to happen.
+
+    `workspace_id: str = None` in the guard makes FastAPI publish a *query*
+    parameter on any route whose path lacks `{workspace_id}` — which is exactly
+    how the T001/T002 class of bug returns silently when someone adds a route.
+    The published OpenAPI is where that shape shows up first, so the assertion
+    is on the contract the app advertises, not on a grep of the source.
+    """
+    from app import app
+
+    assert _query_scoped_routes(app.openapi()) == []
+
+
+def test_creating_a_workspace_is_not_rescoped_by_a_query_string(client, db_session):
+    """?workspace_id=<a workspace I do not belong to> must not change who may create.
+
+    Before the fix the guard read that query value and went looking for a
+    membership row, so a legitimate platform-level action could be turned into
+    a 403 by the caller's own URL.
+    """
+    ws = _mk_workspace(db_session, "someoneelse", slug="arc05-other")
+    make_user(db_session, "creator", email="creator@example.com")
+
+    as_user(client, "creator")
+    resp = client.post(
+        f"/workspaces?workspace_id={ws.id}",
+        json={"name": "Mine", "slug": "arc05-mine"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["id"] != ws.id
+
+
+def test_a_route_without_the_path_parameter_cannot_be_scoped_by_the_caller():
+    """The guard is path-only, so a mis-shaped route fails closed instead of reading a query.
+
+    This is the regression the finding is about: `require_role` used to fall
+    back to a client-supplied `?workspace_id=` whenever the route did not carry
+    the path parameter. A throwaway app pins the new contract — the request is
+    refused outright, and nothing the caller sends can name the workspace.
+    """
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+
+    from app import create_access_token
+
+    router = APIRouter()
+
+    @router.post("/misshaped")
+    async def misshaped(current_user: dict = Depends(require_permission("workspace.delete"))):
+        return {"ok": True}
+
+    probe = FastAPI()
+    probe.include_router(router)
+    client_probe = TestClient(probe, raise_server_exceptions=False)
+    client_probe.headers["Authorization"] = f"Bearer {create_access_token('owner')}"
+
+    resp = client_probe.post("/misshaped?workspace_id=anything")
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert any(
+        p.get("loc") == ["path", "workspace_id"] and p.get("type") == "missing"
+        for p in detail
+    ), f"expected a missing path parameter, got {detail}"
