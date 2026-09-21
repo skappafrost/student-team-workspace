@@ -69,8 +69,8 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 | Method | Path | Notes |
 |---|---|---|
 | GET, POST | `/workspaces/{id}/channels` | POST validates `type` against `general/project/private` (422 otherwise; TA3-2) |
-| PATCH | `/channels/{id}` | Manager (admin or creator) only |
-| GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`) |
+| PATCH | `/channels/{id}` | Manager (admin or creator) only. A `type="dm"` channel is managed only by its two participants — no workspace role opens it |
+| GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`). When the actor is a manager by role rather than the channel creator, the change is written to the workspace activity feed. DMs: participants only |
 | DELETE | `/channels/{id}/members/{user_id}` | Manager only |
 | GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`); POST `201` broadcasts over WS + creates notifications |
 | PATCH, DELETE | `/messages/{id}` | Author only |
