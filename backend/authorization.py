@@ -24,6 +24,41 @@ ROLE_HIERARCHY = {
     Role.GUEST: 1,
 }
 
+# Roles that may be handed out by another user. `owner` is excluded on purpose:
+# it is reachable only through POST /workspaces/{id}/transfer-ownership (SEC-01).
+ASSIGNABLE_ROLES = (Role.ADMIN, Role.MEMBER, Role.GUEST)
+
+
+def role_in_workspace(workspace_id: str, user_id: str, db: Session) -> Role:
+    """The caller's role *inside* the workspace.
+
+    ``current_user["role"]`` is the global token role, which
+    ``get_current_user`` always reports as ``member`` — comparing a grant
+    against it would let any workspace admin mint owners.
+    """
+    membership = _require_member(workspace_id, user_id, db)
+    try:
+        return Role(membership.role)
+    except ValueError:
+        return Role.GUEST
+
+
+def require_assignable_role(caller_role: Role, requested: Role) -> None:
+    """Refuse a role grant the caller has no standing to make."""
+    if requested not in ASSIGNABLE_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Cannot grant '{requested.value}': ownership moves only through "
+                "transfer-ownership"
+            ),
+        )
+    if ROLE_HIERARCHY[requested] > ROLE_HIERARCHY[caller_role]:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot grant '{requested.value}': it outranks your own role",
+        )
+
 
 def _require_member(workspace_id: str, user_id: str, db: Session) -> models.WorkspaceMembership:
     membership = (

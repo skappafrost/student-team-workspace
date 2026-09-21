@@ -31,7 +31,9 @@ import { WorkspaceRole, WorkspaceMember, WorkspaceInvite } from '../types';
 import { toast } from 'sonner';
 import { Icons } from '@/components/icons';
 
-const ROLES: WorkspaceRole[] = ['owner', 'admin', 'member', 'guest'];
+// `owner` is not offered anywhere: the API refuses to assign it, and ownership
+// moves through the transfer-ownership action (SEC-01).
+const ROLES: WorkspaceRole[] = ['admin', 'member', 'guest'];
 
 function RoleSelect({
   value,
@@ -52,7 +54,9 @@ function RoleSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {ROLES.map((role) => (
+        {/* The owner row is display-only, so its own value stays listed even
+            though it is not assignable. */}
+        {(ROLES.includes(value) ? ROLES : [value, ...ROLES]).map((role) => (
           <SelectItem key={role} value={role} className='capitalize'>
             {role}
           </SelectItem>
