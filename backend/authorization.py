@@ -13,21 +13,26 @@ from dependencies import get_current_user
 
 class Role(StrEnum):
     OWNER = "owner"
+    CO_OWNER = "co-owner"
     ADMIN = "admin"
     MEMBER = "member"
     GUEST = "guest"
 
 
 ROLE_HIERARCHY = {
-    Role.OWNER: 4,
+    Role.OWNER: 5,
+    Role.CO_OWNER: 4,
     Role.ADMIN: 3,
     Role.MEMBER: 2,
     Role.GUEST: 1,
 }
 
 # Roles that may be handed out by another user. `owner` is excluded on purpose:
-# it is reachable only through POST /workspaces/{id}/transfer-ownership (SEC-01).
-ASSIGNABLE_ROLES = (Role.ADMIN, Role.MEMBER, Role.GUEST)
+# it is reachable only through POST /workspaces/{id}/transfer-ownership (SEC-01),
+# and `co-owner` is deliberately *listed* even though it is not a legal owner —
+# an owner may appoint one, and the strict ceiling below stops it being
+# self-replicating (D-3c).
+ASSIGNABLE_ROLES = (Role.CO_OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST)
 
 
 def role_in_workspace(workspace_id: str, user_id: str, db: Session) -> Role:
@@ -45,7 +50,16 @@ def role_in_workspace(workspace_id: str, user_id: str, db: Session) -> Role:
 
 
 def require_assignable_role(caller_role: Role, requested: Role) -> None:
-    """Refuse a role grant the caller has no standing to make."""
+    """Refuse a role grant the caller has no standing to make (SEC-01, D-3c).
+
+    Two independent ceilings, both strict:
+
+    * `owner` is not an assignable role at all — ownership moves through
+      `POST /workspaces/{id}/transfer-ownership` and nowhere else;
+    * a caller may only hand out a role ranked **strictly below** its own, so no
+      role can be self-replicating: an `admin` cannot mint another `admin`, and
+      a `co-owner` cannot mint another `co-owner`.
+    """
     if requested not in ASSIGNABLE_ROLES:
         raise HTTPException(
             status_code=403,
@@ -54,10 +68,13 @@ def require_assignable_role(caller_role: Role, requested: Role) -> None:
                 "transfer-ownership"
             ),
         )
-    if ROLE_HIERARCHY[requested] > ROLE_HIERARCHY[caller_role]:
+    if ROLE_HIERARCHY[requested] >= ROLE_HIERARCHY[caller_role]:
         raise HTTPException(
             status_code=403,
-            detail=f"Cannot grant '{requested.value}': it outranks your own role",
+            detail=(
+                f"Cannot grant '{requested.value}': a role may only be assigned "
+                "to someone below your own role"
+            ),
         )
 
 

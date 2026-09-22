@@ -161,18 +161,40 @@ def test_router_invalid_role_branch_is_400_not_500(setup, db_session):
     assert _role_of(db_session, ws_id, "member1") == Role.MEMBER.value
 
 
-def test_promote_member_to_admin_persists(setup, client, db_session):
-    """The happy path the coverage gap was hiding: a real persisted promotion."""
+def test_admin_cannot_mint_a_peer_admin(setup, client, db_session):
+    """D-3c policy reversal: an admin may no longer hand out `admin`.
+
+    This test used to be `test_promote_member_to_admin_persists` and asserted the
+    opposite — 200 plus a persisted promotion — because peer-granting was what
+    the ceiling happened to allow. It is rewritten deliberately, not as a side
+    effect of touching the file: the rule is now "assign a role strictly below
+    your own", so `admin -> admin` and `co-owner -> co-owner` are refused, and
+    every caller's assignable set is enumerated in the ceiling matrix in
+    test_authorization_edges.py.
+    """
     ws_id = setup["workspace_id"]
     as_user(client, "admin1")
     resp = client.patch(
         f"/workspaces/{ws_id}/members/member1", json={"role": Role.ADMIN.value}
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["role"] == Role.ADMIN.value
-    # Persisted, not just returned.
+    assert resp.status_code == 403, resp.text
+    assert "below your own role" in resp.json()["detail"]
     db_session.expire_all()
-    assert _role_of(db_session, ws_id, "member1") == Role.ADMIN.value
+    assert _role_of(db_session, ws_id, "member1") == Role.MEMBER.value
+
+
+def test_admin_can_still_assign_roles_below_its_own_rank(setup, client, db_session):
+    """The reversal removes peer-granting, not the admin's ordinary duty to assign."""
+    ws_id = setup["workspace_id"]
+    for role in (Role.MEMBER, Role.GUEST):
+        as_user(client, "admin1")
+        resp = client.patch(
+            f"/workspaces/{ws_id}/members/member1", json={"role": role.value}
+        )
+        assert resp.status_code == 200, f"{role.value}: {resp.text}"
+        clear_auth(client)
+        db_session.expire_all()
+        assert _role_of(db_session, ws_id, "member1") == role.value
 
 
 def test_demote_self_admin_to_member_blocked_by_owner_protection(setup, client):

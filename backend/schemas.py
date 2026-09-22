@@ -6,10 +6,12 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
-RoleValue = Literal["owner", "admin", "member", "guest"]
+RoleValue = Literal["owner", "co-owner", "admin", "member", "guest"]
 # What a caller may hand out. `owner` is deliberately absent: ownership moves
 # through POST /workspaces/{id}/transfer-ownership and nowhere else (SEC-01).
-AssignableRole = Literal["admin", "member", "guest"]
+# A role equal to the caller's own rank is refused too, in the handler — see
+# `require_assignable_role` (D-3c).
+AssignableRole = Literal["co-owner", "admin", "member", "guest"]
 
 
 class WorkspaceCreate(BaseModel):
