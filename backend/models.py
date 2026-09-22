@@ -714,3 +714,47 @@ class PageVersion(Base):
 # ``WorkspaceInvite`` remains unchanged for now.
 # ---------------------------------------------------------------------------
 WorkspaceMembership = WorkspaceMember
+
+
+# ---------------------------------------------------------------------------
+# ARC-02: hot-path indexes declared on the model, not only in migrations.
+#
+# `alembic/versions/a7c15_nplus1_indexes.py` and its siblings create 21 indexes
+# that `Base.metadata` did not describe, so every `create_all` database — each
+# developer's `stw.db`, both backend CI jobs, all 60 test databases — ran the
+# list endpoints without them, and any future `--autogenerate` would have
+# proposed dropping 21 of them. `test_schema_drift.py` fails if the two lists
+# separate again, which is the reason these are declared here rather than left in
+# the migration chain alone.
+#
+# Declaring an Index against the mapped table attaches it to that table's
+# metadata, so `create_all` emits the same DDL the migrations do. One block keeps
+# the pairing with the migration list readable; the names match exactly.
+# ---------------------------------------------------------------------------
+_HOT_PATH_INDEXES: list[tuple[str, str, list[str]]] = [
+    ("ix_activities_workspace_created", "activities", ["workspace_id", "created_at"]),
+    ("ix_auth_sessions_family", "auth_sessions", ["family_id"]),
+    ("ix_auth_sessions_user", "auth_sessions", ["user_id"]),
+    ("ix_channel_members_user_id", "channel_members", ["user_id"]),
+    ("ix_channels_workspace_id", "channels", ["workspace_id"]),
+    ("ix_events_workspace_id", "events", ["workspace_id"]),
+    ("ix_files_uploader_id", "files", ["uploader_id"]),
+    ("ix_files_workspace_id", "files", ["workspace_id"]),
+    ("ix_message_reactions_message_id", "message_reactions", ["message_id"]),
+    ("ix_messages_author_id", "messages", ["author_id"]),
+    ("ix_messages_channel_created", "messages", ["channel_id", "created_at"]),
+    ("ix_messages_parent_id", "messages", ["parent_id"]),
+    ("ix_notifications_user_id", "notifications", ["user_id"]),
+    ("ix_page_versions_page_version", "page_versions", ["page_id", "version"]),
+    ("ix_pages_parent_id", "pages", ["parent_id"]),
+    ("ix_pages_workspace_id", "pages", ["workspace_id"]),
+    ("ix_projects_workspace_id", "projects", ["workspace_id"]),
+    ("ix_task_comments_task_id", "task_comments", ["task_id"]),
+    ("ix_tasks_assignee_id", "tasks", ["assignee_id"]),
+    ("ix_tasks_project_id", "tasks", ["project_id"]),
+    ("ix_workspace_members_user_id", "workspace_members", ["user_id"]),
+]
+
+for _name, _table, _columns in _HOT_PATH_INDEXES:
+    Index(_name, *(Base.metadata.tables[_table].c[column] for column in _columns))
+del _name, _table, _columns, _HOT_PATH_INDEXES
