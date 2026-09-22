@@ -25,6 +25,7 @@ from sqlalchemy import create_engine, inspect, text
 
 from alembic import command
 from app import app
+from conftest import run_alembic
 from models import Base
 
 
@@ -38,7 +39,7 @@ def migrated_engine():
     previous = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = url
     try:
-        command.upgrade(cfg, "head")
+        run_alembic(command.upgrade, cfg, "head")
     finally:
         if previous is None:
             os.environ.pop("DATABASE_URL", None)
