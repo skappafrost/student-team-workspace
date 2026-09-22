@@ -15,7 +15,7 @@ from authorization import (
     role_in_workspace,
 )
 from database import get_db
-from dependencies import _get_workspace_or_404, _utcnow, get_current_user
+from dependencies import _get_workspace_or_404, _utcnow, commit_unique, get_current_user
 from email_sender import send_invite_email
 
 router = APIRouter()
@@ -130,8 +130,8 @@ async def accept_invite(
         user_id=current_user["id"],
         role=invite.role,
     )
-    db.add(membership)
-    db.commit()
+    with commit_unique(db, "User is already a member of this workspace"):
+        db.add(membership)
     db.refresh(membership)
     return membership
 

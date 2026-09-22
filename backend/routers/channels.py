@@ -21,6 +21,7 @@ from dependencies import (
     _get_channel_or_404,
     _get_workspace_or_404,
     _ws_resolve_user,
+    commit_unique,
     get_current_user,
 )
 from services import log_activity
@@ -585,11 +586,11 @@ async def add_channel_member(
         raise HTTPException(status_code=409, detail="User is already a member of this channel")
 
     cm = models.ChannelMember(channel_id=channel.id, user_id=payload.user_id)
-    db.add(cm)
-    _log_channel_membership_change(
-        db, channel, current_user["id"], "added channel member", payload.user_id
-    )
-    db.commit()
+    with commit_unique(db, "User is already a member of this channel"):
+        db.add(cm)
+        _log_channel_membership_change(
+            db, channel, current_user["id"], "added channel member", payload.user_id
+        )
     db.refresh(cm)
     cm.user = target
     return _channel_member_out(cm)

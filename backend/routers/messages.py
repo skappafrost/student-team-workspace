@@ -11,7 +11,12 @@ import pagination as pagination_lib
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
-from dependencies import _get_channel_or_404, _get_message_or_404, get_current_user
+from dependencies import (
+    _get_channel_or_404,
+    _get_message_or_404,
+    commit_unique,
+    get_current_user,
+)
 from query_utils import LIKE_ESCAPE, contains_pattern
 from routers.channels import _is_private_channel_member
 from services import log_activity, notify
@@ -346,15 +351,15 @@ async def toggle_reaction(
         )
         .first()
     )
-    if existing is not None:
-        db.delete(existing)
-    else:
-        db.add(
-            models.MessageReaction(
-                message_id=message_id, user_id=current_user["id"], emoji=payload.emoji
+    with commit_unique(db, "Reaction already recorded"):
+        if existing is not None:
+            db.delete(existing)
+        else:
+            db.add(
+                models.MessageReaction(
+                    message_id=message_id, user_id=current_user["id"], emoji=payload.emoji
+                )
             )
-        )
-    db.commit()
 
     message = (
         db.query(models.Message)
