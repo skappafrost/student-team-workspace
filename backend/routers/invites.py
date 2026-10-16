@@ -8,9 +8,14 @@ from sqlalchemy.orm import Session
 import models
 import pagination as pagination_lib
 import schemas
-from authorization import Role, require_permission
+from authorization import (
+    Role,
+    require_assignable_role,
+    require_permission,
+    role_in_workspace,
+)
 from database import get_db
-from dependencies import _get_workspace_or_404, _utcnow, get_current_user
+from dependencies import _get_workspace_or_404, _utcnow, commit_unique, get_current_user
 from email_sender import send_invite_email
 
 router = APIRouter()
@@ -25,11 +30,23 @@ async def create_invite(
     current_user: dict = Depends(require_permission("workspace.invite")),
     db: Session = Depends(get_db),
 ):
-    """Invite a user by email to a workspace. Requires admin or higher role."""
+    """Invite a user by email to a workspace. Requires admin or higher role.
+
+    The role an invite carries is capped: `owner` is not assignable, and no role
+    above the caller's own role in this workspace may be handed out (SEC-02).
+    """
     # RBAC enforced by require_permission dependency
     workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
+
+    try:
+        requested_role = Role(payload.role or Role.MEMBER.value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid role") from None
+    require_assignable_role(
+        role_in_workspace(workspace_id, current_user["id"], db), requested_role
+    )
 
     # Prevent duplicate active invite for same email/workspace.
     existing = (
@@ -48,7 +65,7 @@ async def create_invite(
     invite = models.WorkspaceInvite(
         workspace_id=workspace_id,
         email=payload.email,
-        role=payload.role or Role.MEMBER.value,
+        role=requested_role.value,
         expires_at=_utcnow() + timedelta(days=7),
     )
     db.add(invite)
@@ -113,8 +130,8 @@ async def accept_invite(
         user_id=current_user["id"],
         role=invite.role,
     )
-    db.add(membership)
-    db.commit()
+    with commit_unique(db, "User is already a member of this workspace"):
+        db.add(membership)
     db.refresh(membership)
     return membership
 
@@ -176,6 +193,10 @@ async def update_invite_role(
         new_role = Role(payload.role)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid role") from None
+
+    require_assignable_role(
+        role_in_workspace(workspace_id, current_user["id"], db), new_role
+    )
 
     invite.role = new_role.value
     db.commit()

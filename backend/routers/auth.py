@@ -14,6 +14,7 @@ from dependencies import (
     _decode_token,
     _set_session_cookie,
     _token_from_request,
+    commit_unique,
     create_session_pair,
     get_current_user,
     get_password_hash_async,
@@ -77,8 +78,8 @@ async def register(payload: RegisterIn, response: Response, db: Session = Depend
         display_name=payload.email.split("@")[0],
         hashed_password=await get_password_hash_async(payload.password),
     )
-    db.add(user)
-    db.commit()
+    with commit_unique(db, "Email already registered"):
+        db.add(user)
     db.refresh(user)
 
     access_token, refresh_token = create_session_pair(user.id, db)

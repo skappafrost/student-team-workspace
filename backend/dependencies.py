@@ -6,12 +6,15 @@ import secrets
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from starlette.concurrency import run_in_threadpool
 
@@ -624,3 +627,27 @@ def _get_notification_or_404(
     if notification.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not allowed to access this notification")
     return notification
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-row writes (COR-18)
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def commit_unique(db: Session, detail: str) -> Iterator[None]:
+    """Commit the block's write, answering a duplicate UNIQUE value with 409.
+
+    Every create path checks for the duplicate first and then inserts, but the
+    check and the INSERT are separate statements, so a concurrent request can
+    commit the same value in between — two tabs, a double-click, a client retry.
+    The constraint then fires on the flush or the commit and, unhandled, surfaces
+    as an HTTP 500. The rollback matters as much as the status: without it the
+    session is left inside a failed transaction and teardown raises on top.
+    """
+    try:
+        yield
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=detail) from exc

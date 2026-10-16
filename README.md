@@ -54,7 +54,8 @@ A local-first team workspace that keeps **context connected**: the message that 
                & verified deletion (tombstone)            ✅ shipped
 
  WORKSPACES    create · invite (expiring tokens) · roles
-               owner ▸ admin ▸ member ▸ guest · transfer ownership
+               owner ▸ co-owner ▸ admin ▸ member ▸ guest
+               · transfer ownership (owner only)
                · workspace switcher · per-workspace audit log ✅ shipped
 
  CHAT          channels (public/private) · DMs · threads (parent_id)
