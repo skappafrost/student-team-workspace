@@ -10,6 +10,12 @@ python-multipart>=0.0.9
 httpx>=0.27.0
 pytest>=8.0.0
 alembic>=1.13.0
+# The PostgreSQL driver this project supports. SQLAlchemy >= 2.1 resolves a bare
+# `postgresql://` URL to the psycopg (v3) dialect, which is NOT listed here, so
+# every Postgres URL the project generates names `postgresql+psycopg2://`
+# explicitly (docker-compose.yml, .github/workflows/ci.yml, alembic/env.py,
+# .env.example). Keep those two facts together: adding psycopg3 support is a
+# deliberate change, not a side effect of a floating `sqlalchemy` version.
 psycopg2-binary>=2.9.9
 requests>=2.34.2
 

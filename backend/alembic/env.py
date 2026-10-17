@@ -27,7 +27,7 @@ def get_database_url() -> str:
     ini_url = config.get_main_option("sqlalchemy.url")
     if ini_url and ini_url != "driver://user:pass@localhost/dbname":
         return ini_url
-    return "postgresql://postgres:***@localhost:5432/stw"
+    return "postgresql+psycopg2://postgres:***@localhost:5432/stw"
 
 
 def run_migrations_offline() -> None:
