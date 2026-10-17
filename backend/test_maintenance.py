@@ -324,3 +324,29 @@ def test_purge_cli_dry_run_runs_on_sqlite(db_session, upload_dir, capsys, tmp_pa
     assert "gone.pdf" in out
     assert "dry-run" in out.lower() or "would" in out.lower()
     assert db_session.get(models.File, "f-missing") is not None
+
+
+def test_postgres_refusal_does_not_build_an_engine(capsys, monkeypatch):
+    """The `--apply` guard must not need a working DBAPI.
+
+    `cmd_purge_orphans` used to create the engine and only then look at the URL,
+    and creating an engine loads the dialect's driver. SQLAlchemy >= 2.1 maps a
+    bare `postgresql://` to the psycopg (v3) dialect while this project ships
+    psycopg2, so on any runner without psycopg3 the command crashed with
+    ModuleNotFoundError instead of printing the refusal it exists to print — which
+    is what made CI red here without any code change to the CLI.
+
+    Patching the engine factory makes the mechanism the assertion, so this fails
+    for the right reason on every SQLAlchemy version rather than depending on
+    which driver happens to be installed.
+    """
+    import database
+
+    def _explode(*_args, **_kwargs):
+        raise AssertionError("the guard ran after building an engine")
+
+    monkeypatch.setattr(database, "_make_engine", _explode)
+
+    rc = maintenance.main(["purge-orphans", "--db-url", "postgresql://u:p@localhost:5432/stw"])
+    assert rc == 2
+    assert "--apply" in capsys.readouterr().err
