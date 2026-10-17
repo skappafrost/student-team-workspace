@@ -72,7 +72,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 | PATCH | `/channels/{id}` | Manager (admin or creator) only. A `type="dm"` channel is managed only by its two participants — no workspace role opens it |
 | GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`). When the actor is a manager by role rather than the channel creator, the change is written to the workspace activity feed. DMs: participants only |
 | DELETE | `/channels/{id}/members/{user_id}` | Manager only |
-| GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`); POST `201` broadcasts over WS + creates notifications |
+| GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`), `?limit=`, `?offset=`, `?before=<message_id>` — the window is taken from the **newest** end and returned ascending, so `offset` walks backwards and `before` pages older; POST `201` broadcasts over WS + creates notifications |
 | PATCH, DELETE | `/messages/{id}` | The author always may. Otherwise the caller needs workspace rank `admin`+ **and** access to the channel: a DM or a private channel they are not a member of answers `403`, so rank no longer reaches messages it cannot read. Rank-based moderation is written to the workspace activity feed. |
 | POST | `/messages/{id}/reactions` | Body `{emoji}`; returns `[ReactionSummary]` |
 | GET, POST | `/workspaces/{id}/dms` | Direct messages; body `{user_id}` |
@@ -155,7 +155,7 @@ All collection (list) endpoints share one contract — the helper lives in `back
 - Query params: `?limit=` (1..1000) and `?offset=` (>= 0). Omitted `limit` uses the endpoint's default, which for every paginated list equals the 1000 cap — i.e. the full collection (the BFF clients rely on that); omitted `offset` is 0.
 - Hard cap: `limit` above **1000** is rejected with `422` (validation), never silently truncated. Two endpoints keep stricter caps they shipped with: `GET /workspaces/{id}/activity` (default/max 100) and `GET /workspaces/{id}/audit-log` (default 100, max 500).
 - Responses stay **bare JSON arrays** (shape frozen — no `{items,total}` envelopes); pages are read with `limit`/`offset` windows over the same ordering each endpoint already uses.
-- Ordering is explicit and stable on every paginated list (creation/join time or position), so windows are disjoint and deterministic.
+- Ordering is explicit and stable on every paginated list (creation/join time or position), so windows are disjoint and deterministic. Where two rows can share a timestamp — SQLite's `CURRENT_TIMESTAMP` is second-granular — the tie-break is a second ordered column, so it is **stable** across queries rather than chronological between the tied rows; `messages` avoids relying on that by stamping new rows with a naive-UTC microsecond default (`models._utcnow_naive`), which is the same naive-UTC convention the line above states.
 - Endpoints without a collection shape (`/ai/search`, `/users/me/export`, tree-mode `/pages` without `recent`/`search`) are not paginated.
 - **Exempt, deliberately: `GET /workspaces/{id}/presence`.** The roster is bounded by workspace membership and the client needs the whole set to render "who is online", so paging it would force the BFF to loop for zero benefit — and ordering it (`ORDER BY last_seen`) over a live-changing value makes rows duplicate or skip between windows. It returns every member in one **unordered** bare array; sort client-side.
 

@@ -4,6 +4,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 
 import models
@@ -157,18 +158,38 @@ def _notify_message_fanout(
 async def list_channel_messages(
     channel_id: str,
     q: str | None = None,
+    before: str | None = None,
     limit: int | None = pagination_lib.limit_query(
-        "Maximum number of messages to return (default = the 1000 cap)."
+        "Maximum number of messages to return, counting back from the newest "
+        "(default = the 1000 cap, i.e. the whole channel)."
     ),
-    offset: int | None = pagination_lib.offset_query(),
+    offset: int | None = pagination_lib.offset_query(
+        "Skip this many messages starting from the newest."
+    ),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List messages in a channel, optionally filtered by a case-insensitive
-    content substring (`q`). Requires workspace membership and channel access.
+    """List the newest messages in a channel, optionally filtered by a
+    case-insensitive content substring (`q`). Requires workspace membership and
+    channel access.
 
-    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
-    collection), ``offset`` (default 0).
+    Pagination: ``limit`` (1..1000; default = the cap, i.e. the whole collection),
+    ``offset`` (default 0) walking **backwards from the newest**, and ``before``
+    (a message id) for a window strictly older than that message. The response is
+    still a bare JSON array in ascending `created_at` order, as `pagination.py`
+    and `docs/API.md` require.
+
+    Why the window is anchored at the newest end: the old query ordered
+    `created_at ASC` and then applied `offset/limit`, so the default page was the
+    **oldest** 1000 messages in the channel. In a busy channel the newest messages
+    were simply absent from the very first response, and no `offset` value could
+    reach them by paging forward.
+
+    `id` is part of the ordering, not decoration: SQLite's `CURRENT_TIMESTAMP` is
+    second-granular, so messages created in the same second had no defined order
+    and could shuffle between pages. UUIDs are not chronological, which is fine
+    for a tie-break as long as the same composite order is used for both the sort
+    and the `before` cut — otherwise a row could appear on two pages or none.
     """
     channel = _get_channel_or_404(db, channel_id)
     _require_member(channel.workspace_id, current_user["id"], db)
@@ -180,15 +201,32 @@ async def list_channel_messages(
         query = query.filter(
             models.Message.content.ilike(contains_pattern(q.strip()), escape=LIKE_ESCAPE)
         )
+
+    if before is not None and before.strip():
+        anchor = _get_message_or_404(db, before.strip())
+        if anchor.channel_id != channel_id:
+            raise HTTPException(status_code=400, detail="`before` is not a message in this channel")
+        query = query.filter(
+            or_(
+                models.Message.created_at < anchor.created_at,
+                and_(
+                    models.Message.created_at == anchor.created_at,
+                    models.Message.id < anchor.id,
+                ),
+            )
+        )
+
     _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     messages = (
-        query.order_by(models.Message.created_at.asc())
+        query.order_by(models.Message.created_at.desc(), models.Message.id.desc())
         .options(selectinload(models.Message.author), selectinload(models.Message.reactions))
         .offset(_offset)
         .limit(_limit)
         .all()
     )
-    return messages
+    # Newest-first window, oldest-first response: the client appends live frames to
+    # the tail and expects the list it renders to be chronological.
+    return list(reversed(messages))
 
 
 @router.post("/channels/{channel_id}/messages", response_model=schemas.MessageOut, status_code=201)
