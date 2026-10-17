@@ -90,8 +90,8 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/pages` | GET: `?flat=true` tree-vs-flat, `?search=` substring filter (literal `%`/`_`, TA3-2), `?recent=true`, `?limit=` (default 10, max 100) |
-| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | POST/GET `201`; PATCH/DELETE admin+ or page creator; slug unique per workspace |
+| GET, POST | `/workspaces/{id}/pages` | GET: `?flat=true` tree-vs-flat, `?search=` substring filter (literal `%`/`_`, TA3-2), `?recent=true`, `?limit=` (default 10, max 100) — the cap applies to `search` and `recent` as stated. `flat`/`search`/`recent` return a flat list with `children: []`; only tree mode nests. |
+| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | POST/GET `201`; PATCH/DELETE admin+ or page creator; slug unique per workspace. `parent_id` must be in the workspace, is not the page itself, and must not be one of the page's own descendants (`400 Page cannot be its own ancestor`) — a cycle made every page list in the workspace answer `500`. |
 | GET | `/workspaces/{id}/pages/{page_id}/backlinks` | Pages linking to this one |
 | GET | `/workspaces/{id}/pages/{page_id}/history` | Versions, newest first |
 | POST | `/workspaces/{id}/pages/{page_id}/restore/{version}` | Restore a version |
