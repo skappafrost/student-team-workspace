@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { seededMembers } from '@/features/workspace/fixture';
 import { WorkspaceRole } from '@/features/workspace/types';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
@@ -37,23 +36,21 @@ async function backendRequest(
   });
 }
 
-function isBackendWired(sessionCookie: string): Promise<boolean> {
-  return fetch(`${BACKEND_URL}/workspaces`, {
-    headers: { Cookie: `session_token=${sessionCookie}` },
-    cache: 'no-store'
-  })
-    .then((res) => res.ok)
-    .catch(() => false);
-}
-
+/**
+ * `GET` is the roster, `PATCH` one role change, and the backend is the only
+ * source for both. Nothing here is reachable without a session, and a refusal is
+ * forwarded with its own status: the two handlers used to answer a missing cookie
+ * or an unreachable backend from a module-scope array that `PATCH` also wrote
+ * into, so one visitor's role change showed up in the next reader's list.
+ */
 export async function GET() {
   const sessionCookie = await getSessionCookie();
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    return NextResponse.json({ members: seededMembers });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
   const workspaceId = await getCurrentWorkspaceId(sessionCookie);
   if (!workspaceId) {
-    return NextResponse.json({ members: seededMembers });
+    return NextResponse.json({ error: 'No workspace found' }, { status: 404 });
   }
   const res = await backendRequest(
     `/workspaces/${workspaceId}/members`,
@@ -76,13 +73,8 @@ export async function PATCH(request: Request) {
   if (!body.memberId || !body.role) {
     return NextResponse.json({ error: 'memberId and role are required' }, { status: 400 });
   }
-
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    const idx = seededMembers.findIndex((m) => m.id === body.memberId);
-    if (idx !== -1) {
-      seededMembers[idx] = { ...seededMembers[idx], role: body.role as WorkspaceRole };
-    }
-    return NextResponse.json({ members: seededMembers });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
   const workspaceId = await getCurrentWorkspaceId(sessionCookie);

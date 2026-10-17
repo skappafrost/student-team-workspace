@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { seededInvites } from '@/features/workspace/fixture';
 import { WorkspaceRole } from '@/features/workspace/types';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
@@ -37,23 +36,24 @@ async function backendRequest(
   });
 }
 
-function isBackendWired(sessionCookie: string): Promise<boolean> {
-  return fetch(`${BACKEND_URL}/workspaces`, {
-    headers: { Cookie: `session_token=${sessionCookie}` },
-    cache: 'no-store'
-  })
-    .then((res) => res.ok)
-    .catch(() => false);
-}
-
+/**
+ * Invites, read and written through the backend and nowhere else.
+ *
+ * These four handlers used to fall back to a module-scope array whenever the
+ * session was missing: `POST` pushed into it, `PATCH` overwrote a slot and
+ * `DELETE` spliced one out, so a write from one visitor changed what the next
+ * reader saw and the delete could not be undone. A request without a session is
+ * now a 401, one without a workspace a 404, and a backend refusal keeps its own
+ * status.
+ */
 export async function GET() {
   const sessionCookie = await getSessionCookie();
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    return NextResponse.json({ invites: seededInvites });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
   const workspaceId = await getCurrentWorkspaceId(sessionCookie);
   if (!workspaceId) {
-    return NextResponse.json({ invites: seededInvites });
+    return NextResponse.json({ error: 'No workspace found' }, { status: 404 });
   }
   const res = await backendRequest(
     `/workspaces/${workspaceId}/invites`,
@@ -76,21 +76,8 @@ export async function POST(request: Request) {
   if (!body.email || !body.role) {
     return NextResponse.json({ error: 'email and role are required' }, { status: 400 });
   }
-
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    const invite = {
-      id: `inv_${Date.now()}`,
-      email: body.email,
-      role: body.role,
-      created_at: new Date().toISOString()
-    };
-    seededInvites.push({
-      id: invite.id,
-      email: invite.email,
-      role: invite.role,
-      invitedAt: invite.created_at
-    });
-    return NextResponse.json({ invite, invites: seededInvites });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
   const workspaceId = await getCurrentWorkspaceId(sessionCookie);
@@ -128,13 +115,8 @@ export async function PATCH(request: Request) {
   if (!body.inviteId || !body.role) {
     return NextResponse.json({ error: 'inviteId and role are required' }, { status: 400 });
   }
-
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    const idx = seededInvites.findIndex((i) => i.id === body.inviteId);
-    if (idx !== -1) {
-      seededInvites[idx] = { ...seededInvites[idx], role: body.role as WorkspaceRole };
-    }
-    return NextResponse.json({ invites: seededInvites });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
   const workspaceId = await getCurrentWorkspaceId(sessionCookie);
@@ -169,11 +151,8 @@ export async function DELETE(request: Request) {
   if (!inviteId) {
     return NextResponse.json({ error: 'inviteId is required' }, { status: 400 });
   }
-
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    const idx = seededInvites.findIndex((i) => i.id === inviteId);
-    if (idx !== -1) seededInvites.splice(idx, 1);
-    return NextResponse.json({ invites: seededInvites });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
   const workspaceId = await getCurrentWorkspaceId(sessionCookie);
