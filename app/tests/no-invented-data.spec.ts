@@ -76,7 +76,9 @@ const pageTitles = (body: unknown): (string | undefined)[] =>
 const inboxRows = (body: unknown): NotificationRow[] =>
   (body as { notifications?: NotificationRow[] }).notifications ?? [];
 
-test('the roster and the invite list are the backend rows, and a cookie-less write cannot rewrite them', async () => {
+test('the roster and the invite list are the backend rows, and a cookie-less write cannot rewrite them', async ({
+  browser
+}) => {
   test.setTimeout(180_000);
 
   const owner = await registerUser('noinvent-owner');
@@ -103,18 +105,30 @@ test('the roster and the invite list are the backend rows, and a cookie-less wri
   // session rewrote the module-scope arrays and returned them, and the splice was
   // unrecoverable. Refusing the request is only half the fix, so the reads after
   // it are asserted too.
-  const tamperedMember = await bff('/api/workspace/members', 'not-a-session', {
-    method: 'PATCH',
-    body: { memberId: 'usr_2', role: 'admin' }
-  });
-  expect(tamperedMember.status).toBe(401);
-  expect(tamperedMember.body.members).toBeUndefined();
+  //
+  // `bff()` always sets the cookie header, so 'not-a-session' reaches the handler
+  // as a session that exists — its 401 check passes and the request lands in the
+  // no-workspace 404 instead. A write has to arrive with no session at all, and
+  // only a context that never had a cookie added sends that (the anonymous shape
+  // `file-download.spec.ts` uses).
+  const anonymous = await browser.newContext();
 
-  const tamperedInvite = await bff('/api/workspace/invites?inviteId=inv_1', 'not-a-session', {
-    method: 'DELETE'
+  const tamperedMember = await anonymous.request.fetch(`${APP}/api/workspace/members`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    data: { memberId: 'usr_2', role: 'admin' }
   });
-  expect(tamperedInvite.status).toBe(401);
-  expect(tamperedInvite.body.invites).toBeUndefined();
+  expect(tamperedMember.status(), await tamperedMember.text()).toBe(401);
+  expect(((await tamperedMember.json()) as { members?: unknown }).members).toBeUndefined();
+
+  const tamperedInvite = await anonymous.request.fetch(
+    `${APP}/api/workspace/invites?inviteId=inv_1`,
+    { method: 'DELETE' }
+  );
+  expect(tamperedInvite.status(), await tamperedInvite.text()).toBe(401);
+  expect(((await tamperedInvite.json()) as { invites?: unknown }).invites).toBeUndefined();
+
+  await anonymous.close();
 
   const membersAfter = await bff('/api/workspace/members', owner.token);
   expect(memberEmails(membersAfter.body)).toEqual(memberEmails(members.body));
@@ -123,13 +137,15 @@ test('the roster and the invite list are the backend rows, and a cookie-less wri
 
   // src/proxy.ts only matches /dashboard and /auth, so an anonymous request does
   // reach the handler; it is answered as unauthenticated, not as somebody's team.
-  const anonymous = await fetch(`${APP}/api/workspace/members`);
-  expect(anonymous.status).toBe(401);
-  expect(((await anonymous.json()) as { members?: unknown }).members).toBeUndefined();
+  // A bare `fetch` from the test process carries no cookie of its own.
+  const rosterWithoutSession = await fetch(`${APP}/api/workspace/members`);
+  expect(rosterWithoutSession.status).toBe(401);
+  expect(((await rosterWithoutSession.json()) as { members?: unknown }).members).toBeUndefined();
 
   // A freshly registered account owns no workspace. This used to be the same
   // fabricated roster, because the fallback keyed on "no rows", not on "the
-  // backend refused".
+  // backend refused". The cookie here is real, so this is the 404 branch on
+  // purpose — the one the two writes above could not reach.
   const alone = await registerUser('noinvent-alone');
   const noWorkspace = await bff('/api/workspace/members', alone.token);
   expect(noWorkspace.status).toBe(404);
@@ -143,13 +159,16 @@ test('a page list the backend refused is an error, not a fabricated tree', async
   expect(anonymous.status).toBe(401);
   expect(((await anonymous.json()) as { pages?: unknown }).pages).toBeUndefined();
 
-  // A token the backend will not honour: `/workspaces` answers 401, so there is
-  // no workspace whose pages could be listed. This used to answer five
-  // hand-written pages while a 500 on the same route answered with the failure.
-  const refused = await bff('/api/pages', 'not-a-session');
-  expect(refused.status).toBe(404);
-  expect(refused.body.pages).toBeUndefined();
-  expect(typeof refused.body.error).toBe('string');
+  // A token the backend will not honour. `bff()` sends it as a cookie, so the
+  // handler passes its 401 check and lands in the 404 branch: `/workspaces`
+  // answers 401, so there is no workspace whose pages could be listed. This used
+  // to answer five hand-written pages while a 500 on the same route reported the
+  // failure honestly. A backend nobody can reach is the 503 branch, which these
+  // specs cannot produce — `playwright.config.ts` starts one that answers.
+  const noWorkspace = await bff('/api/pages', 'not-a-session');
+  expect(noWorkspace.status).toBe(404);
+  expect(noWorkspace.body.pages).toBeUndefined();
+  expect(typeof noWorkspace.body.error).toBe('string');
 
   const owner = await registerUser('noinvent-pages');
   await createWorkspace(owner.token, `noinvent-pages-${Date.now()}`);
