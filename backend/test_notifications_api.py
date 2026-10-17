@@ -26,7 +26,7 @@ def create_user(client, db_session, user_id, email):
 def test_create_notification(client, db_session):
     create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
+    as_user(client, "target-user")
     resp = client.post(
         "/notifications",
         json={
@@ -50,7 +50,7 @@ def test_create_notification(client, db_session):
 def test_list_notifications_for_current_user(client, db_session):
     create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
+    as_user(client, "target-user")
 
     client.post(
         "/notifications",
@@ -86,7 +86,7 @@ def test_list_notifications_for_current_user(client, db_session):
 def test_get_notification(client, db_session):
     create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
+    as_user(client, "target-user")
     n = client.post(
         "/notifications",
         json={"user_id": "target-user", "type": "mention", "title": "Read me"},
@@ -102,7 +102,7 @@ def test_get_notification(client, db_session):
 def test_mark_notification_read(client, db_session):
     create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
+    as_user(client, "target-user")
     n = client.post(
         "/notifications",
         json={"user_id": "target-user", "type": "mention", "title": "Read me"},
@@ -121,7 +121,7 @@ def test_mark_notification_read(client, db_session):
 def test_list_unread_only(client, db_session):
     create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
+    as_user(client, "target-user")
 
     n1 = client.post(
         "/notifications",
@@ -145,7 +145,7 @@ def test_list_unread_only(client, db_session):
 def test_delete_notification(client, db_session):
     create_workspace(client, "owner")
     create_user(client, db_session, "target-user", "target@example.com")
-    as_user(client, "owner")
+    as_user(client, "target-user")
     n = client.post(
         "/notifications",
         json={"user_id": "target-user", "type": "mention", "title": "Delete me"},
@@ -166,7 +166,7 @@ def test_user_cannot_access_others_notifications(client, db_session):
     create_user(client, db_session, "user-a", "a@example.com")
     create_user(client, db_session, "user-b", "b@example.com")
 
-    as_user(client, "owner")
+    as_user(client, "user-a")
     n = client.post(
         "/notifications",
         json={"user_id": "user-a", "type": "mention", "title": "Private"},
@@ -199,3 +199,55 @@ def test_invalid_notification_type_rejected(client, db_session):
         json={"user_id": "target-user", "type": "invalid-type", "title": "Bad"},
     )
     assert resp.status_code == 422
+
+
+def test_cannot_create_notification_for_another_user(client, db_session):
+    """The feed is not a message board other people can write into.
+
+    `user_id` used to be trusted as long as the row existed, so any authenticated
+    user could insert arbitrary title/content into anyone's notifications — and the
+    UI presents that feed as coming from the workspace.
+    """
+    create_workspace(client, "owner")
+    create_user(client, db_session, "target-user", "target@example.com")
+
+    as_user(client, "owner")
+    resp = client.post(
+        "/notifications",
+        json={
+            "user_id": "target-user",
+            "type": "task-assigned",
+            "title": "FAKE from owner",
+            "content": "click this link",
+        },
+    )
+    assert resp.status_code == 403, resp.text
+
+    as_user(client, "target-user")
+    assert client.post(
+        "/notifications",
+        json={"user_id": "target-user", "type": "task-assigned", "title": "mine"},
+    ).status_code == 201
+    feed = client.get("/notifications").json()
+    assert [n["title"] for n in feed] == ["mine"]
+
+
+def test_missing_target_still_answers_404_not_403(client, db_session):
+    """Ordering matters: checking existence first keeps the route from confirming
+    which user ids exist by answering 403 to strangers and 404 to nobody."""
+    create_workspace(client, "owner")
+    create_user(client, db_session, "target-user", "target@example.com")
+
+    as_user(client, "target-user")
+    resp = client.post(
+        "/notifications",
+        json={"user_id": "owner", "type": "mention", "title": "No such user"},
+    )
+    assert resp.status_code == 403, resp.text
+
+    resp = client.post(
+        "/notifications",
+        json={"user_id": "nobody-at-all", "type": "mention", "title": "No such user"},
+    )
+    assert resp.status_code == 404, resp.text
+
