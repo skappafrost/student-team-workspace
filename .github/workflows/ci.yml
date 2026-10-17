@@ -159,6 +159,11 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:8000
           TEST_APP_URL: http://localhost:3000
           STW_BACKEND_URL: http://localhost:8000
+          # The same URL the "Prepare backend database" step just migrated.
+          # Without it the uvicorn that playwright starts falls back to
+          # `sqlite:///./stw.db` (backend/config.py:21) and the migration above
+          # is decorative — see app/playwright.config.ts.
+          DATABASE_URL: sqlite:///./ci_e2e.db
       - name: Upload report
         if: failure()
         uses: actions/upload-artifact@v4
