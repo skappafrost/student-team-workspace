@@ -18,11 +18,23 @@ async def create_notification(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a notification for a user."""
-    # Verify target user exists
+    """Create a notification in the caller's own feed.
+
+    Fan-out for other people (mentions, task assignment, DMs) is the server's job
+    and goes through `services.notify`; this route was a client-callable way to
+    write arbitrary title/content into anyone else's notifications, which makes it
+    a phishing primitive — the feed is one of the few places the UI presents rows
+    as coming from the workspace.
+
+    The existence check runs first on purpose: posting to a user that does not
+    exist stays `404` rather than becoming a `403` that leaks whether the id is
+    valid, which is what `test_cannot_create_notification_for_missing_user` pins.
+    """
     target_user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
+    if payload.user_id != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Cannot create notifications for other users")
 
     notification = models.Notification(
         user_id=payload.user_id,

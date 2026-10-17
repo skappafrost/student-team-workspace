@@ -116,7 +116,7 @@ Each workspace has a storage quota enforced at upload time on `POST /workspaces/
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/notifications` | GET: `?unread_only=true`, `?limit= ?offset=` |
+| GET, POST | `/notifications` | GET: `?unread_only=true`, `?limit= ?offset=`. POST accepts a `user_id` equal to the caller only (`403` otherwise, `404` if the id does not exist); fan-out to other users is server-side (`services.notify`), not client-callable. The BFF exposes GET only. |
 | GET, PATCH, DELETE | `/notifications/{id}` | PATCH `{read: bool}` |
 | POST | `/notifications/mark-all-read` | Marks every unread row of the **caller** as read; returns `{"ok": true}`; idempotent |
 
