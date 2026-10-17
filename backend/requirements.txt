@@ -18,6 +18,10 @@ alembic>=1.13.0
 # deliberate change, not a side effect of a floating `sqlalchemy` version.
 psycopg2-binary>=2.9.9
 requests>=2.34.2
+# Imported directly by test_compose_contract.py. Present today only as a
+# transitive dependency of uvicorn[standard]; naming it keeps that test from
+# disappearing the next time the server stack drops it.
+pyyaml>=6.0
 
 # Dev tooling
 # Pinned exactly on purpose: CI gates `ruff check .`, and a floating version
