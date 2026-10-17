@@ -4,6 +4,7 @@ from datetime import UTC, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 import models
 import pagination as pagination_lib
@@ -71,7 +72,12 @@ async def create_invite(
     db.add(invite)
     db.commit()
     db.refresh(invite)
-    send_invite_email(
+    # Off the event loop: `smtplib.SMTP(host, port, timeout=10)` is a blocking
+    # network call, and this handler is `async def`, so with SMTP_HOST set every
+    # open chat and presence socket used to stop being served for up to the full
+    # timeout. After the commit, so the invite survives a mail failure either way.
+    await run_in_threadpool(
+        send_invite_email,
         email=invite.email,
         token=invite.token,
         workspace_name=workspace.name,
