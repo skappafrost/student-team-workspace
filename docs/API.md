@@ -21,7 +21,7 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 - **Error envelope**: FastAPI default — `{"detail": "human-readable message"}` with the right status code (400 validation, 401 unauthenticated, 403 forbidden, 404 missing, 409 conflict, 422 bad payload, 429 rate-limited with `Retry-After`). Validation errors use `{"detail": [{"loc": [...], "msg": ..., "type": ...}]}`.
 - **Rate limiting**: login 10/min per IP + 5/min per email; register 5/hour; upload 20/hour; AI 30/hour; all other write routes 120/min per identity (sliding window; `429` + `Retry-After`). Set `RATELIMIT_ENABLED=0` to disable.
 - **IDs**: UUID strings. **Timestamps: ISO-8601, naive UTC, with no `Z` and no offset** — e.g. `"2026-08-28T09:00:00"`. This is deliberate and cross-engine: `dependencies._utcnow()` stores naive UTC, and `test_dialect_parity.py:216` pins that serialization stays naive on SQLite and PostgreSQL alike. It applies to every timestamp field in the API, presence's `last_seen` included. The trap when consuming it: `new Date("2026-08-28T09:00:00")` in JavaScript parses as **local** time, so append `Z` (or parse with an explicit UTC assumption) at the boundary — otherwise every non-UTC client silently shifts every timestamp.
-The BFF resolves "current workspace" as the first entry of `GET /workspaces` — if you add multi-workspace switching, that resolution is the place to change.
+The BFF resolves "current workspace" as the first entry of `GET /workspaces` — that entry is now **the workspace the caller created first** (`created_at` asc, `id` asc as the tiebreak), because a documented order is the only thing that makes `data[0]` mean the same thing on two consecutive requests. Nothing here makes it *selected*: a switcher, a selection cookie and the ~18 handlers that re-resolve `[0]` per request are still open work, and that resolution is the place to change.
 
 ## Endpoint map
 
@@ -45,7 +45,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/workspaces/{id}/audit-log` | Admin+; `?verb= ?target_type= ?actor_id= ?q= ?limit= ?offset=` (default 100, max 500) |
-| GET, POST | `/workspaces` | List mine / create |
+| GET, POST | `/workspaces` | List mine / create. **Ordered: `created_at` asc, ties broken by `id` asc** — bare array, unpaginated. The order is contract, not presentation: every BFF handler takes `[0]` as "the current workspace", and an unsorted `WHERE id IN (...)` answers in whatever order the plan yields (id-ascending via the primary-key index on SQLite, physical order under a PostgreSQL sequential scan), so two requests in one page load could name two different workspaces. Pinned by `test_workspace_api.py::test_list_workspaces_orders_by_created_at` (fails without the sort on SQLite) and `..._breaks_created_at_ties_by_id` (the tiebreak; load-bearing on `backend-pg`). |
 | GET, PATCH, DELETE | `/workspaces/{id}` | |
 | GET | `/workspaces/{id}/members` | Admin+; `?limit= ?offset=` |
 | PATCH, DELETE | `/workspaces/{id}/members/{user_id}` | Change role / remove |
@@ -420,7 +420,7 @@ The Next.js app never calls the backend directly from the browser. `app/src/app/
 | `GET /api/activity` | `GET /workspaces/{first}/activity` |
 | `GET /api/account` / `DELETE /api/account` | `GET /users/me/export` / `DELETE /users/me` |
 
-The BFF resolves "current workspace" as the first entry of `GET /workspaces` — if you add multi-workspace switching, that resolution is the place to change.
+The BFF resolves "current workspace" as the first entry of `GET /workspaces` — that entry is now **the workspace the caller created first** (`created_at` asc, `id` asc as the tiebreak), because a documented order is the only thing that makes `data[0]` mean the same thing on two consecutive requests. Nothing here makes it *selected*: a switcher, a selection cookie and the ~18 handlers that re-resolve `[0]` per request are still open work, and that resolution is the place to change.
 
 ## Changelog
 
