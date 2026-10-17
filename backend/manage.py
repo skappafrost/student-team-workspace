@@ -303,14 +303,17 @@ def _alembic_config(db_url: str | None):
 def _alembic_target(db_url: str | None):
     """Make `db_url` the database alembic actually opens.
 
-    `alembic/env.py:get_database_url()` resolves the URL itself, in the order
-    `DATABASE_URL` → `alembic.ini` → a hardcoded Postgres fallback. So setting
-    `sqlalchemy.url` on the Config is not enough: with `DATABASE_URL` present in
-    the environment — which it is for every test session, and for any deployed
-    container — alembic would silently run against *that* database while the
-    command reported success about the one `--db-url` named. Measured exactly
-    that way before this helper existed: `stamp --db-url <tmp>` returned 0 and
-    wrote `alembic_version` somewhere else.
+    `alembic/env.py:get_database_url()` resolves the URL itself: it reads
+    `DATABASE_URL`, otherwise a freshly constructed `Settings()`. The
+    `sqlalchemy.url` ini option is no longer consulted, so the env var is the
+    only thing that routes it — which makes the `set_main_option` call in
+    `_alembic_config` inert for routing, and makes this override mandatory
+    rather than belt-and-braces. Leave `DATABASE_URL` alone and alembic runs
+    against whatever database it names — which is an ambient one for every test
+    session, and for any deployed container — while the command reports success
+    about the one `--db-url` named. Measured exactly that way before this helper
+    existed: `stamp --db-url <tmp>` returned 0 and wrote `alembic_version`
+    somewhere else.
 
     Every other command here honours `--db-url` through `_make_session`, so this
     closes the one path where it did not. Without `--db-url` nothing is

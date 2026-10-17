@@ -109,6 +109,15 @@ alembic upgrade head            # no-op now; later revisions apply normally
 `stamp` refuses an empty database (`nothing to stamp: the database has no tables`) — there you
 want `alembic upgrade head`, which is the only schema source.
 
+**`backend/ci_e2e.db` is the unstamped file that kills an e2e run**: the Playwright backend
+`webServer` chains `alembic upgrade head` before uvicorn, so a `ci_e2e.db` built by `create_all`
+makes that chain exit 1, the server never starts, and the run dies at the 120 s `webServer`
+timeout. Either delete `backend/ci_e2e.db`, or, from `backend/`:
+
+```bash
+python manage.py stamp --db-url sqlite:///./ci_e2e.db
+```
+
 **Docker volume case** (the same repair against the Postgres data in `postgres_data`): stop →
 stamp → up.
 

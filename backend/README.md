@@ -92,6 +92,8 @@ alembic upgrade head                          # now a no-op, and later revisions
 
 Stamping asserts a fact, so it refuses when the fact is false: an empty database gets `nothing to stamp: the database has no tables`, and you want `alembic upgrade head` there instead. Use `python manage.py stamp --db-url <url>` for a database other than `DATABASE_URL` — the flag is authoritative for this command, which matters because `alembic/env.py` reads `DATABASE_URL` from the process environment before anything else.
 
+**`backend/ci_e2e.db` is the same case, and it fails noisily-but-late.** The Playwright backend `webServer` entry chains `alembic upgrade head` into the command that starts uvicorn, against that file; a leftover `ci_e2e.db` whose tables came from `create_all` has no `alembic_version`, so the chain exits 1, uvicorn never starts, and the run dies at the 120 s `webServer` timeout looking like a hung server rather than an unstamped database. Two ways out: delete `backend/ci_e2e.db` and let the chain build it fresh, or stamp it in place with `python manage.py stamp --db-url sqlite:///./ci_e2e.db`.
+
 **Same repair for a Docker volume.** The data lives in the `postgres_data` volume, so the app has to stop writing while the stamp is recorded, and the repair runs against that volume's database rather than a SQLite file:
 
 ```bash
