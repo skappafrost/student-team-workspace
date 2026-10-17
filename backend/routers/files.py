@@ -11,10 +11,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi import File as FileParam
 from fastapi.responses import FileResponse
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+import channel_access
 import models
 import pagination as pagination_lib
 import rate_limit
@@ -255,6 +256,37 @@ def _is_safe_storage_key(storage_key: str) -> bool:
     return all(ord(ch) >= 0x20 for ch in storage_key)
 
 
+def _file_channel(db: Session, file: models.File) -> models.Channel | None:
+    """The channel a file is linked to, through its message. None when unlinked.
+
+    Returns None rather than raising: a dangling ``message_id`` must not turn a
+    file read into a 404, and the caller only cares whether a channel gate
+    applies.
+    """
+    if file.message_id is None:
+        return None
+    message = db.query(models.Message).filter(models.Message.id == file.message_id).first()
+    if message is None:
+        return None
+    return db.query(models.Channel).filter(models.Channel.id == message.channel_id).first()
+
+
+def _require_file_read_access(db: Session, file: models.File, current_user: dict) -> None:
+    """A file linked into a private channel belongs to that channel, not the workspace.
+
+    The message read path has always applied this predicate
+    (``routers/messages.py`` -> ``_is_private_channel_member``); the file paths
+    only ever checked workspace membership, which let any member list and
+    download bytes attached to someone else's DM. Goes through the shared
+    ``channel_access`` predicate rather than the duplicate in ``routers/channels.py``.
+    """
+    channel = _file_channel(db, file)
+    if channel is None:
+        return
+    if not channel_access.is_private_channel_member(db, channel, current_user["id"]):
+        raise HTTPException(status_code=403, detail="Not allowed to view this file")
+
+
 def _resolve_read_file(storage_key: str, db: Session, current_user: dict) -> tuple[models.File, Path]:
     """Shared read-side resolution for ``/uploads/{storage_key}``.
 
@@ -282,6 +314,10 @@ def _resolve_read_file(storage_key: str, db: Session, current_user: dict) -> tup
     )
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
         raise HTTPException(status_code=403, detail="Guests cannot view files")
+
+    # Before the bytes-exist check: someone who may not read the file must not be
+    # able to use 403-vs-404 as an oracle for whether the key is on disk.
+    _require_file_read_access(db, row, current_user)
 
     if not path.is_file():
         # T008: missing bytes read as 404, never 500.
@@ -456,6 +492,10 @@ async def list_workspace_files(
 ):
     """List files in a workspace, optionally filtered by linked resource.
 
+    Files linked into a private channel are only listed for that channel's
+    members, so the result is scoped to what the caller may read, not to
+    everything in the workspace.
+
     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
     collection), ``offset`` (default 0).
     """
@@ -467,6 +507,24 @@ async def list_workspace_files(
         raise HTTPException(status_code=403, detail="Guests cannot view files")
 
     query = db.query(models.File).filter(models.File.workspace_id == workspace_id)
+
+    # Excluded in SQL, not as a post-filter like `list_workspace_channels` does:
+    # dropping rows after `.limit()` would silently shorten pages and make
+    # `offset` lie about which rows it is skipping. The three surviving terms are
+    # the same rule `channel_access.is_private_channel_member` applies.
+    member_channel_ids = channel_access.private_channel_ids_for_user(db, current_user["id"])
+    query = (
+        query.outerjoin(models.Message, models.File.message_id == models.Message.id)
+        .outerjoin(models.Channel, models.Message.channel_id == models.Channel.id)
+        .filter(
+            or_(
+                models.Channel.id.is_(None),
+                models.Channel.is_private.is_(False),
+                models.Channel.created_by == current_user["id"],
+                models.Channel.id.in_(member_channel_ids),
+            )
+        )
+    )
     if project_id is not None:
         query = query.filter(models.File.project_id == project_id)
     if task_id is not None:
@@ -493,6 +551,8 @@ async def get_file(
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.MEMBER]:
         raise HTTPException(status_code=403, detail="Guests cannot view files")
+
+    _require_file_read_access(db, file, current_user)
 
     return _file_out(file)
 
