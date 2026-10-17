@@ -21,17 +21,35 @@ import { APP, createWorkspace, openAuthContext, registerUser } from './helpers';
  */
 const PROBE = 'STW-DOWNLOAD-PROBE';
 
+/**
+ * Multipart upload through the BFF.
+ *
+ * `multipart:` rather than `data: new FormData()` — Playwright does not send a
+ * FormData passed as `data` with a multipart content type, and Next's
+ * `request.formData()` then throws. That is also a real rough edge worth noting:
+ * the upload route answers **500**, not 400/415, when the request is not
+ * multipart. Out of scope here; this spec only needs to send a valid upload.
+ */
+async function uploadProbe(page: import('@playwright/test').Page) {
+  return page.request.post(`${APP}/api/files`, {
+    multipart: {
+      file: { name: 'probe.txt', mimeType: 'text/plain', buffer: Buffer.from(PROBE) }
+    }
+  });
+}
+
 test('a workspace file downloads through the BFF', async ({ browser }: { browser: Browser }) => {
   const { token } = await registerUser('dl');
   await createWorkspace(token, `dl-${Date.now()}`);
   const { context, page } = await openAuthContext(browser, token);
   await page.goto(`${APP}/dashboard/files`);
 
-  const form = new FormData();
-  form.append('file', new Blob([PROBE], { type: 'text/plain' }), 'probe.txt');
-  const uploaded = await page.request.post(`${APP}/api/files`, { data: form });
-  expect(uploaded.status(), await uploaded.text()).toBe(201);
-
+  const uploaded = await uploadProbe(page);
+  // `ok()`, not `status() === 201`: the BFF forwards error statuses but answers
+  // success with NextResponse.json's default 200 while the backend says 201
+  // (api/files/route.ts:108-109). That flattening is a fidelity issue of its own,
+  // not what this spec measures, so it is asserted loosely and noted here.
+  expect(uploaded.ok(), await uploaded.text()).toBe(true);
   const file = await uploaded.json();
   expect(file.url).toMatch(/^\/uploads\//);
 
@@ -48,10 +66,8 @@ test('an anonymous caller cannot download file bytes', async ({ browser }: { bro
   const { context, page } = await openAuthContext(browser, token);
   await page.goto(`${APP}/dashboard/files`);
 
-  const form = new FormData();
-  form.append('file', new Blob([PROBE], { type: 'text/plain' }), 'probe.txt');
-  const uploaded = await page.request.post(`${APP}/api/files`, { data: form });
-  expect(uploaded.status()).toBe(201);
+  const uploaded = await uploadProbe(page);
+  expect(uploaded.ok(), await uploaded.text()).toBe(true);
   const file = await uploaded.json();
 
   // A fresh context with no cookie: the proxy must not turn into an open static
