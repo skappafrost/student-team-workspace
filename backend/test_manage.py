@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import gc
 
+import pytest
 from sqlalchemy.orm import sessionmaker
 
 import database
@@ -291,3 +292,116 @@ def test_db_status_reports_heads_and_counts(tmp_path, capsys):
     assert "workspaces: 1" in out
     assert "projects: 2" in out
     assert "tasks: 9" in out
+
+
+# ---------------------------------------------------------------------------
+# stamp: the repair for a database built by create_all
+# ---------------------------------------------------------------------------
+
+
+def _create_all_url(tmp_path, name="stamped.db") -> str:
+    from sqlalchemy import create_engine
+
+    path = tmp_path / name
+    url = f"sqlite:///{path.as_posix()}"
+    Base.metadata.create_all(create_engine(url))
+    return url
+
+
+def _applied(url: str) -> list[str]:
+    from sqlalchemy import create_engine, text
+
+    with create_engine(url).connect() as conn:
+        try:
+            return sorted(conn.execute(text("SELECT version_num FROM alembic_version")).scalars())
+        except Exception:
+            return []
+
+
+def test_stamp_repairs_a_create_all_database(tmp_path):
+    """The full story in one test: upgrade dies, stamp records, upgrade is a no-op.
+
+    `Base.metadata.create_all` is what `app.py` runs at startup and what
+    `conftest.py` runs per test, so "every table, no alembic_version" is the state
+    most databases on this project are actually in. `alembic upgrade head` reads
+    that as "start from base" and dies on the first unconditional `create_table`,
+    which looks like a broken migration and is not one.
+    """
+    from alembic import command
+    from conftest import run_alembic
+
+    url = _create_all_url(tmp_path)
+
+    with pytest.raises(Exception, match="already exists"):
+        with manage._alembic_target(url):
+            run_alembic(command.upgrade, manage._alembic_config(url), "head")
+
+    assert manage.main(["stamp", "--db-url", url]) == 0
+    assert _applied(url) == manage._alembic_heads()
+
+    with manage._alembic_target(url):
+        run_alembic(command.upgrade, manage._alembic_config(url), "head")
+
+
+def test_stamp_targets_db_url_not_the_ambient_database_url(tmp_path, monkeypatch):
+    """`--db-url` must name the database that actually gets stamped.
+
+    `alembic/env.py:get_database_url()` reads `DATABASE_URL` before `alembic.ini`,
+    so stamping without overriding it reports success while writing
+    `alembic_version` into whatever the process environment points at — which for
+    a container, and for every test session, is a different database than the one
+    the operator named.
+    """
+    ambient = _create_all_url(tmp_path, "ambient.db")
+    target = _create_all_url(tmp_path, "target.db")
+    monkeypatch.setenv("DATABASE_URL", ambient)
+    assert _applied(ambient) == [] and _applied(target) == []
+
+    assert manage.main(["stamp", "--db-url", target]) == 0
+
+    assert _applied(target) == manage._alembic_heads()
+    assert _applied(ambient) == [], "stamp wrote the ambient database, not --db-url"
+
+
+
+def test_stamp_refuses_a_database_with_no_tables(tmp_path, capsys):
+    """Stamping is a statement of fact, so it must fail when the fact is false.
+
+    Silently stamping an empty database would leave `alembic upgrade head` a no-op
+    over a schema that was never built — a quieter and worse failure than the one
+    this command exists to repair.
+    """
+    import sqlite3
+
+    path = tmp_path / "empty.db"
+    sqlite3.connect(path).close()
+
+    rc = manage.main(["stamp", "--db-url", f"sqlite:///{path.as_posix()}"])
+    assert rc == 2
+    assert "upgrade head" in capsys.readouterr().err
+
+
+def test_db_status_names_the_missing_stamp(tmp_path, capsys):
+    """`db-status` is where a confused developer looks; it has to say what to do."""
+    url = _create_all_url(tmp_path, "status.db")
+
+    assert manage.main(["db-status", "--db-url", url]) == 0
+    out = capsys.readouterr().out
+    assert "alembic version (applied): (none)" in out
+    assert "create_all" in out
+    assert "manage.py stamp" in out
+
+
+def test_db_status_lists_applied_revisions_after_a_stamp(tmp_path, capsys):
+    url = _create_all_url(tmp_path, "stamped2.db")
+    assert manage.main(["stamp", "--db-url", url]) == 0
+
+    assert manage.main(["db-status", "--db-url", url]) == 0
+    lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("alembic version (applied):")
+    ]
+    assert len(lines) == 1, lines
+    assert lines[0] != "alembic version (applied): (none)", lines[0]
+    assert "manage.py stamp" not in lines[0]

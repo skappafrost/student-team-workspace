@@ -26,6 +26,8 @@ RETENTION_ENABLED setting (see :mod:`retention`).
 from __future__ import annotations
 
 import argparse
+import contextlib
+import os
 import sys
 from pathlib import Path
 
@@ -277,6 +279,106 @@ def _alembic_heads() -> list[str]:
     return list(ScriptDirectory.from_config(cfg).get_heads())
 
 
+def _alembic_config(db_url: str | None):
+    """An alembic Config sharing alembic.ini's script location.
+
+    `%%` doubling is required: `set_main_option` runs the value through
+    ConfigParser interpolation, so a password containing `%` would otherwise
+    raise rather than connect.
+    """
+    from alembic.config import Config
+
+    cfg = Config(str(Path(__file__).with_name("alembic.ini")))
+    if db_url:
+        cfg.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
+    return cfg
+
+
+@contextlib.contextmanager
+def _alembic_target(db_url: str | None):
+    """Make `db_url` the database alembic actually opens.
+
+    `alembic/env.py:get_database_url()` resolves the URL itself, in the order
+    `DATABASE_URL` → `alembic.ini` → a hardcoded Postgres fallback. So setting
+    `sqlalchemy.url` on the Config is not enough: with `DATABASE_URL` present in
+    the environment — which it is for every test session, and for any deployed
+    container — alembic would silently run against *that* database while the
+    command reported success about the one `--db-url` named. Measured exactly
+    that way before this helper existed: `stamp --db-url <tmp>` returned 0 and
+    wrote `alembic_version` somewhere else.
+
+    Every other command here honours `--db-url` through `_make_session`, so this
+    closes the one path where it did not. Without `--db-url` nothing is
+    overridden, and alembic keeps its own resolution order.
+    """
+    if not db_url:
+        yield
+        return
+
+    previous = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = db_url
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous
+
+
+def _applied_revisions_for(eng) -> list[str]:
+    """`alembic_version` rows for *this* engine.
+
+    Not `logging_mw.applied_revisions()`: that reads the global engine, and every
+    command here has to honour `--db-url` without rebinding globals — the same
+    reason `_make_session` exists.
+    """
+    from sqlalchemy import text
+
+    try:
+        with eng.connect() as conn:
+            return sorted(conn.execute(text("SELECT version_num FROM alembic_version")).scalars())
+    except Exception:
+        return []
+
+
+def cmd_stamp(args: argparse.Namespace) -> int:
+    """Record the revision a database is at, without touching its schema.
+
+    This is the repair for the stuck state this project produces by default. The
+    app calls `Base.metadata.create_all` at startup, and `conftest.py` does it per
+    test, so a typical dev database has every table and no `alembic_version` row.
+    `alembic upgrade head` then starts from base and dies on the first
+    unconditional `create_table` in `9926de6687ec_schema_v1.py`, which reads as a
+    broken migration when the actual problem is an unstamped database.
+
+    Stamping is a statement of fact, so it refuses when the fact is false: no
+    tables at all means the chain should be *applied*, not recorded.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from alembic import command
+
+    eng = database._make_engine(args.db_url) if args.db_url else database.engine
+    tables = set(sa_inspect(eng).get_table_names())
+    if not tables:
+        print(
+            "nothing to stamp: the database has no tables. Run "
+            "`alembic upgrade head` (or omit --db-url and let the app create them) "
+            "instead of recording a revision this schema never reached.",
+            file=sys.stderr,
+        )
+        return 2
+
+    cfg = _alembic_config(args.db_url)
+    revision = args.revision or "head"
+    with _alembic_target(args.db_url):
+        command.stamp(cfg, revision)
+    applied = _applied_revisions_for(eng)
+    print(f"stamped {revision} -> alembic_version: {', '.join(applied) or '(none)'}")
+    return 0
+
+
 def cmd_db_status(args: argparse.Namespace) -> int:
     eng, db = _make_session(args.db_url)
     try:
@@ -287,6 +389,17 @@ def cmd_db_status(args: argparse.Namespace) -> int:
             return 2
         print(f"database: {eng.url}")
         print(f"alembic heads ({len(heads)}): {', '.join(heads) if heads else '(none)'}")
+        applied = _applied_revisions_for(eng)
+        if applied:
+            print(f"alembic version (applied): {', '.join(applied)}")
+        else:
+            # The distinguishing case, and the one that looks like a broken
+            # migration: tables present, no `alembic_version`.
+            print(
+                "alembic version (applied): (none) — if the tables below are "
+                "present, this database was built by create_all and needs "
+                "`python manage.py stamp` before `alembic upgrade head` can run"
+            )
         for table in models.Base.metadata.sorted_tables:
             try:
                 count = db.execute(select(func.count()).select_from(table)).scalar()
@@ -328,6 +441,18 @@ def build_parser() -> argparse.ArgumentParser:
     reset.add_argument("--password", required=True, help="New password.")
 
     sub.add_parser("db-status", parents=[common], help="Show alembic head + per-table row counts.")
+
+    stamp = sub.add_parser(
+        "stamp",
+        parents=[common],
+        help="Record the alembic revision a database is at, without changing its schema.",
+    )
+    stamp.add_argument(
+        "revision",
+        nargs="?",
+        default="head",
+        help="Revision to record (default: head).",
+    )
 
     _add_maintenance_subparser(sub, common)
     return parser
@@ -434,6 +559,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_reset_password(args)
     if args.command == "db-status":
         return cmd_db_status(args)
+    if args.command == "stamp":
+        return cmd_stamp(args)
     if args.command == "maintenance":
         return cmd_maintenance(args)
     return 2
