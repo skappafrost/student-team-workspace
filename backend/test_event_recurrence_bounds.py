@@ -6,7 +6,8 @@ on ``cap`` — a count of *rows appended* — so a range far from the event's an
 skipped millions of dates without ever approaching it. Measured by hand on the
 unbounded code: one daily event with a year-9999 window spent 2,912,442 steps to
 produce 1 row, five of them 14,562,210; the weekly shape of the same window
-walked past ``datetime.max`` and answered 500.
+walked past ``datetime.max`` and answered 500, as did an event long enough for
+its own duration to do the same one step in.
 
 Assertions are on **step counts**, never wall time: a loaded machine makes a
 duration claim meaningless, so the instrument is the seam the fix runs through —
@@ -72,10 +73,28 @@ def step_counter(monkeypatch):
     return counter
 
 
-def _create(client, ws_id, title, start_at, recurrence="daily"):
+@pytest.fixture()
+def quiet_client(client):
+    """The same app and identity, but a server-side exception answers `500`.
+
+    The crash these tests replaced reached the caller as an HTTP 500; the plain
+    client re-raises instead, which would report a broken test rather than the
+    symptom being guarded against.
+    """
+    quiet = TestClient(app, raise_server_exceptions=False)
+    quiet.headers["Authorization"] = client.headers["Authorization"]
+    return quiet
+
+
+def _create(client, ws_id, title, start_at, recurrence="daily", end_at=None):
     resp = client.post(
         f"/workspaces/{ws_id}/events",
-        json={"title": title, "start_at": start_at.isoformat(), "recurrence": recurrence},
+        json={
+            "title": title,
+            "start_at": start_at.isoformat(),
+            "end_at": end_at.isoformat() if end_at else None,
+            "recurrence": recurrence,
+        },
     )
     assert resp.status_code == 201, resp.text
     return resp.json()
@@ -341,20 +360,16 @@ def test_horizon_accepts_its_last_day_and_refuses_the_next(client, ws_id, step_c
     assert step_counter["steps"] == 0
 
 
-def test_weekly_far_future_range_no_longer_answers_500(client, ws_id, step_counter):
+def test_weekly_far_future_range_no_longer_answers_500(ws_id, quiet_client, step_counter):
     """The measured crash: a weekly event with a year-9999 range answered 500.
 
     Both shapes of it are covered, by different mechanisms — the wide range is
     refused at the boundary, the narrow year-9999 one is bounded by steps and
-    stops stepping centuries short of ``datetime.max``. The quiet client is
-    deliberate: it reports a server-side exception as a 500 status instead of
-    raising, so a regression shows up as the status code the probe recorded.
+    stops stepping centuries short of ``datetime.max``.
     """
-    _create(client, ws_id, "sync", dt.datetime(2026, 1, 5, 9, 0), "weekly")
-    quiet = TestClient(app, raise_server_exceptions=False)
-    quiet.headers["Authorization"] = client.headers["Authorization"]
+    _create(quiet_client, ws_id, "sync", dt.datetime(2026, 1, 5, 9, 0), "weekly")
 
-    wide = quiet.get(
+    wide = quiet_client.get(
         f"/workspaces/{ws_id}/events",
         params={"start": "2026-01-01T00:00:00", "end": "9999-12-31T00:00:00"},
     )
@@ -362,7 +377,7 @@ def test_weekly_far_future_range_no_longer_answers_500(client, ws_id, step_count
     assert str(MAX_EXPANSION_RANGE.days) in wide.json()["detail"]
 
     step_counter["steps"] = 0
-    narrow = quiet.get(
+    narrow = quiet_client.get(
         f"/workspaces/{ws_id}/events",
         params={"start": "9999-12-30T00:00:00", "end": "9999-12-31T00:00:00"},
     )
@@ -371,6 +386,36 @@ def test_weekly_far_future_range_no_longer_answers_500(client, ws_id, step_count
     # Weekly steps 7 days at a time: the bound stops the walk around year 2410,
     # which is what makes the old OverflowError unreachable from this shape.
     assert step_counter["steps"] == MAX_EXPANSION_STEPS
+
+
+def test_long_event_end_does_not_overflow_the_calendar(ws_id, quiet_client, step_counter):
+    """The other way out of the date range: an occurrence's own end, not its start.
+
+    ``end_at`` is not validated against ``start_at``, so a daily event created to
+    run up to 9999-12-31 carries a ``duration`` that pushes
+    ``start_at + duration`` past ``datetime.max`` on its very second step — the
+    same uncaught ``OverflowError`` as the weekly case, from a different line, and
+    one neither bound reaches. Such an occurrence overlaps every window, so the
+    row cap ends the walk; the first row keeps the end it had before the clamp and
+    the rest are the clamped ones that used to raise.
+    """
+    _create(
+        quiet_client,
+        ws_id,
+        "marathon",
+        dt.datetime(2026, 1, 1, 9, 0),
+        end_at=dt.datetime(9999, 12, 31, 9, 0),
+    )
+    resp = _list(
+        quiet_client, ws_id, dt.datetime(9999, 12, 30), dt.datetime(9999, 12, 31), step_counter
+    )
+
+    assert resp.status_code == 200, resp.text
+    occ = _rows(resp, "marathon")
+    assert len(occ) == ROW_CAP, "the row cap binds, so the walk was not truncated"
+    assert step_counter["steps"] == ROW_CAP
+    assert occ[0]["end_at"] == "9999-12-31T09:00:00"
+    assert occ[1]["end_at"] == "9999-12-31T23:59:59.999999"
 
 
 def test_event_anchored_at_the_end_of_the_calendar_does_not_crash(client, ws_id, step_counter):
