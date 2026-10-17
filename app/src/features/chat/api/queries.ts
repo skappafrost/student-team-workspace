@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { getChannels, getMessages } from './service';
+import { getChannels, getMessages, MESSAGES_PAGE_SIZE } from './service';
 
 export const channelKeys = {
   all: ['channels'] as const,
@@ -22,7 +22,7 @@ export function messagesQueryOptions(channelId: string | null) {
     queryKey: channelKeys.messages(channelId),
     queryFn: () => {
       if (!channelId) return Promise.resolve([]);
-      return getMessages(channelId);
+      return getMessages(channelId, { limit: MESSAGES_PAGE_SIZE });
     },
     enabled: !!channelId
   });

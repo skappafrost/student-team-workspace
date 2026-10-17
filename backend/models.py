@@ -30,6 +30,24 @@ def _new_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def _utcnow_naive() -> datetime.datetime:
+    """Naive UTC, microsecond precision.
+
+    Mirrors `dependencies._utcnow` (which cannot be imported here: `dependencies`
+    imports `models`), and the same reasoning applies: SQLite's
+    `DateTime(timezone=True)` round-trips values without tzinfo, so naive UTC is
+    the convention `docs/API.md` states and the one that behaves identically on
+    SQLite and PostgreSQL.
+
+    Microseconds matter for messages specifically. SQLite's `CURRENT_TIMESTAMP` is
+    second-granular, so messages sent in one burst shared a stamp and their
+    relative order was whatever the storage engine returned — invisible while
+    every page was ordered ASC from row 0, but a real hazard as soon as the list
+    is windowed from the newest end and paged backwards.
+    """
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+
+
 # ---------------------------------------------------------------------------
 # WorkspaceInvite (legacy compatibility with W2-1b invite endpoints)
 # ---------------------------------------------------------------------------
@@ -432,10 +450,11 @@ class Message(Base):
         String(36), ForeignKey("messages.id", ondelete="CASCADE"), nullable=True
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), default=_utcnow_naive, server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
+        default=_utcnow_naive,
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,

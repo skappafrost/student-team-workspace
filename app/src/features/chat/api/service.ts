@@ -24,13 +24,36 @@ export async function createChannel(payload: CreateChannelPayload): Promise<Chan
   return data.channel;
 }
 
-export async function getMessages(channelId: string, q?: string): Promise<Message[]> {
-  const query = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+/** Page size the chat history is opened with, and the unit of "load earlier".
+ *
+ * The backend's default is its 1000 cap, which in a busy channel means the first
+ * response is the 1000 *oldest* messages. Asking for a bounded window from the
+ * newest end is what makes the newest messages appear at all.
+ */
+export const MESSAGES_PAGE_SIZE = 50;
+
+export interface MessagePageOptions {
+  q?: string;
+  limit?: number;
+  /** A message id: return the window strictly older than it. */
+  before?: string;
+}
+
+export async function getMessages(
+  channelId: string,
+  options: MessagePageOptions = {}
+): Promise<Message[]> {
+  const params = new URLSearchParams();
+  if (options.q?.trim()) params.set('q', options.q.trim());
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.before) params.set('before', options.before);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
   const data = await apiRequest<{ messages: Message[] }>(
-    `/${encodeURIComponent(channelId)}/messages${query}`
+    `/${encodeURIComponent(channelId)}/messages${suffix}`
   );
   return data.messages || [];
 }
+
 
 export async function sendMessage(
   channelId: string,
