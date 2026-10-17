@@ -343,6 +343,29 @@ def test_stamp_repairs_a_create_all_database(tmp_path):
         run_alembic(command.upgrade, manage._alembic_config(url), "head")
 
 
+def test_stamp_leaves_log_capture_working(tmp_path, caplog):
+    """`stamp` must not hand back an app whose loggers were disabled.
+
+    This one is measured, not theorised: the first version of `cmd_stamp` called
+    `command.stamp` bare, `alembic/env.py` ran `fileConfig()` (which defaults to
+    `disable_existing_loggers=True`), and the next `caplog` assertion in the
+    session — `test_ws.py::test_broadcast_bounds_one_stalled_peer` — reported
+    `records=[]` for a line that had demonstrably been logged. CI red, everything
+    green locally.
+    """
+    import logging
+
+    url = _create_all_url(tmp_path, "logging.db")
+    assert manage.main(["stamp", "--db-url", url]) == 0
+
+    with caplog.at_level(logging.WARNING, logger="stw"):
+        logging.getLogger("stw").warning("after stamp")
+    assert "after stamp" in caplog.text, (
+        "the stw logger was left disabled by the alembic call: nothing downstream "
+        "will be captured, and a test asserting on it passes on empty input"
+    )
+
+
 def test_stamp_targets_db_url_not_the_ambient_database_url(tmp_path, monkeypatch):
     """`--db-url` must name the database that actually gets stamped.
 

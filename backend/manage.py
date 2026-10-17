@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import logging
 import os
 import sys
 from pathlib import Path
@@ -342,6 +343,37 @@ def _applied_revisions_for(eng) -> list[str]:
         return []
 
 
+@contextlib.contextmanager
+def _preserving_logging():
+    """Keep an in-process alembic call from reconfiguring the whole app's logging.
+
+    `alembic/env.py` runs `fileConfig(alembic.ini)`, and `fileConfig` defaults to
+    `disable_existing_loggers=True`: it replaces the root logger's handler list
+    and marks every already-created `stw.*` logger disabled. In a terminal that is
+    the intended behaviour (conftest's `run_alembic` documents the same choice and
+    restores rather than editing `env.py`). In this process it is not: `stamp`
+    runs inside a live app/test session, and after it a later `caplog` assertion
+    reads `records=[]` for a line that was demonstrably emitted — a silent loss of
+    log capture, which is exactly the failure mode that makes a green-looking run
+    lie.
+    """
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    disabled = {
+        name: logger.disabled
+        for name, logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+    }
+    try:
+        yield
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if isinstance(logger, logging.Logger) and name in disabled:
+                logger.disabled = disabled[name]
+
+
 def cmd_stamp(args: argparse.Namespace) -> int:
     """Record the revision a database is at, without touching its schema.
 
@@ -372,7 +404,7 @@ def cmd_stamp(args: argparse.Namespace) -> int:
 
     cfg = _alembic_config(args.db_url)
     revision = args.revision or "head"
-    with _alembic_target(args.db_url):
+    with _alembic_target(args.db_url), _preserving_logging():
         command.stamp(cfg, revision)
     applied = _applied_revisions_for(eng)
     print(f"stamped {revision} -> alembic_version: {', '.join(applied) or '(none)'}")
