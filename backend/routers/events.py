@@ -21,6 +21,19 @@ from services import log_activity
 
 router = APIRouter()
 
+#: Widest date range the list endpoint expands: five years, i.e. ~1,830 daily
+#: occurrences — an order of magnitude past any realistic calendar view, and
+#: wide enough that no legitimate request learns the limit exists.
+MAX_EXPANSION_RANGE = timedelta(days=366 * 5)
+
+#: Iterations one event's expansion may spend, separate from ``cap``: ``cap``
+#: bounds the rows returned, this bounds the work done to find them (a window
+#: far from the event's anchor skips without appending). A daily event across
+#: ``MAX_EXPANSION_RANGE`` is ~1,830 steps, so this keeps ten times that
+#: headroom and stays two orders of magnitude below the ~2.9M-step walk that
+#: was measured costing seconds.
+MAX_EXPANSION_STEPS = 20_000
+
 
 def _can_modify_event(
     event: models.Event, membership: models.WorkspaceMembership, current_user: dict
@@ -101,6 +114,29 @@ def _add_months(dt: datetime, months: int) -> datetime:
     return dt.replace(year=year, month=month, day=day)
 
 
+def _next_occurrence(current: datetime, recurrence: str) -> datetime | None:
+    """Advance one recurrence period, or end the walk at the calendar limit.
+
+    ``datetime.max`` is 9999-12-31, so stepping past it raises ``OverflowError``
+    (daily/weekly ``timedelta`` arithmetic) or ``ValueError`` (the ``replace`` in
+    ``_add_months``) — an uncaught 500 for any event whose own ``start_at`` sits
+    at the end of the supported range. Returning ``None`` removes that instead of
+    catching it: past the last representable date there is no occurrence to emit.
+    """
+    if recurrence == "daily":
+        delta = timedelta(days=1)
+    elif recurrence == "weekly":
+        delta = timedelta(weeks=1)
+    else:
+        # Monthly — and any legacy value in the free-text column — steps by month.
+        if current.year == datetime.max.year and current.month == 12:
+            return None
+        return _add_months(current, 1)
+    if current > datetime.max - delta:
+        return None
+    return current + delta
+
+
 def _expand_occurrences(
     event: models.Event,
     range_start: datetime | None,
@@ -110,6 +146,11 @@ def _expand_occurrences(
     """Expand a recurring event into concrete occurrences intersecting the range.
 
     RRULE-lite: daily / weekly / monthly steps from the base start_at.
+
+    Two independent bounds stop the walk: ``cap`` on the rows appended and
+    ``MAX_EXPANSION_STEPS`` on the iterations taken — an iteration that falls
+    outside the range appends nothing, so ``cap`` alone does not bound the work.
+    The walk also ends at the calendar limit (see ``_next_occurrence``).
 
     The event's timestamps and the range bounds are both normalized to naive
     UTC before stepping, because the two come from different sources with
@@ -126,16 +167,15 @@ def _expand_occurrences(
 
     duration = (end - start) if end else None
 
-    def step(dt: datetime) -> datetime:
-        if event.recurrence == "daily":
-            return dt + timedelta(days=1)
-        if event.recurrence == "weekly":
-            return dt + timedelta(weeks=1)
-        return _add_months(dt, 1)
-
     out: list[schemas.EventOut] = []
-    start_at = start
-    while start_at <= re_ and len(out) < cap:
+    start_at: datetime | None = start
+    steps = 0
+    while (
+        start_at is not None
+        and start_at <= re_
+        and len(out) < cap
+        and steps < MAX_EXPANSION_STEPS
+    ):
         occ_end = start_at + duration if duration else None
         if (
             (occ_end is None or occ_end >= rs)
@@ -153,7 +193,8 @@ def _expand_occurrences(
                     }
                 )
             )
-        start_at = step(start_at)
+        start_at = _next_occurrence(start_at, event.recurrence)
+        steps += 1
     return out
 
 
@@ -187,6 +228,14 @@ async def list_workspace_events(
             end_dt = datetime.fromisoformat(end).replace(tzinfo=None)
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid end date format") from None
+
+    # Rejected here, before any expansion: `fromisoformat` happily accepts year
+    # 9999, and walking such a range is bounded only by how long the request takes.
+    if start_dt and end_dt and end_dt - start_dt > MAX_EXPANSION_RANGE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Date range too large: at most {MAX_EXPANSION_RANGE.days} days",
+        )
 
     base_query = db.query(models.Event).filter(models.Event.workspace_id == workspace_id)
 
