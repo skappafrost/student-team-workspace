@@ -45,11 +45,23 @@ def _jwt_auth_client(user_id: str, expires_delta: timedelta | None = None) -> Te
 class RoleUser:
     """Container for a test user with a specific role in a workspace."""
 
-    def __init__(self, client: TestClient, user_id: str, role: Role, workspace_id: str = None):
+    def __init__(
+        self,
+        client: TestClient,
+        user_id: str,
+        role: Role,
+        workspace_id: str = None,
+        email: str | None = None,
+    ):
         self._client = client
         self.user_id = user_id
         self.role = role
         self.workspace_id = workspace_id
+        # The address the accounts table holds for this identity. Invitations are
+        # only redeemable by the account they name, so tests that go through the
+        # invite flow need it; ``None`` means the identity was never created with
+        # an explicit address and carries the default ``<user_id>@example.com``.
+        self.email = email
 
     @property
     def client(self) -> TestClient:
@@ -86,64 +98,77 @@ def role_users(client, db_session):
     ws_id = ws_resp.json()["id"]
     owner.clear_auth()
 
-    # Create admin user via invite
-    admin = RoleUser(client, "admin-user", Role.ADMIN, ws_id)
+    # Create admin user via invite. Each invitation is addressed at the email the
+    # new account actually has, because only that account may redeem it.
+    admin_email = _unique_email("admin")
+    admin = RoleUser(client, "admin-user", Role.ADMIN, ws_id, email=admin_email)
     invite_resp = owner.client.post(
         f"/workspaces/{ws_id}/invites",
-        json={"email": _unique_email("admin"), "role": Role.ADMIN.value},
+        json={"email": admin_email, "role": Role.ADMIN.value},
     )
     assert invite_resp.status_code == 201
     token = invite_resp.json()["token"]
     owner.clear_auth()
-    make_user(db_session, "admin-user")
-    admin.client.post("/invites/accept", json={"token": token})
+    make_user(db_session, "admin-user", email=admin_email)
+    accepted = admin.client.post("/invites/accept", json={"token": token})
+    assert accepted.status_code == 201, accepted.text
     admin.clear_auth()
 
     # Create member user via invite
-    member = RoleUser(client, "member-user", Role.MEMBER, ws_id)
+    member_email = _unique_email("member")
+    member = RoleUser(client, "member-user", Role.MEMBER, ws_id, email=member_email)
     invite_resp = owner.client.post(
         f"/workspaces/{ws_id}/invites",
-        json={"email": _unique_email("member"), "role": Role.MEMBER.value},
+        json={"email": member_email, "role": Role.MEMBER.value},
     )
     assert invite_resp.status_code == 201
     token = invite_resp.json()["token"]
     owner.clear_auth()
-    make_user(db_session, "member-user")
-    member.client.post("/invites/accept", json={"token": token})
+    make_user(db_session, "member-user", email=member_email)
+    accepted = member.client.post("/invites/accept", json={"token": token})
+    assert accepted.status_code == 201, accepted.text
     member.clear_auth()
 
     # Create co-owner user via invite (only an owner may grant it)
-    co_owner = RoleUser(client, "co-owner-user", Role.CO_OWNER, ws_id)
+    co_owner_email = _unique_email("co-owner")
+    co_owner = RoleUser(client, "co-owner-user", Role.CO_OWNER, ws_id, email=co_owner_email)
     invite_resp = owner.client.post(
         f"/workspaces/{ws_id}/invites",
-        json={"email": _unique_email("co-owner"), "role": Role.CO_OWNER.value},
+        json={"email": co_owner_email, "role": Role.CO_OWNER.value},
     )
     assert invite_resp.status_code == 201
     token = invite_resp.json()["token"]
     owner.clear_auth()
-    make_user(db_session, "co-owner-user")
-    co_owner.client.post("/invites/accept", json={"token": token})
+    make_user(db_session, "co-owner-user", email=co_owner_email)
+    accepted = co_owner.client.post("/invites/accept", json={"token": token})
+    assert accepted.status_code == 201, accepted.text
     co_owner.clear_auth()
 
     # Create guest user via invite
-    guest = RoleUser(client, "guest-user", Role.GUEST, ws_id)
+    guest_email = _unique_email("guest")
+    guest = RoleUser(client, "guest-user", Role.GUEST, ws_id, email=guest_email)
     invite_resp = owner.client.post(
         f"/workspaces/{ws_id}/invites",
-        json={"email": _unique_email("guest"), "role": Role.GUEST.value},
+        json={"email": guest_email, "role": Role.GUEST.value},
     )
     assert invite_resp.status_code == 201
     token = invite_resp.json()["token"]
     owner.clear_auth()
-    make_user(db_session, "guest-user")
-    guest.client.post("/invites/accept", json={"token": token})
+    make_user(db_session, "guest-user", email=guest_email)
+    accepted = guest.client.post("/invites/accept", json={"token": token})
+    assert accepted.status_code == 201, accepted.text
     guest.clear_auth()
 
     return {
-        Role.OWNER: RoleUser(client, "owner-user", Role.OWNER, ws_id),
-        Role.CO_OWNER: RoleUser(client, "co-owner-user", Role.CO_OWNER, ws_id),
-        Role.ADMIN: RoleUser(client, "admin-user", Role.ADMIN, ws_id),
-        Role.MEMBER: RoleUser(client, "member-user", Role.MEMBER, ws_id),
-        Role.GUEST: RoleUser(client, "guest-user", Role.GUEST, ws_id),
+        # Carries the address each identity's account row holds: an invitation is
+        # only redeemable by the account it names.
+        Role.OWNER: RoleUser(
+            client, "owner-user", Role.OWNER, ws_id, email="owner-user@example.com"
+        ),
+        Role.CO_OWNER: RoleUser(client, "co-owner-user", Role.CO_OWNER, ws_id, email=co_owner_email),
+        Role.ADMIN: RoleUser(client, "admin-user", Role.ADMIN, ws_id, email=admin_email),
+        Role.MEMBER: RoleUser(client, "member-user", Role.MEMBER, ws_id, email=member_email),
+        Role.GUEST: RoleUser(client, "guest-user", Role.GUEST, ws_id, email=guest_email),
     }
 
 
@@ -208,9 +233,11 @@ def _create_test_invite(client: TestClient, ws_id: str, role: Role = Role.MEMBER
 def _create_test_member(client: TestClient, ws_id: str, role: Role = Role.MEMBER) -> str:
     """Create a member by inviting and accepting, return the new user's id."""
     user_id = f"{role.value}-member-{uuid.uuid4().hex[:8]}"
+    # The invitation has to name the address the redeeming account holds.
+    email = _unique_email("member")
     invite_resp = client.post(
         f"/workspaces/{ws_id}/invites",
-        json={"email": _unique_email("member"), "role": role.value},
+        json={"email": email, "role": role.value},
     )
     assert invite_resp.status_code == 201, f"Failed to create invite for member: {invite_resp.text}"
     token = invite_resp.json()["token"]
@@ -220,7 +247,7 @@ def _create_test_member(client: TestClient, ws_id: str, role: Role = Role.MEMBER
     from database import SessionLocal as _SL
     _db = _SL()
     try:
-        make_user(_db, user_id)
+        make_user(_db, user_id, email=email)
     finally:
         _db.close()
     accept_client = TestClient(app)
@@ -437,11 +464,14 @@ class TestRoleMatrix:
 
             # Special handling for invite accept - need a valid token
             if path == "/invites/accept":
+                # Addressed at the caller's own account: only the named address can
+                # redeem an invitation, and every matrix role user is already a
+                # member, so this reaches the "already a member" conflict.
                 invite_resp = owner.client.post(
                     f"/workspaces/{ws_id}/invites",
-                    json={"email": _unique_email(f"matrix-test-{role.value}"), "role": Role.MEMBER.value},
+                    json={"email": role_user.email, "role": Role.MEMBER.value},
                 )
-                assert invite_resp.status_code == 201
+                assert invite_resp.status_code == 201, invite_resp.text
                 valid_token = invite_resp.json()["token"]
                 payload = {"token": valid_token}
                 owner.clear_auth()
@@ -659,14 +689,17 @@ class TestRoleMatrix:
         assert owner.client.delete(f"/workspaces/{ws_id}").status_code == 204
         owner.clear_auth()
 
-        # Admin can update and invite but NOT delete
-        admin = RoleUser(client, "admin-h", Role.ADMIN)
+        # Admin can update and invite but NOT delete. Each invitation names the
+        # address the redeeming account holds (`<user_id>@example.com`), because
+        # only that account may redeem it.
+        admin = RoleUser(client, "admin-h", Role.ADMIN, email="admin-h@example.com")
         ws_resp2 = owner.client.post("/workspaces", json={"name": "WS2", "slug": "ws2-h"})
         ws_id2 = ws_resp2.json()["id"]
-        invite_resp = owner.client.post(f"/workspaces/{ws_id2}/invites", json={"email": "admin@example.com", "role": Role.ADMIN.value})
+        invite_resp = owner.client.post(f"/workspaces/{ws_id2}/invites", json={"email": "admin-h@example.com", "role": Role.ADMIN.value})
         token = invite_resp.json()["token"]
         owner.clear_auth()
-        admin.client.post("/invites/accept", json={"token": token})
+        accepted = admin.client.post("/invites/accept", json={"token": token})
+        assert accepted.status_code == 201, accepted.text
 
         assert admin.client.patch(f"/workspaces/{ws_id2}", json={"name": "Admin update"}).status_code == 200
         assert admin.client.post(f"/workspaces/{ws_id2}/invites", json={"email": "test@example.com"}).status_code == 201
@@ -674,13 +707,14 @@ class TestRoleMatrix:
         admin.clear_auth()
 
         # Member can view but NOT update/invite/delete
-        member = RoleUser(client, "member-h", Role.MEMBER)
+        member = RoleUser(client, "member-h", Role.MEMBER, email="member-h@example.com")
         ws_resp3 = owner.client.post("/workspaces", json={"name": "WS3", "slug": "ws3-h"})
         ws_id3 = ws_resp3.json()["id"]
-        invite_resp = owner.client.post(f"/workspaces/{ws_id3}/invites", json={"email": "member@example.com", "role": Role.MEMBER.value})
+        invite_resp = owner.client.post(f"/workspaces/{ws_id3}/invites", json={"email": "member-h@example.com", "role": Role.MEMBER.value})
         token = invite_resp.json()["token"]
         owner.clear_auth()
-        member.client.post("/invites/accept", json={"token": token})
+        accepted = member.client.post("/invites/accept", json={"token": token})
+        assert accepted.status_code == 201, accepted.text
 
         assert member.client.get(f"/workspaces/{ws_id3}").status_code == 200
         assert member.client.patch(f"/workspaces/{ws_id3}", json={"name": "Member update"}).status_code == 403
@@ -689,13 +723,14 @@ class TestRoleMatrix:
         member.clear_auth()
 
         # Guest can view but NOT update/invite/delete
-        guest = RoleUser(client, "guest-h", Role.GUEST)
+        guest = RoleUser(client, "guest-h", Role.GUEST, email="guest-h@example.com")
         ws_resp4 = owner.client.post("/workspaces", json={"name": "WS4", "slug": "ws4-h"})
         ws_id4 = ws_resp4.json()["id"]
-        invite_resp = owner.client.post(f"/workspaces/{ws_id4}/invites", json={"email": "guest@example.com", "role": Role.GUEST.value})
+        invite_resp = owner.client.post(f"/workspaces/{ws_id4}/invites", json={"email": "guest-h@example.com", "role": Role.GUEST.value})
         token = invite_resp.json()["token"]
         owner.clear_auth()
-        guest.client.post("/invites/accept", json={"token": token})
+        accepted = guest.client.post("/invites/accept", json={"token": token})
+        assert accepted.status_code == 201, accepted.text
 
         assert guest.client.get(f"/workspaces/{ws_id4}").status_code == 200
         assert guest.client.patch(f"/workspaces/{ws_id4}", json={"name": "Guest update"}).status_code == 403

@@ -65,13 +65,15 @@ def test_duplicate_membership_prevention(client):
     assert r.status_code == 201
     ws_id = r.json()["id"]
 
-    email = f"dup-{uuid.uuid4().hex[:8]}@example.com"
+    user1_id = f"user1-{uuid.uuid4().hex[:8]}"
+    # The invite names the account that redeems it: the client materializes
+    # `user1_id` with `<user1_id>@example.com`, so that is the address to offer.
+    email = f"{user1_id}@example.com"
     r = client.post(f"/workspaces/{ws_id}/invites", json={"email": email, "role": "member"})
     assert r.status_code == 201
     token1 = r.json()["token"]
 
     # Accept as user1
-    user1_id = f"user1-{uuid.uuid4().hex[:8]}"
     as_user(client, user1_id)
     r = client.post("/invites/accept", json={"token": token1})
     assert r.status_code == 201

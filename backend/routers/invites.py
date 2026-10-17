@@ -22,6 +22,22 @@ from email_sender import send_invite_email
 router = APIRouter()
 
 
+def _caller_email(user_id: str, db: Session) -> str:
+    """The email on the caller's own account row.
+
+    `get_current_user` carries only the JWT subject (its `email` is always the
+    empty string), so the address has to come from the row. An identity with no
+    row answers as "no address", which no invitation can match.
+    """
+    user = db.get(models.User, user_id)
+    return user.email if user is not None else ""
+
+
+def _matchable_email(email: str | None) -> str:
+    """Address as used for invite matching; blank-safe."""
+    return (email or "").strip().casefold()
+
+
 @router.post(
     "/workspaces/{workspace_id}/invites", response_model=schemas.InviteOut, status_code=201
 )
@@ -91,7 +107,11 @@ async def accept_invite(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Accept an invitation by token and become a workspace member."""
+    """Accept an invitation addressed to the caller's own email and become a member.
+
+    Only the account whose email the invitation was addressed to may redeem it;
+    any other authenticated caller gets 403 and the invitation stays pending.
+    """
     invite = (
         db.query(models.WorkspaceInvite)
         .filter(models.WorkspaceInvite.token == payload.token)
@@ -99,6 +119,19 @@ async def accept_invite(
     )
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
+    # A token proves the invitation changed hands, not that it reached the caller,
+    # so this gate runs ahead of the 409 (already-accepted) and 410 (expired)
+    # branches below: neither a burned nor an expired invite may mask a
+    # wrong-person try — reordering those would reintroduce the hole, not fix it.
+    # Casefold deliberately: `EmailStr` folds only the domain, so an invitation
+    # written `Ana@corp.com` stays redeemable by the `ana@corp.com` account.
+    caller_email = _matchable_email(_caller_email(current_user["id"], db))
+    if not caller_email or caller_email != _matchable_email(invite.email):
+        # One detail for both reasons on purpose: never reveal "no address" vs "wrong address".
+        raise HTTPException(
+            status_code=403,
+            detail="This invitation was issued to a different email address",
+        )
     if invite.accepted_at is not None:
         raise HTTPException(status_code=409, detail="Invite already accepted")
     # T4-E2 divergence fix: DateTime(timezone=True) columns round-trip NAIVE on
