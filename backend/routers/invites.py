@@ -107,7 +107,7 @@ async def accept_invite(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Accept an invitation by token and become a workspace member.
+    """Accept an invitation addressed to the caller's own email and become a member.
 
     Only the account whose email the invitation was addressed to may redeem it;
     any other authenticated caller gets 403 and the invitation stays pending.
@@ -119,17 +119,15 @@ async def accept_invite(
     )
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
-    # A token proves the invitation changed hands, not that it was handed to the
-    # caller: without this gate any account that lays eyes on a token — a
-    # forwarded link, a log line, a browser history entry — can take the seat and
-    # burn the invite the real invitee still needs. Checked ahead of the
-    # already-accepted branch so a burned invite cannot mask a wrong-person try.
-    # Casefold deliberately: `EmailStr` normalizes the domain but leaves the local
-    # part as typed, so an invitation written `Ana@corp.com` has to stay
-    # redeemable by the account registered as `ana@corp.com`; an exact compare
-    # would lock people out of their own invites over a difference nobody chose.
+    # A token proves the invitation changed hands, not that it reached the caller,
+    # so this gate runs ahead of the 409 (already-accepted) and 410 (expired)
+    # branches below: neither a burned nor an expired invite may mask a
+    # wrong-person try — reordering those would reintroduce the hole, not fix it.
+    # Casefold deliberately: `EmailStr` folds only the domain, so an invitation
+    # written `Ana@corp.com` stays redeemable by the `ana@corp.com` account.
     caller_email = _matchable_email(_caller_email(current_user["id"], db))
     if not caller_email or caller_email != _matchable_email(invite.email):
+        # One detail for both reasons on purpose: never reveal "no address" vs "wrong address".
         raise HTTPException(
             status_code=403,
             detail="This invitation was issued to a different email address",

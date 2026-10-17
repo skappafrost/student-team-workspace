@@ -281,7 +281,18 @@ def test_named_invitee_who_is_already_a_member_still_consumes_the_invite(
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"] == "User is already a member of this workspace"
     assert _invite_row(db_session, second["id"]).accepted_at is not None
-    assert list(_roles(db_session, workspace_id)).count(invitee_id) == 1
+    # Count the ROWS, not the keys of `_roles`: that helper is keyed by user_id, so
+    # a second membership row for this user would overwrite its own key and the
+    # key list would still name them exactly once — an assertion that cannot fail.
+    assert (
+        db_session.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == invitee_id,
+        )
+        .count()
+        == 1
+    ), "a duplicate membership row exists for the named invitee"
 
 
 # ---------------------------------------------------------------------------
