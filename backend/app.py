@@ -18,7 +18,7 @@ import logging_mw
 import rate_limit
 from authorization import ROLE_HIERARCHY, Role  # noqa: F401  (re-exported for tests)
 from config import JWT_SECRET_KEY_DEFAULT, settings
-from database import Base, engine, get_db  # noqa: F401  (get_db: test override target)
+from database import Base, get_db  # noqa: F401  (Base for tests, get_db: test override target)
 from dependencies import (  # noqa: F401  (re-exported for tests and convenience)
     _decode_token,
     _parse_cors_origins,
@@ -103,8 +103,19 @@ async def _loop_stall_watchdog() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _require_production_jwt_secret()  # TA1-2: refuse to boot on a known secret
-    # Create tables on startup for simplicity in this scaffold stage.
-    Base.metadata.create_all(bind=engine)  # TODO(T036)
+    # The migration chain is the only schema source: the server builds no tables
+    # of its own. A database nobody migrated is not visible at boot — every route
+    # but the ones touching a missing table answers fine — so name the state once,
+    # while the operator is still reading the log. `/readyz` answers 503 for it.
+    report = logging_mw.readiness_report()
+    if report["alembic_applied"] == []:
+        logging.getLogger("stw.schema").warning(
+            "alembic_version has no rows: nothing has run `alembic upgrade head` "
+            "against this database, and the server will not create its own schema. "
+            "If its tables are already present it was built by create_all and needs "
+            "`python manage.py stamp`; on a fresh database `alembic upgrade head` "
+            "is the step that was skipped."
+        )
     if _test_auth_bypass_enabled():
         logging.getLogger(__name__).warning(
             "STW_TEST_AUTH=1 with ENVIRONMENT in {test,dev}: the X-Test-User-* "
