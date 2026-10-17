@@ -107,13 +107,18 @@ async def lifespan(app: FastAPI):
     # of its own. A database nobody migrated is not visible at boot — every route
     # but the ones touching a missing table answers fine — so name the state once,
     # while the operator is still reading the log. `/readyz` answers 503 for it.
+    # `readiness_report()` blanks `alembic_applied` for an unreachable database too,
+    # so the message names both readings instead of blaming the chain for an outage.
     report = logging_mw.readiness_report()
     if report["alembic_applied"] == []:
         logging.getLogger("stw.schema").warning(
-            "alembic_version has no rows: nothing has run `alembic upgrade head` "
-            "against this database, and the server will not create its own schema. "
-            "If its tables are already present it was built by create_all and needs "
-            "`python manage.py stamp`; on a fresh database `alembic upgrade head` "
+            "alembic_version reads as empty: either this database could not be "
+            "read at all (/readyz reports db=false, so check DATABASE_URL and "
+            "reachability first), or nothing has run `alembic upgrade head` against "
+            "it, and the server will not create its own schema. For that second "
+            "case, if its tables are already present the database was built by "
+            "create_all and needs `python manage.py stamp` before `alembic "
+            "upgrade head` can run; on a fresh database `alembic upgrade head` "
             "is the step that was skipped."
         )
     if _test_auth_bypass_enabled():

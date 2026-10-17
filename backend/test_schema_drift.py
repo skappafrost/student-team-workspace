@@ -25,9 +25,12 @@ schema nobody ships.
 
 None of this is checkable from source text, which is why every test here builds a
 real database with `alembic upgrade head`. The last test goes one step further and
-binds the app's own engine to such a database, because a server that creates its
-own schema at startup serves traffic no matter what the chain did — that is the
-hole the deletion closed, and this is what keeps it closed.
+binds the app's own engine to such a database: what it proves is that a real
+request through `database.SessionLocal` can write against a schema only the chain
+built. It is not what keeps a restored startup `create_all` out — that is a
+checkfirst-per-table no-op on a chain-built database, so `/readyz` would still
+answer 200. `test_lifespan.py:45` and `test_lifespan.py:73-74` are the tests that
+fail if the app starts building its own schema again.
 """
 
 import os
@@ -297,6 +300,8 @@ def test_the_application_server_serves_a_chain_built_database(fresh_migrated_eng
     suite_url = os.environ.get("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
     set_db_url(url)
     try:
+        # No `get_db` override: the requests below must run on the app's own session.
+        assert not app.dependency_overrides
         with TestClient(app) as client:
             ready = client.get("/readyz")
             assert ready.status_code == 200, ready.text

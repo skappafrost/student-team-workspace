@@ -30,6 +30,11 @@ Never load into your dev `stw.db` — spin a throwaway sqlite DB instead:
 
 ```bash
 # from the repo root, backend on a temp DB (PowerShell / git-bash):
+# migrate FIRST — the server no longer creates its own schema, so the loader's
+# first POST would 500 against a qa-pack.db the chain has not built yet:
+DATABASE_URL="sqlite:///./qa-pack.db" PYTHONPATH=backend \
+  backend/.venv/Scripts/python.exe -m alembic -c backend/alembic.ini upgrade head
+
 DATABASE_URL="sqlite:///./qa-pack.db" \
   backend/.venv/Scripts/python.exe -m uvicorn app:app --port 8001 --app-dir backend
 
