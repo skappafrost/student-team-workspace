@@ -75,7 +75,7 @@ alembic heads
 alembic upgrade head
 ```
 
-**This is the schema source.** Every path that starts this backend migrates first: the README quickstart and `make dev` run `alembic upgrade head`, `backend/Dockerfile`'s `CMD` chains it before uvicorn, Playwright's `globalSetup` applies it to `ci_e2e.db`, and `python smoke_server.py` applies it to `stw_smoke.db` in-process. Treat a successful `upgrade head` as what gives a fresh clone its schema — a database that was only ever `create_all`ed is the exception below.
+**This is the schema source.** Every path that starts this backend migrates first: the README quickstart and `make dev` run `alembic upgrade head`, `backend/Dockerfile`'s `CMD` chains it before uvicorn, the Playwright backend `webServer` entry runs it in the same shell command that starts uvicorn, against `ci_e2e.db`, and `python smoke_server.py` applies it to `stw_smoke.db` in-process. Treat a successful `upgrade head` as what gives a fresh clone its schema — a database that was only ever `create_all`ed is the exception below.
 
 `alembic` resolves the same database the app opens: `backend/alembic/env.py` reads `DATABASE_URL` from the process environment first and otherwise falls back to `config.Settings`, which is what reads `.env`. Copying `.env.example` to `.env` is enough for both; `alembic.ini`'s `sqlalchemy.url` is no longer consulted (it still holds the `driver://user:pass@localhost/dbname` template placeholder).
 

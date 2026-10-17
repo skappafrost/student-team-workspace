@@ -6,10 +6,7 @@ const BACKEND_URL = process.env.STW_BACKEND_URL ?? 'http://localhost:8000';
 // The venv layout differs by platform and the specs need a real backend: every
 // one of them goes through the BFF at :3000, which proxies to :8000. Without a
 // live backend they would only be proving that Next can serve HTML.
-// Exported because `tests/global-setup.ts` migrates the database with this exact
-// interpreter and cwd; a second copy of either would be free to drift.
-export const BACKEND_PY = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' : '.venv/bin/python';
-export const BACKEND_CWD = '../backend';
+const BACKEND_PY = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' : '.venv/bin/python';
 
 /**
  * The database the started server must open.
@@ -26,16 +23,10 @@ export const BACKEND_CWD = '../backend';
  * e2e at its own file instead of writing fixtures into the developer's `stw.db`;
  * override with `DATABASE_URL` to test against a real dev database.
  */
-export const E2E_DATABASE_URL = process.env.DATABASE_URL ?? 'sqlite:///./ci_e2e.db';
+const E2E_DATABASE_URL = process.env.DATABASE_URL ?? 'sqlite:///./ci_e2e.db';
 
 export default defineConfig({
   testDir: './tests',
-  // Nothing migrates locally before uvicorn opens `E2E_DATABASE_URL`, so the schema
-  // comes from `app.py`'s startup `create_all` and a migration that dies on its
-  // first statement is unfeelable here. Re-running the chain against a stamped
-  // database is a no-op, so CI (which migrates in its own step) pays one command
-  // and nothing else.
-  globalSetup: './tests/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -61,8 +52,16 @@ export default defineConfig({
   // Windows: killing the subshell that ran uvicorn left the server listening.
   webServer: [
     {
-      command: `${BACKEND_PY} -m uvicorn app:app --port ${new URL(BACKEND_URL).port}`,
-      cwd: BACKEND_CWD,
+      // Migrate, then serve, in one `&&`-chained command: Playwright spawns
+      // `command` with `shell: true`, so uvicorn only starts after
+      // `alembic upgrade head` exits 0, and the `cwd` + `env` below make the
+      // chain and the server target the same file. A `globalSetup` migration
+      // cannot work here: Playwright sets up `webServer` before it runs
+      // `globalSetup`, so the server would already have opened the database.
+      // Re-running the chain against a stamped database is a no-op, so CI
+      // (which migrates in its own step) pays one extra command and nothing else.
+      command: `${BACKEND_PY} -m alembic upgrade head && ${BACKEND_PY} -m uvicorn app:app --port ${new URL(BACKEND_URL).port}`,
+      cwd: '../backend',
       env: { ENVIRONMENT: 'dev', DATABASE_URL: E2E_DATABASE_URL },
       // `/readyz`, not `/health`: `/health` touches no table and returns 200 on an
       // empty schema, so "the backend came up" proved nothing about the database.
@@ -72,6 +71,9 @@ export default defineConfig({
       // the run through. `/health` stays documented as the cheap liveness endpoint.
       url: `${BACKEND_URL}/readyz`,
       timeout: 120_000,
+      // Something already answering on :8000 (locally) skips this whole
+      // `command` — the migration included. The bootstrap this entry proves
+      // therefore holds from a cold start only.
       reuseExistingServer: !process.env.CI
     },
     {
