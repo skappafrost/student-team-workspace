@@ -100,9 +100,9 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/files` | GET: `?project_id= ?task_id= ?message_id= ?limit= ?offset=`; POST is multipart upload |
-| GET, PATCH, DELETE | `/files/{id}` | File content served from `/uploads/...` |
-| GET | `/uploads/{storage_key}` | Serves the bytes themselves, authenticated: same policy as `GET /files/{id}` — anonymous `401`, non-member `403`, guest `403`, revoked session `401`, unknown key `404`. Replaced the old unauthenticated `StaticFiles` mount, so any LAN peer with a URL can no longer read another workspace's files. |
+| GET, POST | `/workspaces/{id}/files` | GET: `?project_id= ?task_id= ?message_id= ?limit= ?offset=`; POST is multipart upload. A file linked to a message in a **private** channel (including DMs) is omitted from the list for callers who are not members of that channel. |
+| GET, PATCH, DELETE | `/files/{id}` | GET returns metadata only; content is served from `/uploads/...`. GET answers `403` when the file is linked into a private channel the caller is not a member of. PATCH/DELETE are still gated on uploader-or-admin, which is a separate question from read scope. |
+| GET | `/uploads/{storage_key}` | Serves the bytes themselves, authenticated: same policy as `GET /files/{id}` — anonymous `401`, non-member `403`, guest `403`, revoked session `401`, unknown key `404`, and `403` for a file linked into a private channel the caller is not in. The channel check runs **before** the on-disk lookup, so the status code is not an oracle for whether a key exists. Replaced the old unauthenticated `StaticFiles` mount, so any LAN peer with a URL can no longer read another workspace's files. |
 
 #### Storage quota (TA2-3)
 
