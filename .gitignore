@@ -26,8 +26,15 @@ backend/bench/uploads/
 # Logs
 *.log
 
-# Uploads (user content)
-uploads/
+# Upload *data* dirs — user files written under settings.upload_dir.
+# Anchored on purpose. The previous bare `uploads/` matched every directory of
+# that name at any depth, which silently swallowed source directories: the Next
+# route folder app/src/app/api/uploads could not be added, so a fix living there
+# would be invisible to git and to CI.
+/uploads/
+/backend/uploads/
+/app/uploads/
+/backend/bench/uploads/
 
 # Edge/browser profiles
 .edge-profile/

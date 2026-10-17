@@ -5,19 +5,25 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Icons } from '@/components/icons';
 import { Separator } from '@/components/ui/separator';
-import { linkedFilesQueryOptions, useUploadFile } from '../api/queries';
-import { downloadFile, formatSize } from '../api/service';
+import { linkedFilesQueryOptions, useDownloadFile, useUploadFile } from '../api/queries';
+import { formatSize } from '../api/service';
 
 // Source: composes this feature's file-uploader input pattern + file-list row layout.
 export function TaskAttachments({ taskId }: { taskId: string }) {
   const { data: files } = useQuery(linkedFilesQueryOptions({ task_id: taskId }));
   const upload = useUploadFile();
+  const download = useDownloadFile();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    await upload.mutateAsync({ file, task_id: taskId });
+    // `mutate`, not `await mutateAsync`: the mutation reports through
+    // onSuccess/onError (a toast on failure), and an awaited rejection here would
+    // surface only as an unhandled promise rejection with the dialog left open.
+    upload.mutate({ file, task_id: taskId });
+    // Reset before returning, not after an await: on a rejected upload the reset
+    // was skipped, so re-picking the same file fired nothing at all.
     e.target.value = '';
   };
 
@@ -51,7 +57,7 @@ export function TaskAttachments({ taskId }: { taskId: string }) {
                   type='button'
                   variant='ghost'
                   size='sm'
-                  onClick={() => downloadFile(f)}
+                  onClick={() => download.mutate(f)}
                   aria-label={`Download ${f.name}`}
                 >
                   <Icons.download className='h-4 w-4' />
