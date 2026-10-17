@@ -87,6 +87,24 @@ async def update_notification(
     return notification
 
 
+@router.post("/notifications/mark-all-read")
+async def mark_all_notifications_read(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark every unread notification of the current user as read.
+
+    Scoped to the caller: other users' unread rows are never touched.
+    Idempotent — calling it with nothing unread still returns 200.
+    """
+    db.query(models.Notification).filter(
+        models.Notification.user_id == current_user["id"],
+        models.Notification.read.is_(False),
+    ).update({models.Notification.read: True}, synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/notifications/{notification_id}", status_code=204)
 async def delete_notification(
     notification_id: str,

@@ -2,7 +2,7 @@
 
 Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagger) and `/redoc`. This file is the curated teammate guide — read this first, use `/docs` for schema details.
 
-> **Accuracy:** every row below was regenerated from the live route table + `routers/` source (19/09/2026; 51 HTTP paths + 2 WebSocket routes). `backend/test_docs_contract.py` fails the build if a route appears in the app without a row here, if a row outlives its route, or if that count stops matching — so regenerate rather than hand-editing individual rows.
+> **Accuracy:** every row below was regenerated from the live route table + `routers/` source (19/09/2026; 52 HTTP paths + 2 WebSocket routes). `backend/test_docs_contract.py` fails the build if a route appears in the app without a row here, if a row outlives its route, or if that count stops matching — so regenerate rather than hand-editing individual rows.
 
 ## Auth model
 
@@ -118,6 +118,7 @@ Each workspace has a storage quota enforced at upload time on `POST /workspaces/
 |---|---|---|
 | GET, POST | `/notifications` | GET: `?unread_only=true`, `?limit= ?offset=` |
 | GET, PATCH, DELETE | `/notifications/{id}` | PATCH `{read: bool}` |
+| POST | `/notifications/mark-all-read` | Marks every unread row of the **caller** as read; returns `{"ok": true}`; idempotent |
 
 ### Presence
 
@@ -413,7 +414,7 @@ The Next.js app never calls the backend directly from the browser. `app/src/app/
 | `GET /api/pages/{pageId}/backlinks` | `/workspaces/{id}/pages/{id}/backlinks` |
 | `GET, POST /api/files` + `/api/files/{fileId}` | `/workspaces/{id}/files` + `/files/{id}` |
 | `GET, PATCH /api/notifications` | `/notifications` |
-| `POST /api/notifications` (`{action: "mark-all-read"}`) | proxies to `POST /notifications/mark-all-read` — **no such backend route exists** (backend has only `POST /notifications` and `GET/PATCH/DELETE /notifications/{id}`); currently fails with 405. Known gap, candidate for a future harden PR. |
+| `POST /api/notifications` (`{action: "mark-all-read"}`) | proxies to `POST /notifications/mark-all-read`; the backend route now exists (added in the `mark-all-read` harden change) — marks every unread row of the caller as read |
 | `GET /api/ai/search` | `GET /ai/search` (`q`, `scope` forwarded) |
 | `POST /api/ai/summarize` | `POST /ai/summarize` |
 | `GET /api/activity` | `GET /workspaces/{first}/activity` |
