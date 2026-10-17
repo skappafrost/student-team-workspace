@@ -180,9 +180,11 @@ cd backend && ./.venv/Scripts/python -m pytest -q
 # Migrations — exactly one head expected
 cd backend && ./.venv/Scripts/python -m alembic heads
 
-# Frontend — the three steps the `frontend` CI job runs
+# Frontend — the checks the `frontend` CI job runs, in job order. ci.yml adds a
+# fifth (it greps the built CSS for `.bg-presence-*`), so `build` has to run first.
 cd app && bunx oxlint --deny-warnings src   # warnings fail; scoped to src, see ci.yml
 cd app && bun run typecheck                 # tsc --noEmit
+cd app && bun run test:unit                 # bun's built-in runner, app/tests-unit/
 cd app && bun run build                     # webpack build
 
 # Browser specs — CI job `frontend-e2e`. Playwright starts the backend and the
@@ -207,9 +209,9 @@ cd app && bun run format:check
 cd app && bun run gen:api                   # regenerate src/types/api.d.ts from /openapi.json
 ```
 
-> **What is actually tested.** `app/tests/` holds four Playwright specs that run in CI against a live backend: route guards, the workspace-settings invite flow, the host-mismatch socket guard, and cross-browser message delivery. There are no component tests and no accessibility automation — contrast is reviewed from the light/dark screenshots in `app/qa-evidence/`. Don't claim a frontend behavior is tested unless one of the commands above proves it.
+> **What is actually tested.** Two frontend tiers run in CI: `bun run test:unit` (bun's built-in runner, zero test dependency) covers pure functions whose tests live in `app/tests-unit/`, and the Playwright specs in `app/tests/` run against a live backend in job `frontend-e2e` — route guards, the workspace-settings invite flow, the host-mismatch socket guard, realtime delivery, presence. What neither reaches: there is **no DOM/component runner** (bun's runner has no jsdom), so component behavior Playwright cannot reach is verified by hand and written down as such, and there is no accessibility automation — contrast is reviewed from the light/dark screenshots in `app/qa-evidence/`. Don't claim a frontend behavior is tested unless one of the commands above proves it.
 
-CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — `ruff` (lint), `backend` (SQLite), `backend-pg` (Postgres 16), `frontend` (lint + typecheck + build), `frontend-e2e` (Playwright on Chromium) and `demo-pack`. All green before review.
+CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — `ruff` (lint), `backend` (SQLite), `backend-pg` (Postgres 16), `frontend` (lint + typecheck + `bun run test:unit` + build + a compiled-CSS grep), `frontend-e2e` (Playwright on Chromium) and `demo-pack`. All green before review.
 
 > **SQLite/Postgres parity is mandatory.** A migration that renders valid DDL on one engine can be invalid on the other (a boolean `server_default` must be `sa.false()` / `"false"`, not `sa.text("0")` — Postgres rejects an unquoted integer default on a boolean column). The `backend-pg` job is the safety net; local SQLite-only pytest does not catch this.
 
@@ -221,7 +223,7 @@ CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — `ruff` (
 |---|---|---|
 | Feature surface | ✅ all core modules shipped | 51 HTTP paths · 2 WebSocket routes · 20 mapped tables · 15 backend routers (recount: walk `app.routes` after `import app`) |
 | Backend suite | ✅ 770 collected, 769 passing | `pytest -q` on SQLite; same suite on Postgres 16 in CI |
-| Client tests | 🔶 **no automated suite** | CI runs `typecheck` only — no lint, build or tests; 2 Playwright specs exist but nothing runs them; verification is the manual `e2e-*.mjs` scripts |
+| Client tests | 🔶 two tiers, no component tier | job `frontend` runs `bun run test:unit` over `app/tests-unit/` (pure functions); job `frontend-e2e` runs the Playwright specs in `app/tests/` against a live backend. Component behavior neither tier reaches is still hand-verified — bun's runner has no jsdom |
 | Alembic | ✅ single head `prs01_presence_state` | `alembic heads`; `/readyz` 503s if it ever splits |
 | Type check | ✅ clean | `tsc --noEmit` |
 | Backend lint | ✅ 0 errors, gated in CI | `ruff` job runs `ruff check .` from `backend/` on every PR |
