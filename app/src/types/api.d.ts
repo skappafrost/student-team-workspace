@@ -28,6 +28,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/healthz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Healthz */
+        get: operations["healthz_healthz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Readyz */
+        get: operations["readyz_readyz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/register": {
         parameters: {
             query?: never;
@@ -88,6 +122,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Rotate a refresh token into a fresh access+refresh pair (TA1-1).
+         *
+         *     Rotation policy (single-use refresh tokens, reuse detection):
+         *
+         *     - A refresh token is bound to the same ``auth_sessions`` row (jti) as
+         *       its access token, so ``/auth/logout``, ``/auth/logout-all`` and
+         *       account deletion revoke it too — a logged-out refresh token is dead.
+         *     - Each successful refresh ROTATES the row: the old refresh token becomes
+         *       single-use (revoked-with-rotated) and a successor row is minted with a
+         *       fresh jti, chained to the same rotation ``family_id``.
+         *     - REPLAY (reuse of an already-rotated refresh token) is treated as token
+         *       theft: the ENTIRE family is revoked — every successor row, hence every
+         *       access and refresh token minted from that login — and the request is
+         *       answered 401.
+         *     - Expired / malformed / revoked-but-not-rotated tokens get a plain 401
+         *       with no family action.
+         *
+         *     Response shape: the same ``TokenOut`` as ``/auth/login`` (a NEW endpoint
+         *     defining its own shape, deliberately mirroring login's).
+         */
+        post: operations["refresh_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -99,9 +171,52 @@ export interface paths {
         put?: never;
         /**
          * Logout
-         * @description Clear the session cookie.
+         * @description Revoke the current session (jti blocklist) and clear the cookie.
          */
         post: operations["logout_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout All
+         * @description Sign out everywhere: revoke every active session for the current user.
+         */
+        post: operations["logout_all_auth_logout_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/ws-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint Ws Ticket
+         * @description Mint a one-shot ticket for the next WebSocket handshake (TA4-2).
+         *
+         *     Offer the returned value as the ``Sec-WebSocket-Protocol`` header so the
+         *     credential never appears in a URL or access log. See docs/API.md.
+         */
+        post: operations["mint_ws_ticket_auth_ws_ticket_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -117,7 +232,27 @@ export interface paths {
         };
         /**
          * List Workspaces
-         * @description List workspaces the current user is a member of.
+         * @description List workspaces the current user is a member of, oldest first.
+         *
+         *     The order is part of the contract, not a courtesy: every BFF handler takes
+         *     ``[0]`` of this list as "the current workspace", so without an explicit sort
+         *     that choice is whatever the plan yielded — rowid/insert order on SQLite,
+         *     nothing at all on PostgreSQL. Two queries used to stack here (memberships,
+         *     then ``id.in_(workspace_ids)``) and neither constrained the result order,
+         *     because the order of an ``IN`` list does not propagate to rows.
+         *
+         *     ``created_at`` is the key because it is the only stable, meaningful one the
+         *     row has: it is set by the database at insert, never rewritten (``updated_at``
+         *     is, and a rename would silently move which workspace a member opens), and
+         *     "the workspace you created first" is the one you were already looking at, so
+         *     creating another cannot hijack ``[0]``. It is not unique — two workspaces
+         *     created in the same second tie on SQLite, and ``func.now()`` is a
+         *     transaction timestamp on PostgreSQL, so every batch of inserts ties — hence
+         *     the ``id`` tiebreak. ``id`` is a random UUID string, which makes the tie
+         *     order arbitrary but fixed, and it is the primary key, which makes it total:
+         *     no two rows can tie twice. Same two-key shape as
+         *     ``routers/messages.py:list_channel_messages``, and the reason
+         *     ``test_workspace_api.py`` pins both keys instead of one.
          */
         get: operations["list_workspaces_workspaces_get"];
         put?: never;
@@ -160,6 +295,71 @@ export interface paths {
         patch: operations["update_workspace_workspaces__workspace_id__patch"];
         trace?: never;
     };
+    "/workspaces/{workspace_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Activity
+         * @description Recent activity feed for a workspace (members only), newest first.
+         *
+         *     Pagination: ``limit`` (default 50, max 100), no offset (feed is newest-first
+         *     and was always bounded; offset is intentionally not offered here).
+         */
+        get: operations["list_workspace_activity_workspaces__workspace_id__activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Log
+         * @description Admin audit log: full activity history with filters. Admin or higher only.
+         *
+         *     Pagination: ``limit`` (default 100, max 500), ``offset`` (default 0).
+         */
+        get: operations["list_audit_log_workspaces__workspace_id__audit_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/transfer-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer Ownership
+         * @description Transfer workspace ownership to another member. Requires owner role.
+         */
+        post: operations["transfer_ownership_workspaces__workspace_id__transfer_ownership_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/invites": {
         parameters: {
             query?: never;
@@ -170,12 +370,18 @@ export interface paths {
         /**
          * List Workspace Invites
          * @description List all pending invitations for a workspace. Requires admin or higher role.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
          */
         get: operations["list_workspace_invites_workspaces__workspace_id__invites_get"];
         put?: never;
         /**
          * Create Invite
          * @description Invite a user by email to a workspace. Requires admin or higher role.
+         *
+         *     The role an invite carries is capped: `owner` is not assignable, and no role
+         *     above the caller's own role in this workspace may be handed out (SEC-02).
          */
         post: operations["create_invite_workspaces__workspace_id__invites_post"];
         delete?: never;
@@ -238,6 +444,9 @@ export interface paths {
         /**
          * List Workspace Members
          * @description List all members of a workspace. Requires admin or higher role.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
          */
         get: operations["list_workspace_members_workspaces__workspace_id__members_get"];
         put?: never;
@@ -268,24 +477,34 @@ export interface paths {
         /**
          * Update Member Role
          * @description Update a member's role. Requires admin or higher role. Cannot change owner role.
+         *
+         *     The caller may only hand out a role it holds or one below it, and `owner` is
+         *     never assignable here — it moves through `transfer-ownership` (SEC-01).
          */
         patch: operations["update_member_role_workspaces__workspace_id__members__user_id__patch"];
         trace?: never;
     };
-    "/workspaces/{workspace_id}/transfer-ownership": {
+    "/workspaces/{workspace_id}/dms": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Dms
+         * @description List the current user's DM channels in a workspace.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
+         */
+        get: operations["list_dms_workspaces__workspace_id__dms_get"];
         put?: never;
         /**
-         * Transfer Ownership
-         * @description Transfer workspace ownership to another member. Requires owner role.
+         * Create Dm
+         * @description Create (or return existing) 1:1 direct-message channel with another member.
          */
-        post: operations["transfer_ownership_workspaces__workspace_id__transfer_ownership_post"];
+        post: operations["create_dm_workspaces__workspace_id__dms_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -303,8 +522,12 @@ export interface paths {
          * List Workspace Channels
          * @description List channels in a workspace.
          *
-         *     Admins/owners see every channel. Other members see public channels plus
-         *     private channels they are members of (or the creator of).
+         *     DM channels are never listed here (they live under /dms). Admins/owners
+         *     see every other channel; regular members see public channels plus private
+         *     channels they created or hold a channel_members row for.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
          */
         get: operations["list_workspace_channels_workspaces__workspace_id__channels_get"];
         put?: never;
@@ -352,6 +575,9 @@ export interface paths {
          *
          *     Private channels: users with an explicit membership row. Public channels:
          *     all workspace members (membership is implicit).
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
          */
         get: operations["list_channel_members_channels__channel_id__members_get"];
         put?: never;
@@ -395,7 +621,27 @@ export interface paths {
         };
         /**
          * List Channel Messages
-         * @description List messages in a channel. Requires workspace membership and private channel access.
+         * @description List the newest messages in a channel, optionally filtered by a
+         *     case-insensitive content substring (`q`). Requires workspace membership and
+         *     channel access.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the cap, i.e. the whole collection),
+         *     ``offset`` (default 0) walking **backwards from the newest**, and ``before``
+         *     (a message id) for a window strictly older than that message. The response is
+         *     still a bare JSON array in ascending `created_at` order, as `pagination.py`
+         *     and `docs/API.md` require.
+         *
+         *     Why the window is anchored at the newest end: the old query ordered
+         *     `created_at ASC` and then applied `offset/limit`, so the default page was the
+         *     **oldest** 1000 messages in the channel. In a busy channel the newest messages
+         *     were simply absent from the very first response, and no `offset` value could
+         *     reach them by paging forward.
+         *
+         *     `id` is part of the ordering, not decoration: SQLite's `CURRENT_TIMESTAMP` is
+         *     second-granular, so messages created in the same second had no defined order
+         *     and could shuffle between pages. UUIDs are not chronological, which is fine
+         *     for a tie-break as long as the same composite order is used for both the sort
+         *     and the `before` cut — otherwise a row could appear on two pages or none.
          */
         get: operations["list_channel_messages_channels__channel_id__messages_get"];
         put?: never;
@@ -434,56 +680,27 @@ export interface paths {
         patch: operations["update_message_messages__message_id__patch"];
         trace?: never;
     };
-    "/workspaces/{workspace_id}/events": {
+    "/messages/{message_id}/reactions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Workspace Events
-         * @description List events in a workspace, optionally filtered by start/end date range.
-         */
-        get: operations["list_workspace_events_workspaces__workspace_id__events_get"];
+        get?: never;
         put?: never;
         /**
-         * Create Event
-         * @description Create a new event in a workspace. Any member can create.
+         * Toggle Reaction
+         * @description Toggle the current user's emoji reaction on a message.
+         *
+         *     Adds the reaction if absent, removes it if present. Returns the updated
+         *     reaction summary for the message and broadcasts it to the channel room.
          */
-        post: operations["create_event_workspaces__workspace_id__events_post"];
+        post: operations["toggle_reaction_messages__message_id__reactions_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/events/{event_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Event
-         * @description Get a single event. Must be a workspace member.
-         */
-        get: operations["get_event_events__event_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Event
-         * @description Delete an event. Requires creator/admin/owner.
-         */
-        delete: operations["delete_event_events__event_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Event
-         * @description Update an event. Requires creator/admin/owner.
-         */
-        patch: operations["update_event_events__event_id__patch"];
         trace?: never;
     };
     "/workspaces/{workspace_id}/projects": {
@@ -496,6 +713,9 @@ export interface paths {
         /**
          * List Workspace Projects
          * @description List all projects in a workspace.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
          */
         get: operations["list_workspace_projects_workspaces__workspace_id__projects_get"];
         put?: never;
@@ -538,6 +758,29 @@ export interface paths {
         patch: operations["update_project_projects__project_id__patch"];
         trace?: never;
     };
+    "/users/me/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Tasks
+         * @description All tasks assigned to the current user across every workspace they belong to.
+         *
+         *     Pagination: ``limit`` (1..1000, default = cap), ``offset`` (default 0) applied
+         *     after the due-bucket filter (the buckets are computed in Python).
+         */
+        get: operations["list_my_tasks_users_me_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/tasks": {
         parameters: {
             query?: never;
@@ -548,6 +791,9 @@ export interface paths {
         /**
          * List Project Tasks
          * @description List tasks in a project, optionally filtered by status.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
          */
         get: operations["list_project_tasks_projects__project_id__tasks_get"];
         put?: never;
@@ -584,6 +830,61 @@ export interface paths {
          * @description Update a task (incl. status/column move + assignee). Any workspace member can update.
          */
         patch: operations["update_task_tasks__task_id__patch"];
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Events
+         * @description List events in a workspace, optionally filtered by start/end date range.
+         *
+         *     With a range, recurring events are expanded into per-occurrence instances
+         *     (occurrence_id set); without a range the base events are returned as-is.
+         */
+        get: operations["list_workspace_events_workspaces__workspace_id__events_get"];
+        put?: never;
+        /**
+         * Create Event
+         * @description Create a new event in a workspace. Any member can create.
+         */
+        post: operations["create_event_workspaces__workspace_id__events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Event
+         * @description Get a single event. Must be a workspace member.
+         */
+        get: operations["get_event_events__event_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Event
+         * @description Delete an event. Requires creator/admin/owner.
+         */
+        delete: operations["delete_event_events__event_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Event
+         * @description Update an event. Requires creator/admin/owner.
+         */
+        patch: operations["update_event_events__event_id__patch"];
         trace?: never;
     };
     "/workspaces/{workspace_id}/pages": {
@@ -643,6 +944,278 @@ export interface paths {
         patch: operations["update_page_workspaces__workspace_id__pages__page_id__patch"];
         trace?: never;
     };
+    "/workspaces/{workspace_id}/pages/{page_id}/backlinks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Page Backlinks
+         * @description Pages in the workspace whose content links to this page via [[title]]/[[slug]].
+         */
+        get: operations["list_page_backlinks_workspaces__workspace_id__pages__page_id__backlinks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/pages/{page_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Page History
+         * @description List version history for a page, newest first.
+         */
+        get: operations["list_page_history_workspaces__workspace_id__pages__page_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/pages/{page_id}/restore/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Page Version
+         * @description Restore a page to a prior version. Same permissions as update.
+         */
+        post: operations["restore_page_version_workspaces__workspace_id__pages__page_id__restore__version__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Files
+         * @description List files in a workspace, optionally filtered by linked resource.
+         *
+         *     Files linked into a private channel are only listed for that channel's
+         *     members, so the result is scoped to what the caller may read, not to
+         *     everything in the workspace.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
+         */
+        get: operations["list_workspace_files_workspaces__workspace_id__files_get"];
+        put?: never;
+        /**
+         * Upload File
+         * @description Upload a file to a workspace, optionally linked to a project/task/message.
+         */
+        post: operations["upload_file_workspaces__workspace_id__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get File
+         * @description Get a single file. Must be a workspace member.
+         */
+        get: operations["get_file_files__file_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete File
+         * @description Delete a file. Requires admin/owner.
+         */
+        delete: operations["delete_file_files__file_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update File
+         * @description Update a file's metadata. Requires creator or admin/owner.
+         */
+        patch: operations["update_file_files__file_id__patch"];
+        trace?: never;
+    };
+    "/uploads/{storage_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Uploaded File
+         * @description Serve uploaded file bytes to members only (Stage 2.2, TA2-2).
+         *
+         *     Replaces the unauthenticated StaticFiles mount: same URL shape the
+         *     frontend already uses (``file.url`` = ``/uploads/{storage_key}``),
+         *     but now with the ``GET /files/{id}`` access policy — anonymous 401,
+         *     non-member 403, guest 403, revoked session 401, unknown key 404.
+         */
+        get: operations["read_uploaded_file_uploads__storage_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Notifications
+         * @description List notifications for the current user.
+         *
+         *     Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
+         *     collection), ``offset`` (default 0).
+         */
+        get: operations["list_notifications_notifications_get"];
+        put?: never;
+        /**
+         * Create Notification
+         * @description Create a notification in the caller's own feed.
+         *
+         *     Fan-out for other people (mentions, task assignment, DMs) is the server's job
+         *     and goes through `services.notify`; this route was a client-callable way to
+         *     write arbitrary title/content into anyone else's notifications, which makes it
+         *     a phishing primitive — the feed is one of the few places the UI presents rows
+         *     as coming from the workspace.
+         *
+         *     The existence check runs first on purpose: posting to a user that does not
+         *     exist stays `404` rather than becoming a `403` that leaks whether the id is
+         *     valid, which is what `test_cannot_create_notification_for_missing_user` pins.
+         */
+        post: operations["create_notification_notifications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/{notification_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notification
+         * @description Get a single notification for the current user.
+         */
+        get: operations["get_notification_notifications__notification_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Notification
+         * @description Delete a notification.
+         */
+        delete: operations["delete_notification_notifications__notification_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Notification
+         * @description Mark a notification as read/unread.
+         */
+        patch: operations["update_notification_notifications__notification_id__patch"];
+        trace?: never;
+    };
+    "/notifications/mark-all-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark All Notifications Read
+         * @description Mark every unread notification of the current user as read.
+         *
+         *     Scoped to the caller: other users' unread rows are never touched.
+         *     Idempotent — calling it with nothing unread still returns 200.
+         */
+        post: operations["mark_all_notifications_read_notifications_mark_all_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Presence
+         * @description Every member's effective presence in the workspace (members only).
+         */
+        get: operations["list_presence_workspaces__workspace_id__presence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/presence/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set My Presence
+         * @description Set the caller's own presence and fan the change out to the workspace.
+         */
+        post: operations["set_my_presence_workspaces__workspace_id__presence_me_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai/summarize": {
         parameters: {
             query?: never;
@@ -683,7 +1256,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/notifications": {
+    "/users/me/export": {
         parameters: {
             query?: never;
             header?: never;
@@ -691,106 +1264,69 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Notifications
-         * @description List notifications for the current user.
+         * Export My Data
+         * @description Download all of the current user's data as a JSON document.
          */
-        get: operations["list_notifications_notifications_get"];
+        get: operations["export_my_data_users_me_export_get"];
         put?: never;
-        /**
-         * Create Notification
-         * @description Create a notification for a user.
-         */
-        post: operations["create_notification_notifications_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/notifications/{notification_id}": {
+    "/users/me": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Notification
-         * @description Get a single notification for the current user.
-         */
-        get: operations["get_notification_notifications__notification_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
-         * Delete Notification
-         * @description Delete a notification.
+         * Delete My Account
+         * @description Hard-delete the account after password confirmation.
+         *
+         *     Anonymizes the user row; purges memberships, notifications, sessions,
+         *     and uploaded files (rows + blobs).
          */
-        delete: operations["delete_notification_notifications__notification_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Notification
-         * @description Mark a notification as read/unread.
-         */
-        patch: operations["update_notification_notifications__notification_id__patch"];
-        trace?: never;
-    };
-    "/workspaces/{workspace_id}/files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Workspace Files
-         * @description List files in a workspace. Members can view.
-         */
-        get: operations["list_workspace_files_workspaces__workspace_id__files_get"];
-        put?: never;
-        /**
-         * Upload File
-         * @description Upload a file to a workspace. Requires member role or higher.
-         */
-        post: operations["upload_file_workspaces__workspace_id__files_post"];
-        delete?: never;
+        delete: operations["delete_my_account_users_me_delete"];
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/files/{file_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get File
-         * @description Get a single file. Must be a workspace member.
-         */
-        get: operations["get_file_files__file_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete File
-         * @description Delete a file. Requires admin/owner.
-         */
-        delete: operations["delete_file_files__file_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update File
-         * @description Update a file's metadata. Requires creator or admin/owner.
-         */
-        patch: operations["update_file_files__file_id__patch"];
         trace?: never;
     };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActivityOut */
+        ActivityOut: {
+            /** Id */
+            id: string;
+            /** Workspace Id */
+            workspace_id: string;
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Name */
+            actor_name: string;
+            /** Verb */
+            verb: string;
+            /** Target Type */
+            target_type: string;
+            /** Target Id */
+            target_id: string;
+            /** Target Label */
+            target_label: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** AuthUser */
         AuthUser: {
             /** Id */
@@ -806,6 +1342,12 @@ export interface components {
         Body_upload_file_workspaces__workspace_id__files_post: {
             /** File */
             file: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Message Id */
+            message_id?: string | null;
         };
         /** ChannelCreate */
         ChannelCreate: {
@@ -865,6 +1407,40 @@ export interface components {
             /** Type */
             type?: ("general" | "project" | "private") | null;
         };
+        /** DMChannelOut */
+        DMChannelOut: {
+            /** Id */
+            id: string;
+            /** Workspace Id */
+            workspace_id: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+            /** Created By */
+            created_by: string;
+            /** Is Private */
+            is_private: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Peer Id */
+            peer_id?: string | null;
+            /** Peer Name */
+            peer_name?: string | null;
+        };
+        /** DMCreate */
+        DMCreate: {
+            /** User Id */
+            user_id: string;
+        };
+        /** DeleteAccountIn */
+        DeleteAccountIn: {
+            /** Password */
+            password: string;
+        };
         /** EventCreate */
         EventCreate: {
             /** Title */
@@ -889,6 +1465,12 @@ export interface components {
              * @enum {string}
              */
             event_type: "deadline" | "exam" | "meeting" | "reminder";
+            /**
+             * Recurrence
+             * @default none
+             * @enum {string}
+             */
+            recurrence: "none" | "daily" | "weekly" | "monthly";
             /** Project Id */
             project_id?: string | null;
         };
@@ -918,6 +1500,13 @@ export interface components {
             /** Event Type */
             event_type: string;
             /**
+             * Recurrence
+             * @default none
+             */
+            recurrence: string;
+            /** Occurrence Id */
+            occurrence_id?: string | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -942,6 +1531,8 @@ export interface components {
             all_day?: boolean | null;
             /** Event Type */
             event_type?: ("deadline" | "exam" | "meeting" | "reminder") | null;
+            /** Recurrence */
+            recurrence?: ("none" | "daily" | "weekly" | "monthly") | null;
             /** Project Id */
             project_id?: string | null;
         };
@@ -949,6 +1540,12 @@ export interface components {
         FileUpdate: {
             /** Name */
             name?: string | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Message Id */
+            message_id?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -972,7 +1569,7 @@ export interface components {
              * @default member
              * @enum {string}
              */
-            role: "owner" | "admin" | "member" | "guest";
+            role: "co-owner" | "admin" | "member" | "guest";
         };
         /** InviteOut */
         InviteOut: {
@@ -1005,7 +1602,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "owner" | "admin" | "member" | "guest";
+            role: "co-owner" | "admin" | "member" | "guest";
         };
         /** LoginIn */
         LoginIn: {
@@ -1023,7 +1620,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "owner" | "admin" | "member" | "guest";
+            role: "co-owner" | "admin" | "member" | "guest";
         };
         /** MessageCreate */
         MessageCreate: {
@@ -1056,11 +1653,54 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Reactions
+             * @default []
+             */
+            reactions: components["schemas"]["ReactionSummary"][];
         };
         /** MessageUpdate */
         MessageUpdate: {
             /** Content */
             content?: string | null;
+        };
+        /**
+         * MyTaskOut
+         * @description TaskOut enriched with project/workspace names for cross-workspace views.
+         */
+        MyTaskOut: {
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Assignee Id */
+            assignee_id: string | null;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string | null;
+            /** Status */
+            status: string;
+            /** Priority */
+            priority: string;
+            /** Position */
+            position: number;
+            /** Due At */
+            due_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Project Name */
+            project_name: string;
+            /** Workspace Name */
+            workspace_name: string;
         };
         /** NotificationCreate */
         NotificationCreate: {
@@ -1070,7 +1710,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "file-upload" | "mention" | "task-assigned" | "workspace-invite" | "message" | "other";
+            type: "file-upload" | "mention" | "task-assigned" | "workspace-invite" | "message" | "dm" | "thread" | "other";
             /** Title */
             title: string;
             /** Content */
@@ -1088,6 +1728,8 @@ export interface components {
             title: string;
             /** Content */
             content: string | null;
+            /** Link */
+            link?: string | null;
             /** Read */
             read: boolean;
             /**
@@ -1186,6 +1828,35 @@ export interface components {
             /** Parent Id */
             parent_id?: string | null;
         };
+        /** PageVersionOut */
+        PageVersionOut: {
+            /** Id */
+            id: string;
+            /** Page Id */
+            page_id: string;
+            /** Version */
+            version: number;
+            /** Title */
+            title: string;
+            /** Content */
+            content: string | null;
+            /** Author Id */
+            author_id: string | null;
+            /** Author Name */
+            author_name?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** PresenceIn */
+        PresenceIn: {
+            /** Status */
+            status: string;
+            /** Status Message */
+            status_message?: string | null;
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Name */
@@ -1226,6 +1897,25 @@ export interface components {
             description?: string | null;
             /** Status */
             status?: string | null;
+        };
+        /** ReactionSummary */
+        ReactionSummary: {
+            /** Emoji */
+            emoji: string;
+            /** Count */
+            count: number;
+            /** User Ids */
+            user_ids: string[];
+        };
+        /** ReactionToggle */
+        ReactionToggle: {
+            /** Emoji */
+            emoji: string;
+        };
+        /** RefreshIn */
+        RefreshIn: {
+            /** Refresh Token */
+            refresh_token: string;
         };
         /** RegisterIn */
         RegisterIn: {
@@ -1281,6 +1971,8 @@ export interface components {
              * @default 0
              */
             position: number;
+            /** Due At */
+            due_at?: string | null;
         };
         /** TaskOut */
         TaskOut: {
@@ -1300,6 +1992,8 @@ export interface components {
             priority: string;
             /** Position */
             position: number;
+            /** Due At */
+            due_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1325,6 +2019,8 @@ export interface components {
             status?: ("backlog" | "todo" | "doing" | "done") | null;
             /** Position */
             position?: number | null;
+            /** Due At */
+            due_at?: string | null;
         };
         /** TokenOut */
         TokenOut: {
@@ -1367,6 +2063,13 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WSTicketOut */
+        WSTicketOut: {
+            /** Subprotocol */
+            subprotocol: string;
+            /** Expires In Seconds */
+            expires_in_seconds: number;
         };
         /** WorkspaceCreate */
         WorkspaceCreate: {
@@ -1495,6 +2198,46 @@ export interface operations {
             };
         };
     };
+    healthz_healthz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    readyz_readyz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     register_auth_register_post: {
         parameters: {
             query?: never;
@@ -1581,6 +2324,39 @@ export interface operations {
             };
         };
     };
+    refresh_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     logout_auth_logout_post: {
         parameters: {
             query?: never;
@@ -1597,6 +2373,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    logout_all_auth_logout_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    mint_ws_ticket_auth_ws_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WSTicketOut"];
                 };
             };
         };
@@ -1749,9 +2565,123 @@ export interface operations {
             };
         };
     };
-    list_workspace_invites_workspaces__workspace_id__invites_get: {
+    list_workspace_activity_workspaces__workspace_id__activity_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of activity entries to return (default 50, max 100). */
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_audit_log_workspaces__workspace_id__audit_log_get: {
+        parameters: {
+            query?: {
+                verb?: string | null;
+                target_type?: string | null;
+                actor_id?: string | null;
+                q?: string | null;
+                /** @description Maximum number of audit entries to return (default 100, max 500). */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transfer_ownership_workspaces__workspace_id__transfer_ownership_post: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferOwnershipIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_invites_workspaces__workspace_id__invites_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
             header?: never;
             path: {
                 workspace_id: string;
@@ -1916,7 +2846,12 @@ export interface operations {
     };
     list_workspace_members_workspaces__workspace_id__members_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
             header?: never;
             path: {
                 workspace_id: string;
@@ -2011,7 +2946,43 @@ export interface operations {
             };
         };
     };
-    transfer_ownership_workspaces__workspace_id__transfer_ownership_post: {
+    list_dms_workspaces__workspace_id__dms_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DMChannelOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_dm_workspaces__workspace_id__dms_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2022,17 +2993,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TransferOwnershipIn"];
+                "application/json": components["schemas"]["DMCreate"];
             };
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DMChannelOut"];
                 };
             };
             /** @description Validation Error */
@@ -2048,7 +3019,12 @@ export interface operations {
     };
     list_workspace_channels_workspaces__workspace_id__channels_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
             header?: never;
             path: {
                 workspace_id: string;
@@ -2149,7 +3125,12 @@ export interface operations {
     };
     list_channel_members_channels__channel_id__members_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
             header?: never;
             path: {
                 channel_id: string;
@@ -2245,7 +3226,14 @@ export interface operations {
     };
     list_channel_messages_channels__channel_id__messages_get: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string | null;
+                before?: string | null;
+                /** @description Maximum number of messages to return, counting back from the newest (default = the 1000 cap, i.e. the whole channel). */
+                limit?: number | null;
+                /** @description Skip this many messages starting from the newest. */
+                offset?: number | null;
+            };
             header?: never;
             path: {
                 channel_id: string;
@@ -2360,6 +3348,380 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    toggle_reaction_messages__message_id__reactions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReactionToggle"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReactionSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_projects_workspaces__workspace_id__projects_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_workspaces__workspace_id__projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_project_projects__project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_projects__project_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_project_projects__project_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_tasks_users_me_tasks_get: {
+        parameters: {
+            query?: {
+                /** @description Due-date bucket: overdue | today | week | later | none */
+                due?: string | null;
+                status?: string | null;
+                /** @description Maximum number of tasks to return (default = the 1000 cap). */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyTaskOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_tasks_projects__project_id__tasks_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_task_projects__project_id__tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_task_tasks__task_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_task_tasks__task_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
                 };
             };
             /** @description Validation Error */
@@ -2524,299 +3886,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_workspace_projects_workspaces__workspace_id__projects_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_project_workspaces__workspace_id__projects_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_project_projects__project_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_project_projects__project_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_project_projects__project_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_project_tasks_projects__project_id__tasks_get: {
-        parameters: {
-            query?: {
-                status?: string | null;
-            };
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_task_projects__project_id__tasks_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_task_tasks__task_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_task_tasks__task_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskOut"];
                 };
             };
             /** @description Validation Error */
@@ -2999,18 +4068,17 @@ export interface operations {
             };
         };
     };
-    ai_summarize_ai_summarize_post: {
+    list_page_backlinks_workspaces__workspace_id__pages__page_id__backlinks_get: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+            };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SummarizeRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3018,7 +4086,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SummarizeResponse"];
+                    "application/json": components["schemas"]["PageTreeItem"][];
                 };
             };
             /** @description Validation Error */
@@ -3032,14 +4100,14 @@ export interface operations {
             };
         };
     };
-    ai_search_ai_search_get: {
+    list_page_history_workspaces__workspace_id__pages__page_id__history_get: {
         parameters: {
-            query: {
-                q: string;
-                scope?: string;
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -3050,7 +4118,240 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SearchResponse"];
+                    "application/json": components["schemas"]["PageVersionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_page_version_workspaces__workspace_id__pages__page_id__restore__version__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                page_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_files_workspaces__workspace_id__files_get: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+                task_id?: string | null;
+                message_id?: string | null;
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_file_workspaces__workspace_id__files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_file_workspaces__workspace_id__files_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_file_files__file_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_file_files__file_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_file_files__file_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_uploaded_file_uploads__storage_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storage_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -3068,6 +4369,10 @@ export interface operations {
         parameters: {
             query?: {
                 unread_only?: boolean;
+                /** @description Maximum number of items to return. */
+                limit?: number | null;
+                /** @description Number of items to skip. */
+                offset?: number | null;
             };
             header?: never;
             path?: never;
@@ -3223,7 +4528,27 @@ export interface operations {
             };
         };
     };
-    list_workspace_files_workspaces__workspace_id__files_get: {
+    mark_all_notifications_read_notifications_mark_all_read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_presence_workspaces__workspace_id__presence_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3254,7 +4579,7 @@ export interface operations {
             };
         };
     };
-    upload_file_workspaces__workspace_id__files_post: {
+    set_my_presence_workspaces__workspace_id__presence_me_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3265,40 +4590,9 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_upload_file_workspaces__workspace_id__files_post"];
+                "application/json": components["schemas"]["PresenceIn"];
             };
         };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_file_files__file_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                file_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3320,23 +4614,27 @@ export interface operations {
             };
         };
     };
-    delete_file_files__file_id__delete: {
+    ai_summarize_ai_summarize_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                file_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SummarizeRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["SummarizeResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -3349,18 +4647,68 @@ export interface operations {
             };
         };
     };
-    update_file_files__file_id__patch: {
+    ai_search_ai_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                scope?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_my_data_users_me_export_get: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                file_id: string;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
+        };
+    };
+    delete_my_account_users_me_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["FileUpdate"];
+                "application/json": components["schemas"]["DeleteAccountIn"];
             };
         };
         responses: {
