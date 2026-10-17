@@ -3,7 +3,7 @@
 > **Ngày cập nhật:** 20/09/2026 (GMT+7)
 > **Trạng thái:** 🧊 **BẢO TRÌ — đóng băng từ 2026-09-20.** Ảnh chụp `main` ở `9105cdc` (kế hoạch realtime 9 PR đã chạy xong, #212–#220). Đọc §0 trước khi làm bất cứ việc gì.
 > **Repo:** `skappafrost/student-team-workspace`, public, GitHub Flow (`feat/*` + `harden/*` branches → draft PR → Skappa squash-merge)
-> **Verified on:** `cd backend && .venv/Scripts/python -m pytest -q` → **810 passed / 60 file** (SQLite; `test_manage.py::test_seed_demo_fresh_recreates_sqlite_file` vẫn là flake Windows tmp-file-lock đã biết — lần chạy này không tái hiện, xanh trên CI Linux) · `--cov` → coverage **91.98%** với floor `fail_under = 90` (`backend/pyproject.toml:50`) · `alembic heads` = 1 (`prs01_presence_state`) · `cd app && bunx playwright test --workers=1` → **37 passed / 10 spec file** · CI **6 jobs** (`ruff`, `backend`, `backend-pg`, `frontend`, `frontend-e2e`, `demo-pack`) — đo ngày 20/09/2026 trên `main` @ `9105cdc` (CI của PR cũng chạy đúng các lệnh đó trên Linux, nên mỗi số đo có hai lần xác nhận; `workers=1` vì 4 worker làm Next dev server crash — số đo 4/2/1 ghi trong `app/playwright.config.ts`). Chạy lại lệnh trước khi quote.
+> **Verified on:** `cd backend && .venv/Scripts/python -m pytest -q` → **810 passed / 60 file** (SQLite; `test_manage.py::test_seed_demo_fresh_recreates_sqlite_file` vẫn là flake Windows tmp-file-lock đã biết — lần chạy này không tái hiện, xanh trên CI Linux) · `--cov` → coverage **91.98%** với floor `fail_under = 90` (`backend/pyproject.toml:50`) · `alembic heads` = 1 (`r3_authorship_fks`) · `cd app && bunx playwright test --workers=1` → **37 passed / 10 spec file** · CI **6 jobs** (`ruff`, `backend`, `backend-pg`, `frontend`, `frontend-e2e`, `demo-pack`) — đo ngày 20/09/2026 trên `main` @ `9105cdc` (CI của PR cũng chạy đúng các lệnh đó trên Linux, nên mỗi số đo có hai lần xác nhận; `workers=1` vì 4 worker làm Next dev server crash — số đo 4/2/1 ghi trong `app/playwright.config.ts`). Chạy lại lệnh trước khi quote.
 
 ---
 
@@ -126,7 +126,7 @@ stw/                           ← monorepo (git, branch main — lấy sha bằ
 │   └── design-references/    ← usages.json: ledger adaptation theo Zero Native Design Rule
 ├── backend/                   ← FastAPI + Alembic + Docker Compose
 │   ├── routers/              ← 15 domain routers (thêm presence), 51 HTTP paths + 2 WS routes
-│   ├── alembic/versions/     ← head prs01_presence_state (1 head duy nhất)
+│   ├── alembic/versions/     ← head r3_authorship_fks (1 head duy nhất)
 │   └── test_*.py             ← 810 tests / 60 files, full suite xanh (SQLite + Postgres);
 │                                test_ws_handshake_subprotocol.py chặn hồi quy RFC 6455 §4.1
 ├── docs/API.md               ← endpoint map + realtime + BFF map + changelog

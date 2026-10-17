@@ -2,7 +2,7 @@
 
 > **Scope:** Local-first release. Cloud deployment is intentionally out of scope for now.
 > **Updated:** 2026-09-19
-> **Verified on:** `pytest -q` **770 collected / 769 passed** (SQLite) · `bun run typecheck` clean · `alembic heads` = 1 (`prs01_presence_state`) · `ruff check .` from `backend/` clean. Re-run these before quoting the line — every number in this repo's docs went stale once already by staying literal.
+> **Verified on:** `pytest -q` **770 collected / 769 passed** (SQLite) · `bun run typecheck` clean · `alembic heads` = 1 (`r3_authorship_fks`) · `ruff check .` from `backend/` clean. Re-run these before quoting the line — every number in this repo's docs went stale once already by staying literal.
 
 ---
 
@@ -92,13 +92,42 @@ hermes kanban boards set-default-workdir stw "C:/Users/Ha Trung/Documents/Team-w
 
 4. Reclaim and re-dispatch affected tasks.
 
+### Repair a database that `alembic upgrade head` refuses
+
+The state a database built by `Base.metadata.create_all` is left in — `app.py`'s startup path
+(T036) and every test database do exactly that: tables exist, `alembic_version` does not.
+`upgrade head` then starts from base and dies on the first `CREATE TABLE` with "table already
+exists" — which looks like a broken migration and is not one.
+
+```bash
+cd backend
+python manage.py db-status      # tables listed + "alembic version (applied): (none)"
+python manage.py stamp          # record `head` in `alembic_version`; no DDL, no data touched
+alembic upgrade head            # no-op now; later revisions apply normally
+```
+
+`stamp` refuses an empty database (`nothing to stamp: the database has no tables`) — there you
+want `alembic upgrade head`, which is the only schema source.
+
+**Docker volume case** (the same repair against the Postgres data in `postgres_data`): stop →
+stamp → up.
+
+```bash
+docker compose -f backend/docker-compose.yml stop backend   # postgres keeps running
+cd backend && python manage.py stamp --db-url postgresql+psycopg2://stw_user:stw_password@localhost:5432/stw_db
+docker compose -f backend/docker-compose.yml up -d
+```
+
+`--db-url` is required here because the stamp runs from the host venv, where the container's
+`postgres` hostname does not resolve; substitute the credentials from `backend/.env`.
+
 ### Verify a completed task
 
 Required evidence per task type:
 
 | Type | Evidence |
 |------|----------|
-| Backend | `pytest` pass count, migration head applied, `/health` 200 |
+| Backend | `pytest` pass count, migration head applied, `/readyz` 200 (`/health` is liveness only — it answers 200 on an empty schema) |
 | Frontend UI | Screenshot, `bunx oxlint --deny-warnings src` + typecheck + build pass, `bunx playwright test` pass |
 | Integration | End-to-end test result JSON, register/login flow works |
 | Docs | Commit hash, file path, no secrets |
@@ -108,8 +137,8 @@ Required evidence per task type:
 ## 5. Local run verification
 
 - [ ] Backend virtualenv created, dependencies installed, `backend/.env` copied from `.env.example` (Compose **fails** without it — `docker compose config` exits 1).
-- [ ] `alembic upgrade head` runs without error; `alembic heads` shows exactly 1 head.
-- [ ] `.venv/Scripts/python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload` starts and `/health` returns 200. (`--host` is the **bind** address; `NEXT_PUBLIC_API_URL` must still name the *page's* hostname — see §1.)
+- [ ] `alembic upgrade head` runs without error; `alembic heads` shows exactly 1 head (`r3_authorship_fks`). On a database that already has tables it can refuse with "table already exists" — that is the unstamped case, §4.
+- [ ] `.venv/Scripts/python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload` starts and `/readyz` returns 200. A 503 whose body says `db: true, schema_current: false, alembic_applied: []` means the chain never ran against this database — `/health` returning 200 only says the process is listening. (`--host` is the **bind** address; `NEXT_PUBLIC_API_URL` must still name the *page's* hostname — see §1.)
 - [ ] Frontend `app/.env.local` contains `NEXT_PUBLIC_API_URL=http://localhost:8000` (plus Sentry vars from `env.example.txt`, optional).
 - [ ] `bun run dev:webpack` starts the app at http://localhost:3000 (`--webpack` is mandatory — Turbopack is broken on this PC).
 - [ ] `make realtime` passes: it starts both servers itself and asserts a message sent by one browser renders in a second browser's channel. A `/ws/...` line in the uvicorn log is **not** this proof — `[accepted]` only means the application accepted.

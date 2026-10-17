@@ -6,7 +6,10 @@ const BACKEND_URL = process.env.STW_BACKEND_URL ?? 'http://localhost:8000';
 // The venv layout differs by platform and the specs need a real backend: every
 // one of them goes through the BFF at :3000, which proxies to :8000. Without a
 // live backend they would only be proving that Next can serve HTML.
-const BACKEND_PY = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' : '.venv/bin/python';
+// Exported because `tests/global-setup.ts` migrates the database with this exact
+// interpreter and cwd; a second copy of either would be free to drift.
+export const BACKEND_PY = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' : '.venv/bin/python';
+export const BACKEND_CWD = '../backend';
 
 /**
  * The database the started server must open.
@@ -23,10 +26,16 @@ const BACKEND_PY = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' :
  * e2e at its own file instead of writing fixtures into the developer's `stw.db`;
  * override with `DATABASE_URL` to test against a real dev database.
  */
-const E2E_DATABASE_URL = process.env.DATABASE_URL ?? 'sqlite:///./ci_e2e.db';
+export const E2E_DATABASE_URL = process.env.DATABASE_URL ?? 'sqlite:///./ci_e2e.db';
 
 export default defineConfig({
   testDir: './tests',
+  // Nothing migrates locally before uvicorn opens `E2E_DATABASE_URL`, so the schema
+  // comes from `app.py`'s startup `create_all` and a migration that dies on its
+  // first statement is unfeelable here. Re-running the chain against a stamped
+  // database is a no-op, so CI (which migrates in its own step) pays one command
+  // and nothing else.
+  globalSetup: './tests/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -53,9 +62,15 @@ export default defineConfig({
   webServer: [
     {
       command: `${BACKEND_PY} -m uvicorn app:app --port ${new URL(BACKEND_URL).port}`,
-      cwd: '../backend',
+      cwd: BACKEND_CWD,
       env: { ENVIRONMENT: 'dev', DATABASE_URL: E2E_DATABASE_URL },
-      url: `${BACKEND_URL}/health`,
+      // `/readyz`, not `/health`: `/health` touches no table and returns 200 on an
+      // empty schema, so "the backend came up" proved nothing about the database.
+      // `/readyz` (backend/logging_mw.py) is 200 only when the alembic chain is
+      // applied and stamped at the single declared head, and Playwright's probe
+      // accepts responses below 404 — so a 503 keeps it waiting rather than waving
+      // the run through. `/health` stays documented as the cheap liveness endpoint.
+      url: `${BACKEND_URL}/readyz`,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI
     },

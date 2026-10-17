@@ -15,6 +15,9 @@ Covers, each against an isolated ``tmp_path`` sqlite file:
   (exit 2, "no such user") and invalid new password (exit 2,
   "invalid password") — both clean, no traceback leak.
 - db-status reports exactly 1 alembic head plus per-table row counts.
+- migrate_to_head applies the chain in-process: fresh database, already-at-head
+  database (no-op), an unstamped create_all database (fails loudly), and it leaves
+  the process's log capture working.
 
 Isolation contract (T014 lesson): every test drives ``manage.main()``
 in-process with an explicit ``--db-url`` pointing at ``tmp_path``.
@@ -428,3 +431,69 @@ def test_db_status_lists_applied_revisions_after_a_stamp(tmp_path, capsys):
     assert len(lines) == 1, lines
     assert lines[0] != "alembic version (applied): (none)", lines[0]
     assert "manage.py stamp" not in lines[0]
+
+
+# ---------------------------------------------------------------------------
+# migrate_to_head: the in-process chain an entrypoint runs before it serves
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_to_head_builds_the_schema_on_a_fresh_database(tmp_path):
+    """An empty file comes back with every table and the head recorded.
+
+    This is the path `smoke_server.py` takes: without it the server binds, `/health`
+    answers 200, and every route that reads a table 500s — a smoke test that passes
+    on a database with no schema at all.
+    """
+    url = _db_url(tmp_path, "migrate.db")
+
+    assert manage.migrate_to_head(url) == manage._alembic_heads()
+    assert _counts(url) == {
+        "users": 0,
+        "workspaces": 0,
+        "projects": 0,
+        "tasks": 0,
+    }
+
+
+def test_migrate_to_head_is_a_no_op_once_the_database_is_at_head(tmp_path):
+    """Running the chain twice is safe, which is what makes a migrate step cheap.
+
+    CI migrates `ci_e2e.db` in its own step and Playwright's globalSetup runs the
+    same chain again against the same file; the second run must not fail.
+    """
+    url = _db_url(tmp_path, "migrate_twice.db")
+    first = manage.migrate_to_head(url)
+
+    assert manage.migrate_to_head(url) == first
+
+
+def test_migrate_to_head_stops_at_an_unstamped_create_all_database(tmp_path):
+    """The loud half of the contract: a repaired database is required first.
+
+    Failing here instead of quietly falling back to `create_all` is the point —
+    `stamp` is the documented repair, and an entrypoint that swallowed this error
+    would be the old bug wearing a new coat.
+    """
+    url = _create_all_url(tmp_path, "unstamped_migrate.db")
+
+    with pytest.raises(Exception, match="already exists"):
+        manage.migrate_to_head(url)
+
+
+def test_migrate_to_head_leaves_log_capture_working(tmp_path, caplog):
+    """Same trap `stamp` hit: `env.py`'s `fileConfig()` disables `stw.*` loggers.
+
+    A smoke run that mutes the app's logging is a smoke run whose warnings vanish,
+    so the guard is tested for the upgrade path too, not only for `stamp`.
+    """
+    import logging
+
+    url = _db_url(tmp_path, "migrate_logging.db")
+    manage.migrate_to_head(url)
+
+    with caplog.at_level(logging.WARNING, logger="stw"):
+        logging.getLogger("stw").warning("after migrate")
+    assert "after migrate" in caplog.text, (
+        "the alembic call left the stw logger disabled"
+    )

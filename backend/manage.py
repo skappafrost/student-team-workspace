@@ -17,6 +17,10 @@ No new dependencies are introduced.
 built for the override; the global ``database.engine`` is never rebound, so
 this module is also safe to drive in-process (tests, REPL).
 
+``migrate_to_head(url)`` is importable rather than a subcommand: it applies the
+alembic chain in this process, which is what an entrypoint that opens a database
+runs before it serves (see ``smoke_server.py``).
+
 ``maintenance`` wraps :mod:`maintenance` (upload orphan sweeper + retention).
 Default is a non-destructive dry-run; ``--purge --apply`` is required for any
 deletion. Retention-based deletion is additionally opt-in via the
@@ -374,15 +378,45 @@ def _preserving_logging():
                 logger.disabled = disabled[name]
 
 
+def migrate_to_head(db_url: str) -> list[str]:
+    """Apply the alembic chain in this process; return the revisions recorded.
+
+    Every entrypoint that opens a database has to migrate it before serving. A
+    schema materialised by `Base.metadata.create_all` instead (`app.py`'s startup
+    path, T036, and `conftest.py` per test) hides a broken migration: the app works
+    anyway, and so do the tests. An entrypoint therefore calls this instead of
+    shelling out to `alembic`, and gets the two guards `stamp` needs for the same
+    reasons: `_alembic_target` makes the named URL the database alembic actually
+    opens, and `_preserving_logging` stops `env.py`'s `fileConfig()` from disabling
+    this process's `stw.*` loggers.
+
+    Raises when the chain fails. The failure a caller hits first is an unstamped
+    database: tables from `create_all`, no `alembic_version` row, so the first
+    unconditional `create_table` in `9926de6687ec_schema_v1.py` dies with
+    "table already exists". The repair is `python manage.py stamp --db-url <url>`.
+    """
+    from alembic import command
+
+    cfg = _alembic_config(db_url)
+    with _alembic_target(db_url), _preserving_logging():
+        command.upgrade(cfg, "head")
+
+    eng = database._make_engine(db_url)
+    try:
+        return _applied_revisions_for(eng)
+    finally:
+        eng.dispose()
+
+
 def cmd_stamp(args: argparse.Namespace) -> int:
     """Record the revision a database is at, without touching its schema.
 
-    This is the repair for the stuck state this project produces by default. The
-    app calls `Base.metadata.create_all` at startup, and `conftest.py` does it per
-    test, so a typical dev database has every table and no `alembic_version` row.
-    `alembic upgrade head` then starts from base and dies on the first
-    unconditional `create_table` in `9926de6687ec_schema_v1.py`, which reads as a
-    broken migration when the actual problem is an unstamped database.
+    This is the repair for the stuck state this project produces by default. Both
+    `app.py`'s startup path (T036) and `conftest.py` build tables with
+    `Base.metadata.create_all`, so a database created that way has every table and
+    no `alembic_version` row. `alembic upgrade head` then starts from base and dies
+    on the first unconditional `create_table` in `9926de6687ec_schema_v1.py`, which
+    reads as a broken migration when the actual problem is an unstamped database.
 
     Stamping is a statement of fact, so it refuses when the fact is false: no
     tables at all means the chain should be *applied*, not recorded.
@@ -396,8 +430,8 @@ def cmd_stamp(args: argparse.Namespace) -> int:
     if not tables:
         print(
             "nothing to stamp: the database has no tables. Run "
-            "`alembic upgrade head` (or omit --db-url and let the app create them) "
-            "instead of recording a revision this schema never reached.",
+            "`alembic upgrade head` against it instead of recording a revision "
+            "this schema never reached.",
             file=sys.stderr,
         )
         return 2
