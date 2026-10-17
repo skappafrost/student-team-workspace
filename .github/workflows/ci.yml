@@ -94,7 +94,7 @@ jobs:
         env:
           ENVIRONMENT: test
           PGPASSWORD: stw_test
-          CI_DB_URL: postgresql://stw_test:stw_test@localhost:5432/stw_ci
+          CI_DB_URL: postgresql+psycopg2://stw_test:stw_test@localhost:5432/stw_ci
         run: |
           psql -h localhost -U stw_test -d stw_test -v ON_ERROR_STOP=1 \
             -c 'CREATE DATABASE stw_ci OWNER stw_test'
