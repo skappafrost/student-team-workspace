@@ -13,6 +13,7 @@ from fastapi import File as FileParam
 from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 import models
 import pagination as pagination_lib
@@ -127,6 +128,13 @@ def _ascii_slug(name: str) -> str:
     slug = re.sub(r"\.{2,}", "_", slug)  # collapse dot-runs — no '..' in keys
     slug = slug.strip("._")
     return slug or "file"
+
+
+def _write_upload_bytes(path: Path, content: bytes) -> None:
+    """Put the validated body on disk. Named and separate so the upload handler can
+    run it off the event loop: a 25 MB synchronous write blocks every coroutine
+    sharing the loop, including the sockets that carry chat and presence."""
+    path.write_bytes(content)
 
 
 def _stream_upload(file: UploadFile) -> bytes:
@@ -375,8 +383,10 @@ async def upload_file(
     # 2) extension allow-list (rejects spoofed/no-extension uploads)
     _check_extension(original_name)
     # 3) stream-read the body with a server-side size cap (413 mid-stream,
-    #    before anything touches disk)
-    content = _stream_upload(file)
+    #    before anything touches disk). Off the loop: reading a spooled upload is
+    #    blocking file I/O, and at the 25 MB cap it is a stall every open socket
+    #    would pay for.
+    content = await run_in_threadpool(_stream_upload, file)
     size = len(content)
     if size == 0:
         raise HTTPException(status_code=422, detail="File is empty")
@@ -393,7 +403,7 @@ async def upload_file(
     # sanitized name so identical inputs produce identical slug parts.
     storage_key = f"{uuid.uuid4()}_{_ascii_slug(original_name)}"
     file_path = _upload_dir() / storage_key
-    file_path.write_bytes(content)
+    await run_in_threadpool(_write_upload_bytes, file_path, content)
 
     db_file = models.File(
         workspace_id=workspace_id,
