@@ -28,12 +28,18 @@ MAX_EXPANSION_RANGE = timedelta(days=366 * 5)
 
 #: Iterations one event's expansion may spend, separate from ``cap``: ``cap``
 #: bounds the rows returned, this bounds the work done to find them, because an
-#: iteration outside the range appends nothing. Real use is the calendar page
-#: opening one month (~31 daily steps), and the widest range the endpoint admits
-#: is ~1,830 — so this keeps an order of magnitude past what a legitimate request
-#: can reach, and stays well clear of the 2,912,442 steps one year-9999 window
-#: used to spend for a single row.
+#: iteration outside the range appends nothing. The walk starts at the first
+#: candidate occurrence rather than at the event's anchor (see ``_walk_seed``), so
+#: a request costs one step per occurrence in its own window — a calendar month is
+#: ~31 steps and the widest range the endpoint admits ~1,830, whatever the event's
+#: age. This bound is therefore a backstop no legitimate request reaches; it is
+#: what keeps a hand-built or future call from walking the calendar again, the way
+#: the unbounded code spent 2,912,442 steps on a single one-day year-9999 window.
 MAX_EXPANSION_STEPS = 20_000
+
+#: The periods a walk can skip arithmetically, because they land on a whole
+#: number of days. Monthly steps by calendar month and is handled separately.
+FIXED_PERIODS = {"daily": timedelta(days=1), "weekly": timedelta(weeks=1)}
 
 
 def _can_modify_event(
@@ -154,6 +160,80 @@ def _occurrence_end(start_at: datetime, duration: timedelta | None) -> datetime 
     return start_at + duration
 
 
+def _earliest_relevant_start(range_start: datetime, duration: timedelta | None) -> datetime:
+    """The first occurrence start that can still reach into the range.
+
+    An occurrence is kept when it ends at or after ``range_start``, or when it has
+    no duration and starts there, so anything beginning before
+    ``range_start - duration`` is out of the answer for that reason alone. The
+    shift is clamped at both ends of the calendar, because both directions are
+    reachable: a duration long enough to leave it backwards overlaps every window,
+    so nothing may be skipped, and ``end_at`` is never validated against
+    ``start_at``, so a negative duration shifts the threshold forwards past every
+    window there is.
+    """
+    if not duration:
+        return range_start
+    if duration > timedelta():
+        return datetime.min if duration > range_start - datetime.min else range_start - duration
+    if -duration > datetime.max - range_start:
+        return datetime.max
+    return range_start - duration
+
+
+def _monthly_at(start: datetime, months: int) -> datetime:
+    """The occurrence ``months`` steps into a monthly walk, computed in one step.
+
+    ``_add_months`` clamps the day-of-month whenever it lands on a shorter month
+    and never restores it, so a Jan 31 anchor fires on the 28th from February
+    onwards: the date at step ``months`` depends on every month crossed on the way,
+    not just on the target month. The closed form has to reproduce that, or a
+    seeded walk would answer a far window with dates the same event answers a near
+    one differently.
+    """
+    if months <= 0:
+        return start
+    day = start.day
+    # 400 months is a whole Gregorian cycle, which always contains a 28-day
+    # February — the shortest month there is — so further steps cannot lower the
+    # day past it and the sweep does not need to cover them.
+    probe = start.replace(day=1)
+    for offset in range(1, min(months, 400) + 1):
+        step = _add_months(probe, offset)
+        day = min(day, calendar.monthrange(step.year, step.month)[1])
+    return _add_months(start.replace(day=day), months)
+
+
+def _walk_seed(
+    start: datetime, range_start: datetime, duration: timedelta | None, recurrence: str
+) -> datetime:
+    """Where the walk begins: the last period that could still reach the range.
+
+    Stepping from the event's own anchor ties the answer to the event's age,
+    because the walk is bounded by how far it can go: a daily one reaches roughly
+    55 years past the anchor and stops, so a legitimate one-day window beyond that
+    depth used to come back empty. Seeding at the first candidate costs one step
+    per occurrence inside the requested window wherever the calendar puts it, and
+    every period before the seed provably ends before the range.
+
+    Daily/weekly skip whole periods, which floors to at most one step short of the
+    candidate; monthly steps by calendar month, whose day-of-month clamps, so it
+    backs off a further month. Both leave the decision to the loop's own filter,
+    which is what keeps the rows exact rather than merely early.
+    """
+    threshold = _earliest_relevant_start(range_start, duration)
+    period = FIXED_PERIODS.get(recurrence)
+    if period is not None:
+        # The skip is arithmetic driven by caller-supplied bounds, so it is
+        # clamped to the calendar rather than assumed to fit inside it.
+        reachable = (datetime.max - start) // period
+        whole = min(max((threshold - start) // period, 0), reachable)
+        return start + whole * period
+    months = (threshold.year - start.year) * 12 + threshold.month - start.month - 1
+    reachable = (datetime.max.year - start.year) * 12 + datetime.max.month - start.month
+    return _monthly_at(start, min(max(months, 0), reachable))
+
+
 def _expand_occurrences(
     event: models.Event,
     range_start: datetime | None,
@@ -164,11 +244,14 @@ def _expand_occurrences(
 
     RRULE-lite: daily / weekly / monthly steps from the base start_at.
 
-    Two independent bounds stop the walk: ``cap`` on the rows appended and
+    The walk is seeded at the first occurrence that can still reach the range
+    (``_walk_seed``), not at the anchor, so which rows come back does not depend on
+    how old the event is. Two bounds stop it: ``cap`` on the rows appended and
     ``MAX_EXPANSION_STEPS`` on the iterations taken — an iteration that falls
-    outside the range appends nothing, so ``cap`` alone does not bound the work.
-    Neither one bounds the *arithmetic*, which is why both date computations
-    clamp (see ``_next_occurrence`` and ``_occurrence_end``).
+    outside the range appends nothing, so ``cap`` alone does not bound the work, and
+    after the seed only the backstop can end a walk early. Neither one bounds the
+    *arithmetic*, which is why both date computations clamp (see
+    ``_next_occurrence`` and ``_occurrence_end``).
 
     The event's timestamps and the range bounds are both normalized to naive
     UTC before stepping, because the two come from different sources with
@@ -186,7 +269,7 @@ def _expand_occurrences(
     duration = (end - start) if end else None
 
     out: list[schemas.EventOut] = []
-    start_at: datetime | None = start
+    start_at: datetime | None = _walk_seed(start, rs, duration, event.recurrence)
     steps = 0
     while (
         start_at is not None
