@@ -79,7 +79,7 @@ alembic upgrade head
 
 `alembic` resolves the same database the app opens: `backend/alembic/env.py` reads `DATABASE_URL` from the process environment first and otherwise falls back to `config.Settings`, which is what reads `.env`. Copying `.env.example` to `.env` is enough for both; `alembic.ini`'s `sqlalchemy.url` is no longer consulted (it still holds the `driver://user:pass@localhost/dbname` template placeholder).
 
-**One exception, and it bites quietly.** A database whose tables came from `Base.metadata.create_all` — the startup path `app.py` still runs (T036) and the one every test database uses — has no `alembic_version` row, so `alembic upgrade head` treats it as brand-new and dies on the first `CREATE TABLE` with "table already exists". That reads as a broken migration; it is an unstamped database.
+**One exception, and it bites quietly.** A database whose tables came from `Base.metadata.create_all` — every test database (`backend/conftest.py`), and any developer file created before the server stopped building its own schema — has no `alembic_version` row, so `alembic upgrade head` treats it as brand-new and dies on the first `CREATE TABLE` with "table already exists". That reads as a broken migration; it is an unstamped database.
 
 ### Repair recipe: an existing database `alembic upgrade head` refuses
 
@@ -108,6 +108,7 @@ docker compose -f backend/docker-compose.yml up -d             # start again; sc
 ## 5. Start the development server
 
 ```bash
+alembic upgrade head                                  # §4 — the only schema source; the server creates none
 uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 

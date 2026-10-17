@@ -3,11 +3,12 @@
 Two contracts, both checked against a database that was actually created by
 `alembic upgrade head`, not by `create_all`:
 
-1. Every index the migration chain creates is also declared on the model. Today
-   21 of the 22 indexes exist only in migrations, so every `create_all` database
-   (every dev DB, both backend CI jobs, all 60 test databases) runs without them,
-   and a future `--autogenerate` would propose dropping 21 of them. A drift test
-   is the only thing that keeps the two lists from separating again.
+1. Every index the migration chain creates is also declared on the model. 21 of
+   the 22 existed only in migrations, so every `create_all` database (the test
+   databases `conftest.py` builds, and every developer file from before the
+   server stopped creating its own schema) ran without them, and a future
+   `--autogenerate` would have proposed dropping 21 of them. A drift test is the
+   only thing that keeps the two lists from separating again.
 2. A row can actually be inserted into `pages` on a migrated SQLite database.
    `add_kb_pages.py` used `server_default=sa.text("now()")` — the only such
    spelling in the chain — and SQLite has no `now()`, so the DEFAULT is accepted
