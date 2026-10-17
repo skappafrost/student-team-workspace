@@ -155,6 +155,9 @@ test('the roster and the invite list are the backend rows, and a cookie-less wri
 test('a page list the backend refused is an error, not a fabricated tree', async () => {
   test.setTimeout(180_000);
 
+  // No cookie anywhere: a bare `fetch` builds its headers from scratch, so this
+  // answers the handler's own 401, not the no-workspace 404 a `bff()` call with a
+  // bogus token falls into.
   const anonymous = await fetch(`${APP}/api/pages`);
   expect(anonymous.status).toBe(401);
   expect(((await anonymous.json()) as { pages?: unknown }).pages).toBeUndefined();
