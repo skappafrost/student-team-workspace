@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, pool
 
 import models  # noqa: F401  - registers all models on Base.metadata
 from alembic import context
+from config import Settings
 from database import Base
 
 # this is the Alembic Config object, which provides
@@ -20,14 +21,26 @@ target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
-    """Return the database URL from the environment or alembic.ini."""
+    """Return the database the application itself will open.
+
+    `DATABASE_URL` stays first, and the fallback builds a **fresh** `Settings()`
+    rather than reading the `settings` singleton: `manage.py` stamps a `--db-url`
+    by setting `os.environ["DATABASE_URL"]` and then calling alembic in the same
+    process, *after* `config` was imported — so an import-time cached value would
+    migrate (and stamp) a different database than the one it reports on.
+
+    Resolving through `Settings` is what makes the two agree: the app reads `.env`
+    (`config.py`'s `env_file=".env"`), so this does too. `alembic.ini`'s
+    `sqlalchemy.url` is not consulted — it still holds the untouched
+    `driver://user:pass@localhost/dbname` template placeholder, and the fallback
+    before it was a hard-coded Postgres URL with a fake password, so a missing
+    config quietly tried to reach a server nobody configured instead of naming the
+    database the app would open.
+    """
     env_url = os.getenv("DATABASE_URL")
     if env_url:
         return env_url
-    ini_url = config.get_main_option("sqlalchemy.url")
-    if ini_url and ini_url != "driver://user:pass@localhost/dbname":
-        return ini_url
-    return "postgresql+psycopg2://postgres:***@localhost:5432/stw"
+    return Settings().database_url
 
 
 def run_migrations_offline() -> None:
@@ -60,8 +73,6 @@ def run_migrations_online() -> None:
 
     """
     url = get_database_url()
-    configuration = config.get_section(config.config_ini_section, {}).copy()
-    configuration["sqlalchemy.url"] = url
 
     connectable = create_engine(url, poolclass=pool.NullPool)
 

@@ -1,6 +1,6 @@
 # Student Team Workspace — one-command dev shortcuts (pure make, no extra deps).
 #
-#   make dev       — Postgres (Docker) + backend (uvicorn :8000) + frontend (Next.js :3000, webpack)
+#   make dev       — Postgres (Docker), migrate, backend (uvicorn :8000) + frontend (Next.js :3000, webpack)
 #   make test      — backend pytest + frontend typecheck
 #   make realtime  — start both servers and prove a message crosses to a second browser
 #   make verify    — test + realtime
@@ -16,8 +16,14 @@ endif
 
 .PHONY: dev test seed bench realtime verify
 
+# The migration runs against the database the server then opens: with no
+# DATABASE_URL exported here, both resolve `Settings.database_url` (`.env`, else
+# sqlite:///./stw.db) — NOT the Postgres container above. Which engine `make dev`
+# should use is a separate decision, so do not "fix" this by pointing it at
+# docker-compose.yml without deciding it.
 dev:
 	docker compose -f backend/docker-compose.yml up -d postgres
+	cd backend && ENVIRONMENT=dev $(BACKEND_PY) -m alembic upgrade head
 	cd backend && ENVIRONMENT=dev $(BACKEND_PY) -m uvicorn app:app --reload --port 8000 & \
 	cd app && bun run dev:webpack
 

@@ -52,11 +52,28 @@ export default defineConfig({
   // Windows: killing the subshell that ran uvicorn left the server listening.
   webServer: [
     {
-      command: `${BACKEND_PY} -m uvicorn app:app --port ${new URL(BACKEND_URL).port}`,
+      // Migrate, then serve, in one `&&`-chained command: Playwright spawns
+      // `command` with `shell: true`, so uvicorn only starts after
+      // `alembic upgrade head` exits 0, and the `cwd` + `env` below make the
+      // chain and the server target the same file. A `globalSetup` migration
+      // cannot work here: Playwright sets up `webServer` before it runs
+      // `globalSetup`, so the server would already have opened the database.
+      // Re-running the chain against a stamped database is a no-op, so CI
+      // (which migrates in its own step) pays one extra command and nothing else.
+      command: `${BACKEND_PY} -m alembic upgrade head && ${BACKEND_PY} -m uvicorn app:app --port ${new URL(BACKEND_URL).port}`,
       cwd: '../backend',
       env: { ENVIRONMENT: 'dev', DATABASE_URL: E2E_DATABASE_URL },
-      url: `${BACKEND_URL}/health`,
+      // `/readyz`, not `/health`: `/health` touches no table and returns 200 on an
+      // empty schema, so "the backend came up" proved nothing about the database.
+      // `/readyz` (backend/logging_mw.py) is 200 only when the alembic chain is
+      // applied and stamped at the single declared head, and Playwright's probe
+      // accepts responses below 404 — so a 503 keeps it waiting rather than waving
+      // the run through. `/health` stays documented as the cheap liveness endpoint.
+      url: `${BACKEND_URL}/readyz`,
       timeout: 120_000,
+      // Something already answering on :8000 (locally) skips this whole
+      // `command` — the migration included. The bootstrap this entry proves
+      // therefore holds from a cold start only.
       reuseExistingServer: !process.env.CI
     },
     {

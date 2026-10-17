@@ -222,7 +222,7 @@ CI runs the jobs in `.github/workflows/ci.yml` on every push and PR — `ruff` (
 | Feature surface | ✅ all core modules shipped | 51 HTTP paths · 2 WebSocket routes · 20 mapped tables · 15 backend routers (recount: walk `app.routes` after `import app`) |
 | Backend suite | ✅ 770 collected, 769 passing | `pytest -q` on SQLite; same suite on Postgres 16 in CI |
 | Client tests | 🔶 **no automated suite** | CI runs `typecheck` only — no lint, build or tests; 2 Playwright specs exist but nothing runs them; verification is the manual `e2e-*.mjs` scripts |
-| Alembic | ✅ single head `prs01_presence_state` | `alembic heads`; `/readyz` 503s if it ever splits |
+| Alembic | ✅ single head `r3_authorship_fks` | `alembic heads`; `/readyz` 503s if it ever splits |
 | Type check | ✅ clean | `tsc --noEmit` |
 | Backend lint | ✅ 0 errors, gated in CI | `ruff` job runs `ruff check .` from `backend/` on every PR |
 | Contrast | 🔶 manual only | light/dark screenshots in `app/qa-evidence/`; no automated WCAG gate exists |
@@ -274,7 +274,7 @@ Enforcement, not aspiration:
 ## Dev shortcuts
 
 ```bash
-make dev    # Postgres (Docker) + backend uvicorn :8000 + frontend :3000 (webpack)
+make dev    # Postgres (Docker) + `alembic upgrade head` + backend uvicorn :8000 + frontend :3000 (webpack)
 make test   # backend pytest + frontend typecheck
 make seed   # demo data (until manage.py lands)
 ```

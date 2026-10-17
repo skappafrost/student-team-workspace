@@ -68,3 +68,8 @@ htmlcov/
 # stray gitlink got committed once already). A repo-root `ruff check .` also
 # walks them and reports 146 phantom errors.
 .worktrees/
+
+# Agent scratch directory (task briefs, hand-off reports, review notes). It sits
+# beside the code but is not part of it: tracking it puts working noise into every
+# diff, and a reviewer cannot tell the change from the paperwork about the change.
+.superpowers/
