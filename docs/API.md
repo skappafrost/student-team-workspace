@@ -81,7 +81,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/events` | POST `201` (any member); GET takes `?start=&end=` (ISO dates). A range wider than 1830 days is `400` (`routers/events.py:MAX_EXPANSION_RANGE`), and each recurring event's walk stops at 200 occurrences or 20,000 stepped dates, whichever comes first (`routers/events.py:MAX_EXPANSION_STEPS`) — a year-9999 range used to spend ~2.9M iterations for one row, and its weekly shape answered `500` |
+| GET, POST | `/workspaces/{id}/events` | POST `201` (any member); GET takes `?start=&end=` (ISO dates). A range wider than 1830 days is `400` (`routers/events.py:MAX_EXPANSION_RANGE`). Each recurring event's walk starts at the first occurrence that could still reach the range, so a window costs one step per occurrence inside it whatever the event's age; it stops at 200 occurrences or 20,000 stepped dates, whichever comes first (`routers/events.py:MAX_EXPANSION_STEPS`). The step limit is a backstop — reaching it needs a range wider than 20,000 periods, past what the limit above admits — and a walk it does cut short still answers `200`, with the rest of the range missing and no flag. A year-9999 range used to spend ~2.9M iterations for one row, and its weekly shape answered `500` |
 | GET, PATCH, DELETE | `/events/{id}` | PATCH/DELETE creator or admin+ |
 
 **Recurrence**: events carry `recurrence: none|daily|weekly|monthly` (`EventType`: `deadline|exam|meeting|reminder`). When you pass a `start`/`end` range, recurring events expand into occurrences with `occurrence_id` (`{event_id}@{date}`); monthly clamps to month length (Jan 31 → Feb 28). Without a range you get base events only.
