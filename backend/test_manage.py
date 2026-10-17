@@ -333,9 +333,9 @@ def _applied(url: str) -> list[str]:
 def test_stamp_repairs_a_create_all_database(tmp_path):
     """The full story in one test: upgrade dies, stamp records, upgrade is a no-op.
 
-    `Base.metadata.create_all` is what `app.py` runs at startup and what
-    `conftest.py` runs per test, so "every table, no alembic_version" is the state
-    most databases on this project are actually in. `alembic upgrade head` reads
+    `Base.metadata.create_all` is what `conftest.py` runs per test, and was what
+    `app.py` ran at startup, so "every table, no alembic_version" is the state
+    most existing databases on this project are in. `alembic upgrade head` reads
     that as "start from base" and dies on the first unconditional `create_table`,
     which looks like a broken migration and is not one.
     """

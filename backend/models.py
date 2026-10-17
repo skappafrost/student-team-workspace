@@ -740,9 +740,10 @@ WorkspaceMembership = WorkspaceMember
 #
 # `alembic/versions/a7c15_nplus1_indexes.py` and its siblings create 21 indexes
 # that `Base.metadata` did not describe, so every `create_all` database — each
-# developer's `stw.db`, both backend CI jobs, all 60 test databases — ran the
-# list endpoints without them, and any future `--autogenerate` would have
-# proposed dropping 21 of them. `test_schema_drift.py` fails if the two lists
+# test database `conftest.py` builds, and each developer's `stw.db` from before
+# the server stopped creating its own schema — ran the list endpoints without
+# them, and any future `--autogenerate` would have proposed dropping 21 of them.
+# `test_schema_drift.py` fails if the two lists
 # separate again, which is the reason these are declared here rather than left in
 # the migration chain alone.
 #

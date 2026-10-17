@@ -11,13 +11,13 @@ const BACKEND_PY = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' :
 /**
  * The database the started server must open.
  *
- * Set explicitly rather than inherited, because the default is the bug this
- * removes: with no `DATABASE_URL` the app falls back to `sqlite:///./stw.db`
+ * Set explicitly rather than inherited, because migrator and server have to be
+ * aimed at the same file for the migration to mean anything: with no
+ * `DATABASE_URL` the app falls back to `sqlite:///./stw.db`
  * (`backend/config.py:21`) while CI migrates a *different* file
- * (`.github/workflows/ci.yml`, "Prepare backend database"), and `backend/app.py:107`
- * then `create_all`s whatever schema it needs. The migration step looked like a
- * gate and was not one: a migration that fails outright still left Playwright
- * green.
+ * (`.github/workflows/ci.yml`, "Prepare backend database"). The server creates no
+ * schema of its own, so the specs run against exactly what `alembic upgrade head`
+ * built, and the `/readyz` probe below holds the run at 503 until that succeeded.
  *
  * In CI this resolves to the migrated `ci_e2e.db`. On a dev machine it points
  * e2e at its own file instead of writing fixtures into the developer's `stw.db`;
