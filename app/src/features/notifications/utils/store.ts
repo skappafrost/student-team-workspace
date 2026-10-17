@@ -1,3 +1,11 @@
+/**
+ * Dead code, on purpose. Nothing imports this store now that the header bell and
+ * the notifications page both read `GET /api/notifications`.
+ *
+ * It stays because `app/AGENTS.md` still describes this feature as "Notification
+ * center & store": the file and that line have to go in the same commit, and a
+ * repo-wide grep for `useNotificationStore` is the check that says they did.
+ */
 import { create } from 'zustand';
 // import { persist } from 'zustand/middleware';
 import type { NotificationStatus, NotificationAction } from '@/components/ui/notification-card';

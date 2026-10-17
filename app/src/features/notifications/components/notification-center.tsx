@@ -2,6 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Fragment, useState } from 'react';
 import { toast } from 'sonner';
 import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
@@ -19,6 +21,7 @@ import { Separator } from '@/components/ui/separator';
 import { NotificationCard } from '@/components/ui/notification-card';
 import { notificationKeys, notificationsQueryOptions } from '../api/queries';
 import { markAllNotificationsAsRead, markNotificationAsRead } from '../api/service';
+import type { Notification } from '../api/types';
 import { inboxState } from '../lib/inbox-state';
 
 const MAX_VISIBLE = 5;
@@ -31,8 +34,8 @@ const MAX_VISIBLE = 5;
  * sent `view`, `view-product` and `billing` all to `/dashboard/overview`, so the
  * badge counted rows nobody received and every button went to the same place.
  * Backend notifications carry a `link` and no `actions`, so the cards here render
- * no action row; clicking a notification through to its target is the
- * notifications page's existing behaviour (`notification-list.tsx`).
+ * no action row, and a row with a link opens that link — the treatment
+ * `notification-list.tsx` already gives the same rows on the notifications page.
  */
 export function NotificationCenter() {
   // Plain useQuery, not useSuspenseQuery: the header renders inside the server
@@ -46,6 +49,10 @@ export function NotificationCenter() {
     refetch
   } = useQuery(notificationsQueryOptions());
   const queryClient = useQueryClient();
+  const router = useRouter();
+  // Controlled so the panel can get out of the way of the page a row opens;
+  // `data-table-faceted-filter.tsx` closes its popover the same way after a pick.
+  const [open, setOpen] = useState(false);
 
   const markRead = useMutation({
     mutationFn: markNotificationAsRead,
@@ -71,8 +78,19 @@ export function NotificationCenter() {
   const state = inboxState({ isPending, isError, count: notifications.length });
   const visibleNotifications = notifications.slice(0, MAX_VISIBLE);
 
+  // The row treatment `notification-list.tsx` already gives these same rows: a
+  // link opens, an unread row is marked on the way out, and the panel closes so
+  // it does not sit on top of the page the row just navigated to.
+  const openRow = (notification: Notification) => {
+    const { link } = notification;
+    if (!link) return;
+    if (notification.status === 'unread') markRead.mutate(notification.id);
+    setOpen(false);
+    router.push(link);
+  };
+
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button variant='ghost' size='icon' className='relative h-8 w-8' />}>
         <Icons.notification className='h-4 w-4' />
         {count > 0 && (
@@ -146,18 +164,43 @@ export function NotificationCenter() {
           )}
           {state === 'list' && (
             <div className='flex flex-col gap-1 p-2'>
-              {visibleNotifications.map((notification) => (
-                <NotificationCard
-                  key={notification.id}
-                  id={notification.id}
-                  title={notification.title}
-                  body={notification.body}
-                  status={notification.status}
-                  createdAt={notification.createdAt}
-                  actions={notification.actions}
-                  onMarkAsRead={(id) => markRead.mutate(id)}
-                />
-              ))}
+              {visibleNotifications.map((notification) => {
+                const card = (
+                  <NotificationCard
+                    id={notification.id}
+                    title={notification.title}
+                    body={notification.body}
+                    status={notification.status}
+                    createdAt={notification.createdAt}
+                    actions={notification.actions}
+                    className={
+                      notification.link
+                        ? 'hover:bg-accent/50 cursor-pointer transition-colors'
+                        : undefined
+                    }
+                    onMarkAsRead={(id) => markRead.mutate(id)}
+                  />
+                );
+                if (!notification.link) return <Fragment key={notification.id}>{card}</Fragment>;
+                // Deliberately not an `<a href>`: the card holds a button of its
+                // own, and a real anchor would navigate when that tick is clicked.
+                return (
+                  <div
+                    key={notification.id}
+                    role='link'
+                    tabIndex={0}
+                    onClick={() => openRow(notification)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openRow(notification);
+                      }
+                    }}
+                  >
+                    {card}
+                  </div>
+                );
+              })}
             </div>
           )}
         </ScrollArea>
