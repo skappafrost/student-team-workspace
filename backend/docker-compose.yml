@@ -26,6 +26,16 @@ services:
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     environment:
+      # This stack is a local demo stack: every value below is a development
+      # default, including the JWT secret. `app.py` refuses to start with that
+      # secret unless ENVIRONMENT says test/dev, and until now nothing in Docker
+      # set ENVIRONMENT — so `docker compose up` followed the documented quickstart
+      # into a crash loop behind `restart: unless-stopped`. Naming the mode here is
+      # what makes the guard and the defaults agree.
+      # For a real deployment: set ENVIRONMENT=production AND a random
+      # JWT_SECRET_KEY (python -c "import secrets; print(secrets.token_urlsafe(48))")
+      # AND COOKIE_SECURE=true. The guard is then doing its job, not blocking boot.
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
       DB_HOST: ${DB_HOST:-postgres}
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-stw_user}
@@ -35,13 +45,29 @@ services:
       # to the psycopg (v3) dialect, and this project ships psycopg2.
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-stw_user}:${POSTGRES_PASSWORD:-stw_password}@postgres:5432/${POSTGRES_DB:-stw_db}}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Pairs with ENVIRONMENT above: this default is only acceptable because the
+      # mode is dev. `test_compose_contract.py` fails if one changes without the
+      # other.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-super-secret-change-me-in-production}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
     depends_on:
       postgres:
         condition: service_healthy
+    # Long form with `required: false`: the short form errored out on a fresh
+    # clone, because `.env` is gitignored — so the documented `cp .env.example
+    # .env` quickstart had a second, unrelated reason to fail before uvicorn
+    # ever started. Everything the container needs is interpolated above.
     env_file:
-      - .env
+      - path: .env
+        required: false
+    # Uploaded bytes land in `./uploads` (`config.upload_dir`) inside the
+    # container's writable layer, so every `docker compose up --build` or
+    # `docker compose rm` destroyed them: the File rows survived in the postgres
+    # volume and pointed at nothing, and the quota in `_enforce_workspace_storage_quota`
+    # kept counting bytes that were gone.
+    volumes:
+      - upload_data:/app/uploads
 
 volumes:
   postgres_data:
+  upload_data:
