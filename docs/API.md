@@ -73,7 +73,7 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 | GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`). When the actor is a manager by role rather than the channel creator, the change is written to the workspace activity feed. DMs: participants only |
 | DELETE | `/channels/{id}/members/{user_id}` | Manager only |
 | GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`); POST `201` broadcasts over WS + creates notifications |
-| PATCH, DELETE | `/messages/{id}` | Author only |
+| PATCH, DELETE | `/messages/{id}` | The author always may. Otherwise the caller needs workspace rank `admin`+ **and** access to the channel: a DM or a private channel they are not a member of answers `403`, so rank no longer reaches messages it cannot read. Rank-based moderation is written to the workspace activity feed. |
 | POST | `/messages/{id}/reactions` | Body `{emoji}`; returns `[ReactionSummary]` |
 | GET, POST | `/workspaces/{id}/dms` | Direct messages; body `{user_id}` |
 

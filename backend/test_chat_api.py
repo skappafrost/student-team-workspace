@@ -181,7 +181,12 @@ def test_member_cannot_update_others_message(client, db_session):
     assert resp.status_code == 403
 
 
-def test_admin_can_update_and_delete_any_message(client, db_session):
+def test_admin_can_moderate_any_message_in_a_public_channel(client, db_session):
+    """Admin rank moderates other people's messages where the channel is public.
+
+    The narrow case — a DM or a private channel the admin is not in — is refused,
+    and that is pinned in `test_channel_members_api.py`.
+    """
     ws = create_workspace(client, db_session, "owner")
     as_user(client, "owner")
     channel = client.post(f"/workspaces/{ws['id']}/channels", json={"name": "general", "type": "general"}).json()
