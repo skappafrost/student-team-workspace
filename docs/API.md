@@ -398,7 +398,7 @@ The Next.js app never calls the backend directly from the browser. `app/src/app/
 | `PATCH /api/auth/session` | `POST /auth/logout-all` |
 | `GET /api/auth/me` | `GET /auth/me` |
 | `GET, POST /api/workspace` | `GET, POST /workspaces` |
-| `GET /api/workspace/current` | `GET /workspaces` (first entry) |
+| `GET /api/workspace/current` | `GET /workspaces` (first entry). Status codes are the contract: 401 with no session, the backend's own status when it refuses, 503 when it is unreachable, 502 when a 200 is not the documented array, and **404 `No workspace found` only when the backend answered and the answer was an empty list** — it is no longer a synonym for "the lookup failed". |
 | `GET, PATCH, POST /api/workspace/members` | `/workspaces/{id}/members...` |
 | `GET, POST, PATCH, DELETE /api/workspace/invites` | `/workspaces/{id}/invites...` |
 | `GET /api/workspace/audit-log` | `GET /workspaces/{id}/audit-log` (filters forwarded) |
