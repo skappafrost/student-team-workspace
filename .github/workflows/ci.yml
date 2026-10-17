@@ -78,6 +78,28 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      # The migration chain has never been applied to PostgreSQL anywhere. This
+      # job points pytest at Postgres, but the fixtures build their schema with
+      # `Base.metadata.create_all` (`backend/conftest.py`) and the migration tests
+      # force SQLite (`backend/test_models.py`), so a revision whose DDL only
+      # works on SQLite passes both backend jobs today.
+      #
+      # A separate, empty database — deliberately not the pytest one. The
+      # fixtures drop and re-create every table per test, so sharing a database
+      # would erase the evidence and the gate would prove nothing again, which is
+      # the exact disease this step closes. `r3_authorship_fks` also refuses to
+      # run against rows it cannot link, and that is only correct behaviour on a
+      # database nobody has written to.
+      - name: Apply the migration chain on PostgreSQL
+        env:
+          ENVIRONMENT: test
+          PGPASSWORD: stw_test
+          CI_DB_URL: postgresql+psycopg2://stw_test:stw_test@localhost:5432/stw_ci
+        run: |
+          psql -h localhost -U stw_test -d stw_test -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE stw_ci OWNER stw_test'
+          DATABASE_URL="$CI_DB_URL" python -m alembic upgrade head
+          DATABASE_URL="$CI_DB_URL" python -m alembic current | grep -q '(head)'
       - name: Run pytest (Postgres)
         run: pytest -q --cov=. --cov-report=term --cov-report=xml
         env:
@@ -133,10 +155,10 @@ jobs:
         with:
           python-version: "3.12"
       # playwright.config.ts starts uvicorn itself, so the schema has to exist
-      # before it can answer anything. No other job migrates a database: the
-      # backend jobs build their own schema inside pytest fixtures. The venv is
-      # not cosmetic - the config looks for `backend/.venv`, which is what
-      # CONTRIBUTING tells a human to create.
+      # before it can answer anything. `backend-pg` also applies the chain now, to
+      # PostgreSQL, as a schema-validity gate rather than as this job's database.
+      # The venv is not cosmetic - the config looks for `backend/.venv`, which is
+      # what CONTRIBUTING tells a human to create.
       - name: Prepare backend database
         working-directory: backend
         run: |
