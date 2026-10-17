@@ -73,6 +73,7 @@ The app runs at http://localhost:3000.
 | `bun run build`        | Production build                                                    |
 | `bun run start`        | Serve a production build                                            |
 | `bun run typecheck`    | `tsc --noEmit`                                                      |
+| `bun run test:unit`    | Pure-function tests, bun's built-in runner (`tests-unit/`)          |
 | `bun run lint`         | OxLint                                                              |
 | `bun run gen:api`      | Regenerate typed backend client (see below)                         |
 | `bun run cleanup --list` | Template leftover: lists removable demo features; STW does not rely on it |
@@ -141,6 +142,10 @@ they describe generic Next.js/shadcn patterns, not STW specifics.
 ```bash
 # Type check
 bun run typecheck
+
+# Unit tests — pure functions only (bun's runner has no jsdom, so components
+# live in the Playwright specs under tests/)
+bun run test:unit
 
 # Production build
 bun run build

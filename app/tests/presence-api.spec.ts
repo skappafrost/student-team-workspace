@@ -5,8 +5,10 @@ import { bff, createWorkspace, inviteAndAccept, registerUser } from './helpers';
 /**
  * The presence BFF, as a contract layer between the browser and the backend.
  *
- * There is no unit runner in this app, so a proxy that silently rewrites status
- * codes is otherwise unverifiable — and the guest rule depends on exactly that:
+ * A proxy that silently rewrites status codes has no test home below this
+ * boundary — `bun run test:unit` covers pure functions, not a handler that needs
+ * `next/headers` and a real cookie jar — and the guest rule depends on exactly
+ * that:
  * `usePresenceMap` decides whether to draw any dots by checking for a 403. A
  * handler that turned 403 into `[]` would make a guest's UI look like "nobody is
  * online", which is a fabrication, not an absence.

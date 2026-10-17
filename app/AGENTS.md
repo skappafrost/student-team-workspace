@@ -143,6 +143,9 @@ The project follows a feature-based folder structure designed for scalability in
     ├── cleanup.js         # Feature removal, run via `bun run cleanup` (templates in cleanup-templates/, typechecked)
     └── cleanup-templates/ # Replacement files cleanup.js copies into the repo
 
+/tests                     # Playwright specs — job `frontend-e2e`
+/tests-unit                # bun test, pure functions only — job `frontend`
+
 Dockerfile                 # Node.js production Dockerfile
 Dockerfile.bun             # Bun production Dockerfile
 .dockerignore              # Docker build exclusions
@@ -171,6 +174,9 @@ bun run lint:fix     # Fix ESLint issues and format
 bun run lint:strict  # Zero warnings tolerance
 
 bun run typecheck    # tsc --noEmit
+
+# Unit tests (bun's built-in runner; pure functions in tests-unit/, no DOM)
+bun run test:unit
 
 # Formatting
 bun run format       # Format with Prettier
@@ -454,13 +460,22 @@ NEXT_PUBLIC_SENTRY_DISABLED="true"
 What exists today, and what CI actually runs:
 
 - **E2E (job `frontend-e2e`)** — Playwright specs in `tests/`, against a live backend that `playwright.config.ts` starts itself. Seeding helpers shared by the specs live in `tests/helpers.ts`.
-- **Static gates (job `frontend`)** — `bunx oxlint --deny-warnings src`, `bun run typecheck`, `bun run build`.
-- **No unit or component runner.** There is no Vitest, Jest or React Testing Library dependency and no config for them. Do not add `*.test.ts` files expecting a runner to find them, and do not write "Vitest" into any doc — that sentence is exactly how a false claim about test coverage got into this repo.
+- **Unit (job `frontend`)** — `bun run test:unit`, which is `bun test tests-unit`: bun's built-in runner over `tests-unit/*.test.ts`. Nothing was installed for it — bun is already this app's package manager, and CI runs `bun install --frozen-lockfile`, so a test dependency would have meant a lockfile change and a fifth install. It runs **pure functions**: no jsdom, no React, no server, no fixture data from the backend.
+- **Static gates (job `frontend`)** — `bunx oxlint --deny-warnings src`, `bun run typecheck`, `bun run build`, then a grep that the presence utilities reached the compiled CSS.
+- **No component or DOM runner.** Still true, and `bun test` does not change it. There is no Vitest, Jest or React Testing Library dependency and no config for them. A behavior that only exists once something is rendered is either a Playwright spec or a hand-verified claim you write down as hand-verified.
 
-Adopting a unit runner is a decision to make deliberately (dependency + CI step + a home for the tests), not a default to assume. Until then: a behavior Playwright cannot reach is verified by hand, and the docs have to say so rather than imply a gate.
+Adopting a **component** runner remains a decision to make deliberately (dependency + CI step + a home for the tests), not a default to assume — the unit runner above was made that way, and it did not need a dependency because bun already ships the runner. Writing "Vitest", "Jest" or "Testing Library" into a doc as though it were installed is how a false claim about test coverage got into this repo once already.
+
+The two runners must stay partitioned, and the split is by directory, not by filename: a bare `bun test` also matches `tests/*.spec.ts`, and a Playwright spec loaded that way dies on import with "Playwright Test did not expect test() to be called here" — a red unit suite that is not about your code. That is why the script names `tests-unit`, and why Playwright's `testDir` stays `./tests`.
+
+Two gaps worth knowing before you trust a green run here:
+
+- `bunx oxlint --deny-warnings src` is scoped to `src`, so CI does **not** lint `tests-unit/`. Run `bunx oxlint --deny-warnings tests-unit` yourself.
+- `bun:test` has no published types installed; `tests-unit/bun-test.d.ts` is a hand-written shim over the matchers the suite uses. A matcher it does not declare reads as a type error, not as a missing feature — extend it from https://bun.com/docs/cli/test, not from memory.
 
 ```
 /tests                 # Playwright specs, run in CI
+/tests-unit            # bun test — pure functions, run in CI
 /app/qa-evidence       # screenshots that back a visual claim
 ```
 
