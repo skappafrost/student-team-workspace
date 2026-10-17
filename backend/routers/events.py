@@ -21,17 +21,18 @@ from services import log_activity
 
 router = APIRouter()
 
-#: Widest date range the list endpoint expands: five years, i.e. ~1,830 daily
-#: occurrences — an order of magnitude past any realistic calendar view, and
-#: wide enough that no legitimate request learns the limit exists.
+#: Widest range the list endpoint expands: five years, i.e. ~1,830 daily
+#: occurrences. The calendar page requests one month at a time, so this is a wide
+#: margin over real use — and a range beyond it is refused instead of walked.
 MAX_EXPANSION_RANGE = timedelta(days=366 * 5)
 
 #: Iterations one event's expansion may spend, separate from ``cap``: ``cap``
-#: bounds the rows returned, this bounds the work done to find them (a window
-#: far from the event's anchor skips without appending). A daily event across
-#: ``MAX_EXPANSION_RANGE`` is ~1,830 steps, so this keeps ten times that
-#: headroom and stays two orders of magnitude below the ~2.9M-step walk that
-#: was measured costing seconds.
+#: bounds the rows returned, this bounds the work done to find them, because an
+#: iteration outside the range appends nothing. Real use is the calendar page
+#: opening one month (~31 daily steps), and the widest range the endpoint admits
+#: is ~1,830 — so this keeps an order of magnitude past what a legitimate request
+#: can reach, and stays well clear of the 2,912,442 steps one year-9999 window
+#: used to spend for a single row.
 MAX_EXPANSION_STEPS = 20_000
 
 
@@ -137,6 +138,22 @@ def _next_occurrence(current: datetime, recurrence: str) -> datetime | None:
     return current + delta
 
 
+def _occurrence_end(start_at: datetime, duration: timedelta | None) -> datetime | None:
+    """The end of one occurrence, clamped to the last representable datetime.
+
+    ``end_at`` is never validated against ``start_at``, so an event that runs up
+    to the calendar limit (a daily one created with ``end_at`` in 9999) has a
+    ``duration`` that carries ``start_at + duration`` past ``datetime.max`` one
+    step in. Clamping cannot change which rows are kept: a range end is never
+    past the limit either, so the real value and the clamp both overlap.
+    """
+    if not duration:
+        return None
+    if duration > datetime.max - start_at:
+        return datetime.max
+    return start_at + duration
+
+
 def _expand_occurrences(
     event: models.Event,
     range_start: datetime | None,
@@ -150,7 +167,8 @@ def _expand_occurrences(
     Two independent bounds stop the walk: ``cap`` on the rows appended and
     ``MAX_EXPANSION_STEPS`` on the iterations taken — an iteration that falls
     outside the range appends nothing, so ``cap`` alone does not bound the work.
-    The walk also ends at the calendar limit (see ``_next_occurrence``).
+    Neither one bounds the *arithmetic*, which is why both date computations
+    clamp (see ``_next_occurrence`` and ``_occurrence_end``).
 
     The event's timestamps and the range bounds are both normalized to naive
     UTC before stepping, because the two come from different sources with
@@ -176,7 +194,7 @@ def _expand_occurrences(
         and len(out) < cap
         and steps < MAX_EXPANSION_STEPS
     ):
-        occ_end = start_at + duration if duration else None
+        occ_end = _occurrence_end(start_at, duration)
         if (
             (occ_end is None or occ_end >= rs)
             and start_at >= rs
