@@ -1,6 +1,16 @@
 import { expect, test } from '@playwright/test';
 
-import { APP, apiPost, bff, createWorkspace, invite, inviteAndAccept, openPage, registerUser, userId } from './helpers';
+import {
+  APP,
+  apiPost,
+  bff,
+  createWorkspace,
+  invite,
+  inviteAndAccept,
+  openPage,
+  registerUser,
+  userId
+} from './helpers';
 
 /**
  * The handlers here used to answer real requests from arrays written into the
@@ -41,7 +51,11 @@ const INVENTED_PAGES = [
 ];
 
 /** Titles from the deleted `mockNotifications`, kept to the three no backend writes. */
-const INVENTED_NOTIFICATIONS = ['New team member joined', 'New product added', 'Billing cycle updated'];
+const INVENTED_NOTIFICATIONS = [
+  'New team member joined',
+  'New product added',
+  'Billing cycle updated'
+];
 
 // `bff()` and `apiPost()` answer `any`; every shape is named here instead, so a
 // handler that starts returning something else fails on the shape, not silently.
