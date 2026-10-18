@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { seededMembers } from '@/features/workspace/fixture';
 import { WorkspaceRole } from '@/features/workspace/types';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
@@ -10,15 +9,29 @@ async function getSessionCookie(): Promise<string | undefined> {
   return cookieStore.get('session_token')?.value;
 }
 
-async function getCurrentWorkspaceId(sessionCookie: string): Promise<string | null> {
+/** `404` is the caller's finding, `503` the BFF's own; see `getCurrentWorkspace`. */
+type WorkspaceLookup =
+  | { ok: true; workspaceId: string }
+  | { ok: false; status: 404 | 503; error: string };
+
+/**
+ * The workspace a session acts on is the first row `/workspaces` shares with it.
+ * A backend that cannot be reached is not the same finding as one that answers
+ * with no rows: left uncaught, the rejection escapes the handler and Next answers
+ * its generic 500, which carries no `{error}` body for a client to render.
+ */
+async function getCurrentWorkspace(sessionCookie: string): Promise<WorkspaceLookup> {
   const res = await fetch(`${BACKEND_URL}/workspaces`, {
     headers: { Cookie: `session_token=${sessionCookie}` },
     cache: 'no-store'
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as Array<{ id: string }>;
-  if (!Array.isArray(data) || data.length === 0) return null;
-  return data[0].id;
+  }).catch(() => null);
+  if (!res) return { ok: false, status: 503, error: 'Backend unreachable' };
+  if (!res.ok) return { ok: false, status: 404, error: 'No workspace found' };
+  const data = (await res.json().catch(() => null)) as Array<{ id: string }> | null;
+  if (!Array.isArray(data) || data.length === 0) {
+    return { ok: false, status: 404, error: 'No workspace found' };
+  }
+  return { ok: true, workspaceId: data[0].id };
 }
 
 async function backendRequest(
@@ -26,7 +39,7 @@ async function backendRequest(
   init: RequestInit,
   sessionCookie: string
 ): Promise<Response> {
-  return fetch(`${BACKEND_URL}${path}`, {
+  const res = await fetch(`${BACKEND_URL}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -34,29 +47,30 @@ async function backendRequest(
       ...(init.headers as Record<string, string>)
     },
     cache: 'no-store'
-  });
+  }).catch(() => null);
+  // Every handler here already turns a non-2xx into a status plus an `{error}`,
+  // so a refusal and a failure to connect get the same honest shape.
+  return res ?? new Response('Backend unreachable', { status: 503 });
 }
 
-function isBackendWired(sessionCookie: string): Promise<boolean> {
-  return fetch(`${BACKEND_URL}/workspaces`, {
-    headers: { Cookie: `session_token=${sessionCookie}` },
-    cache: 'no-store'
-  })
-    .then((res) => res.ok)
-    .catch(() => false);
-}
-
+/**
+ * `GET` is the roster, `PATCH` one role change, and the backend is the only
+ * source for both. Nothing here is reachable without a session, and a refusal is
+ * forwarded with its own status: the two handlers used to answer a missing cookie
+ * or an unreachable backend from a module-scope array that `PATCH` also wrote
+ * into, so one visitor's role change showed up in the next reader's list.
+ */
 export async function GET() {
   const sessionCookie = await getSessionCookie();
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    return NextResponse.json({ members: seededMembers });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const workspaceId = await getCurrentWorkspaceId(sessionCookie);
-  if (!workspaceId) {
-    return NextResponse.json({ members: seededMembers });
+  const workspace = await getCurrentWorkspace(sessionCookie);
+  if (!workspace.ok) {
+    return NextResponse.json({ error: workspace.error }, { status: workspace.status });
   }
   const res = await backendRequest(
-    `/workspaces/${workspaceId}/members`,
+    `/workspaces/${workspace.workspaceId}/members`,
     { method: 'GET' },
     sessionCookie
   );
@@ -76,21 +90,16 @@ export async function PATCH(request: Request) {
   if (!body.memberId || !body.role) {
     return NextResponse.json({ error: 'memberId and role are required' }, { status: 400 });
   }
-
-  if (!sessionCookie || !(await isBackendWired(sessionCookie))) {
-    const idx = seededMembers.findIndex((m) => m.id === body.memberId);
-    if (idx !== -1) {
-      seededMembers[idx] = { ...seededMembers[idx], role: body.role as WorkspaceRole };
-    }
-    return NextResponse.json({ members: seededMembers });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const workspaceId = await getCurrentWorkspaceId(sessionCookie);
-  if (!workspaceId) {
-    return NextResponse.json({ error: 'No workspace found' }, { status: 404 });
+  const workspace = await getCurrentWorkspace(sessionCookie);
+  if (!workspace.ok) {
+    return NextResponse.json({ error: workspace.error }, { status: workspace.status });
   }
   const res = await backendRequest(
-    `/workspaces/${workspaceId}/members/${encodeURIComponent(body.memberId)}`,
+    `/workspaces/${workspace.workspaceId}/members/${encodeURIComponent(body.memberId)}`,
     {
       method: 'PATCH',
       body: JSON.stringify({ role: body.role })
@@ -102,7 +111,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: text }, { status: res.status });
   }
   const listRes = await backendRequest(
-    `/workspaces/${workspaceId}/members`,
+    `/workspaces/${workspace.workspaceId}/members`,
     { method: 'GET' },
     sessionCookie
   );

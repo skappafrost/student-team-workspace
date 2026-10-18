@@ -15,7 +15,7 @@ function mapBackendMember(member: {
 }): WorkspaceMember {
   return {
     // Prefer backend user_id (role-update API addresses members by user_id);
-    // fall back to row id so fixture/seeds without user_id still get unique keys.
+    // fall back to row id so a member row without one still gets a unique key.
     id: member.user_id ?? member.id,
     name: member.user?.display_name || member.name || member.user_id || 'Unknown',
     email: member.user?.email || member.email || '',
