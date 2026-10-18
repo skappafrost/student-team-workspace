@@ -94,8 +94,9 @@ hermes kanban boards set-default-workdir stw "C:/Users/Ha Trung/Documents/Team-w
 
 ### Repair a database that `alembic upgrade head` refuses
 
-The state a database built by `Base.metadata.create_all` is left in — `app.py`'s startup path
-(T036) and every test database do exactly that: tables exist, `alembic_version` does not.
+The state a database built by `Base.metadata.create_all` is left in — every test database, and any
+developer file created before the server stopped building its own schema, is in it: tables exist,
+`alembic_version` does not.
 `upgrade head` then starts from base and dies on the first `CREATE TABLE` with "table already
 exists" — which looks like a broken migration and is not one.
 

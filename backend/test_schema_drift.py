@@ -3,11 +3,12 @@
 Two contracts, both checked against a database that was actually created by
 `alembic upgrade head`, not by `create_all`:
 
-1. Every index the migration chain creates is also declared on the model. Today
-   21 of the 22 indexes exist only in migrations, so every `create_all` database
-   (every dev DB, both backend CI jobs, all 60 test databases) runs without them,
-   and a future `--autogenerate` would propose dropping 21 of them. A drift test
-   is the only thing that keeps the two lists from separating again.
+1. Every index the migration chain creates is also declared on the model. 21 of
+   the 22 existed only in migrations, so every `create_all` database (the test
+   databases `conftest.py` builds, and every developer file from before the
+   server stopped creating its own schema) ran without them, and a future
+   `--autogenerate` would have proposed dropping 21 of them. A drift test is the
+   only thing that keeps the two lists from separating again.
 2. A row can actually be inserted into `pages` on a migrated SQLite database.
    `add_kb_pages.py` used `server_default=sa.text("now()")` — the only such
    spelling in the chain — and SQLite has no `now()`, so the DEFAULT is accepted
@@ -23,7 +24,13 @@ migration-built database accepts dangling ids that the model says are impossible
 schema nobody ships.
 
 None of this is checkable from source text, which is why every test here builds a
-real database with `alembic upgrade head`.
+real database with `alembic upgrade head`. The last test goes one step further and
+binds the app's own engine to such a database: what it proves is that a real
+request through `database.SessionLocal` can write against a schema only the chain
+built. It is not what keeps a restored startup `create_all` out — that is a
+checkfirst-per-table no-op on a chain-built database, so `/readyz` would still
+answer 200. `test_lifespan.py:45` and `test_lifespan.py:73-74` are the tests that
+fail if the app starts building its own schema again.
 """
 
 import os
@@ -31,12 +38,14 @@ import tempfile
 
 import pytest
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from alembic import command
 from app import app
-from conftest import run_alembic
+from conftest import TEST_DB_PATH, run_alembic
+from database import set_db_url
 from models import Base
 
 
@@ -273,3 +282,40 @@ def test_the_fk_revision_refuses_rows_it_cannot_link_instead_of_rewriting_them(
     assert left_alone == created_by, "the guard rewrote the row it refused to link"
     assert version == "r2_pages_defaults", "a failed revision still moved the schema stamp"
     assert "fk_channels_created_by" not in named, "the FK landed even though the guard raised"
+
+
+def test_the_application_server_serves_a_chain_built_database(fresh_migrated_engine):
+    """The gate this file exists for: the app's OWN engine, schema from migrations only.
+
+    Every other test here either inspects the migrated engine directly or overrides
+    `get_db` with its own session, so none proved what `database.SessionLocal` —
+    the session a real request actually runs on — can do against a schema only
+    `alembic upgrade head` built. Startup used to `create_all` over whatever the
+    chain left behind, so a migration that failed outright still served traffic.
+    `/readyz` answering 200 requires the `alembic_version` row no `create_all`
+    writes; the register/read pair requires the request path to touch real tables.
+    """
+    url = str(fresh_migrated_engine.url)
+    # Whatever the suite started with: the sqlite file locally, Postgres on CI.
+    suite_url = os.environ.get("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
+    set_db_url(url)
+    try:
+        # No `get_db` override: the requests below must run on the app's own session.
+        assert not app.dependency_overrides
+        with TestClient(app) as client:
+            ready = client.get("/readyz")
+            assert ready.status_code == 200, ready.text
+            assert ready.json()["schema_current"] is True
+
+            registered = client.post(
+                "/auth/register",
+                json={"email": "chain-built@example.com", "password": "long-enough-password"},
+            )
+            assert registered.status_code == 201, registered.text
+            token = registered.json()["access_token"]
+
+            me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+            assert me.status_code == 200, me.text
+            assert me.json()["email"] == "chain-built@example.com"
+    finally:
+        set_db_url(suite_url)

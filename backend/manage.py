@@ -385,13 +385,13 @@ def migrate_to_head(db_url: str) -> list[str]:
     """Apply the alembic chain in this process; return the revisions recorded.
 
     Every entrypoint that opens a database has to migrate it before serving. A
-    schema materialised by `Base.metadata.create_all` instead (`app.py`'s startup
-    path, T036, and `conftest.py` per test) hides a broken migration: the app works
-    anyway, and so do the tests. An entrypoint therefore calls this instead of
-    shelling out to `alembic`, and gets the two guards `stamp` needs for the same
-    reasons: `_alembic_target` makes the named URL the database alembic actually
-    opens, and `_preserving_logging` stops `env.py`'s `fileConfig()` from disabling
-    this process's `stw.*` loggers.
+    schema materialised by `Base.metadata.create_all` instead (`conftest.py` per
+    test, and any database built while the server still created its own) hides a
+    broken migration: the app works anyway, and so do the tests. An entrypoint
+    therefore calls this instead of shelling out to `alembic`, and gets the two
+    guards `stamp` needs for the same reasons: `_alembic_target` makes the named
+    URL the database alembic actually opens, and `_preserving_logging` stops
+    `env.py`'s `fileConfig()` from disabling this process's `stw.*` loggers.
 
     Raises when the chain fails. The failure a caller hits first is an unstamped
     database: tables from `create_all`, no `alembic_version` row, so the first
@@ -414,12 +414,13 @@ def migrate_to_head(db_url: str) -> list[str]:
 def cmd_stamp(args: argparse.Namespace) -> int:
     """Record the revision a database is at, without touching its schema.
 
-    This is the repair for the stuck state this project produces by default. Both
-    `app.py`'s startup path (T036) and `conftest.py` build tables with
-    `Base.metadata.create_all`, so a database created that way has every table and
-    no `alembic_version` row. `alembic upgrade head` then starts from base and dies
-    on the first unconditional `create_table` in `9926de6687ec_schema_v1.py`, which
-    reads as a broken migration when the actual problem is an unstamped database.
+    This is the repair for the stuck state `create_all` leaves a database in.
+    `conftest.py` builds every test database that way, and so did this server
+    until it stopped creating its own schema, so such a database has every table
+    and no `alembic_version` row. `alembic upgrade head` then starts from base and
+    dies on the first unconditional `create_table` in
+    `9926de6687ec_schema_v1.py`, which reads as a broken migration when the actual
+    problem is an unstamped database.
 
     Stamping is a statement of fact, so it refuses when the fact is false: no
     tables at all means the chain should be *applied*, not recorded.
