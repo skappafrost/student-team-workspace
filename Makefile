@@ -1,7 +1,7 @@
 # Student Team Workspace — one-command dev shortcuts (pure make, no extra deps).
 #
 #   make dev       — Postgres (Docker), migrate, backend (uvicorn :8000) + frontend (Next.js :3000, webpack)
-#   make test      — backend pytest + frontend typecheck
+#   make test      — backend pytest + frontend typecheck + frontend unit tests
 #   make realtime  — start both servers and prove a message crosses to a second browser
 #   make verify    — test + realtime
 #   make seed      — placeholder until T045 manage.py lands
@@ -30,6 +30,7 @@ dev:
 test:
 	cd backend && $(BACKEND_PY) -m pytest -q
 	cd app && bun run typecheck
+	cd app && bun run test:unit
 
 # The point of this target is that "realtime works" is never an inference from
 # an access-log line again: uvicorn logged `[accepted]` for every socket while

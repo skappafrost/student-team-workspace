@@ -39,6 +39,10 @@ cd backend && ./.venv/Scripts/python -m alembic heads
 # Frontend typecheck
 cd app && bunx tsc --noEmit
 
+# Frontend unit tests — pure functions, bun's built-in runner (no test dependency,
+# no jsdom: anything needing a DOM belongs in a Playwright spec)
+cd app && bun run test:unit
+
 # Frontend lint (oxlint, not eslint)
 cd app && bun run lint
 
@@ -50,7 +54,7 @@ cd app && bun audit --prod
 cd backend && ./.venv/Scripts/python -m pip_audit
 ```
 
-CI (`.github/workflows/ci.yml`) runs the jobs defined there: `backend` (pytest on SQLite), `backend-pg` (pytest on Postgres 16), `frontend` (typecheck), `demo-pack` (validates `scripts/demo-packs/busy-workspace.json` structure), plus `ruff` (lint) once the gate in `harden/ruff-debt-and-gate` lands. Open the workflow file for the authoritative list rather than trusting this sentence — and all of them must be green before a PR is marked ready.
+CI (`.github/workflows/ci.yml`) runs the jobs defined there: `ruff` (backend lint), `backend` (pytest on SQLite), `backend-pg` (pytest on Postgres 16), `frontend` (oxlint + typecheck + `bun run test:unit` + build, then a grep of the compiled CSS), `frontend-e2e` (Playwright on Chromium, against a backend the config starts itself) and `demo-pack`. Open the workflow file for the authoritative list rather than trusting this sentence — and all of them must be green before a PR is marked ready.
 
 ### SQLite + PostgreSQL parity
 

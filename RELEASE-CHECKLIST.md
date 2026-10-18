@@ -139,6 +139,7 @@ Required evidence per task type:
 |------|----------|
 | Backend | `pytest` pass count, migration head applied, `/readyz` 200 (`/health` is liveness only — it answers 200 on an empty schema) |
 | Frontend UI | Screenshot, `bunx oxlint --deny-warnings src` + typecheck + build pass, `bunx playwright test` pass |
+| Frontend logic (pure functions) | `bun run test:unit` pass — the runner has no jsdom, so this is not evidence about a component |
 | Integration | End-to-end test result JSON, register/login flow works |
 | Docs | Commit hash, file path, no secrets |
 
@@ -153,5 +154,5 @@ Required evidence per task type:
 - [ ] `bun run dev:webpack` starts the app at http://localhost:3000 (`--webpack` is mandatory — Turbopack is broken on this PC).
 - [ ] `make realtime` passes: it starts both servers itself and asserts a message sent by one browser renders in a second browser's channel. A `/ws/...` line in the uvicorn log is **not** this proof — `[accepted]` only means the application accepted.
 - [ ] Register and login flows complete successfully (`cd app && node e2e-auth-flow.mjs`).
-- [ ] `bun run typecheck`, `bunx oxlint --deny-warnings src` and `bun run build` pass; backend `python -m pytest -q` fully green (re-run, don't quote a stored count); `bunx playwright test` green.
+- [ ] `bun run typecheck`, `bunx oxlint --deny-warnings src`, `bun run test:unit` and `bun run build` pass; backend `python -m pytest -q` fully green (re-run, don't quote a stored count); `bunx playwright test` green.
 - [ ] No secrets committed in docs or `.env` files.

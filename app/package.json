@@ -14,6 +14,7 @@
     "cleanup": "node scripts/cleanup.js",
     "gen:api": "node scripts/gen-api.mjs",
     "typecheck": "tsc --noEmit",
+    "test:unit": "bun test tests-unit",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix && bun format",
     "lint:strict": "oxlint --deny-warnings",

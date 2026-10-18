@@ -129,6 +129,14 @@ jobs:
         run: bunx oxlint --deny-warnings src
       - name: Typecheck
         run: bun run typecheck
+      # bun's built-in runner — no test dependency, so no second install and no
+      # `bun.lock` change. The directory argument is load-bearing, not cosmetic:
+      # a bare `bun test` also matches `tests/*.spec.ts`, and Playwright's specs
+      # die on import with "Playwright Test did not expect test() to be called
+      # here", which would read as a broken unit suite. Pure functions only —
+      # bun has no jsdom, so anything with a DOM stays in `frontend-e2e`.
+      - name: Unit tests
+        run: bun run test:unit
       # Also the only step that ever sees Tailwind's emitted CSS, which matters
       # because v4 drops an unregistered utility silently instead of erroring.
       - name: Build
