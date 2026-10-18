@@ -75,8 +75,10 @@ def ws_id(workspace_factory):
 def step_counter(monkeypatch):
     """Count calls to ``_next_occurrence`` — one per loop iteration, while that holds.
 
-    Wrapping the step function measures work rather than payload: a skipped date
-    calls it just as an appended one does. The wrapper returns the real value, so
+    Wrapping the step function counts loop iterations rather than payload: a skipped
+    date calls it just as an appended one does. It is not a census of the work the
+    request does — a monthly walk probes up to 400 months inside ``_monthly_at``
+    without calling the step function at all. The wrapper returns the real value, so
     the walk itself is untouched. The relationship is not self-evident and the
     seed is a second site where a step call could hide, so
     ``test_counter_counts_loop_iterations_not_anchor_distance`` pins it and
@@ -893,8 +895,9 @@ def test_monthly_at_reproduces_the_iterated_clamp(anchor):
     The seed computes where a monthly walk would be after ``months`` steps. If
     that date is not the one stepping reaches, the seeded walk answers a far window
     with dates the same event never produces up close — a Jan 31 anchor fires on
-    the 28th once February has passed and does not drift back. The sweep covers a
-    whole Gregorian cycle, which is where the closed form stops looking.
+    the 28th once February has passed and does not drift back. The sweep below runs
+    to 400 months, the depth at which ``_monthly_at`` stops folding the day, and one
+    step past it, so the truncation is on the path.
     """
     stepped = anchor
     for months in range(401):

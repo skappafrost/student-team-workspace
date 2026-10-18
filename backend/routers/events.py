@@ -194,9 +194,10 @@ def _monthly_at(start: datetime, months: int) -> datetime:
     if months <= 0:
         return start
     day = start.day
-    # 400 months is a whole Gregorian cycle, which always contains a 28-day
-    # February — the shortest month there is — so further steps cannot lower the
-    # day past it and the sweep does not need to cover them.
+    # The fold only ever lowers the day, and 28 — a non-leap February, the shortest
+    # month there is — is its floor: past one, later steps cannot change it. Any 33
+    # consecutive years span a non-leap February (any two do, really), so 400 months
+    # reaches the floor with room to spare and the sweep need not cover the rest.
     probe = start.replace(day=1)
     for offset in range(1, min(months, 400) + 1):
         step = _add_months(probe, offset)
