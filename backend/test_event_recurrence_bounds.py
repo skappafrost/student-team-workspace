@@ -760,6 +760,55 @@ def test_an_event_whose_end_precedes_its_start_still_answers(ws_id, quiet_client
     assert [(o.start_at, o.end_at) for o in rows] == [(anchor, dt.datetime(2020, 1, 1, 9, 0))]
 
 
+def test_a_duration_longer_than_the_calendar_backs_the_seed_to_the_start_of_time(
+    ws_id, quiet_client, step_counter
+):
+    """The clamp at the near end of the seed's threshold, reached from the client.
+
+    ``_earliest_relevant_start`` shifts the window open backwards by the event's
+    duration and clamps at ``datetime.min`` once the shift leaves the calendar. It
+    is not exotic: the marathon event above spans 2,912,442 days, so the clamp holds
+    for every window opening before 7974-12-31 — the first three quarters of the
+    years the endpoint's own date parsing admits — and without it the shift raises
+    ``OverflowError``, the same 500 its sibling pins in the other direction.
+    Neither neighbour reaches it: the marathon test shifts the very same duration
+    from 9999-12-30, which the shift fits inside, the reversed event has a negative
+    duration and lands on the far clamp instead, and the differential's longest
+    duration is four hours.
+
+    A clamped threshold means "skip nothing", which is the right answer here: an
+    occurrence that runs to the calendar limit overlaps every window, including one
+    974 years past the anchor. So the walk starts at the anchor and fills to the row
+    cap with 2026 dates, none of them inside the requested year-3000 window — the
+    rows the clamp keeps, which is what the pinned shape is for.
+    """
+    anchor = dt.datetime(2026, 1, 1, 9, 0)
+    far_end = dt.datetime(9999, 12, 31, 9, 0)
+    event = _create(quiet_client, ws_id, "aeon", anchor, "daily", end_at=far_end)
+
+    # The precondition is part of the assertion, not an assumption about the date:
+    # this window really is inside the clamp's reach...
+    window_start = dt.datetime(3000, 1, 1)
+    assert far_end - anchor > window_start - dt.datetime.min
+    # ...and the sibling's year-9999 window really is outside it, so the two tests
+    # cover the two branches of one line rather than the same branch twice.
+    assert far_end - anchor <= dt.datetime(9999, 12, 30) - dt.datetime.min
+
+    resp = _list(
+        quiet_client, ws_id, window_start, window_start + dt.timedelta(days=1), step_counter
+    )
+
+    assert resp.status_code == 200, resp.text
+    occ = _rows(resp, "aeon")
+    assert len(occ) == ROW_CAP, "the row cap binds, so the walk was not truncated"
+    assert step_counter["steps"] == ROW_CAP
+    assert occ[0]["occurrence_id"] == f"{event['id']}@2026-01-01"
+    assert [o["start_at"] for o in occ[:2]] == ["2026-01-01T09:00:00", "2026-01-02T09:00:00"]
+    assert occ[-1]["start_at"] == "2026-07-19T09:00:00"
+    assert occ[0]["end_at"] == "9999-12-31T09:00:00"
+    assert {o["end_at"] for o in occ[1:]} == {"9999-12-31T23:59:59.999999"}
+
+
 def test_event_anchored_at_the_end_of_the_calendar_does_not_crash(client, ws_id, step_counter):
     """The path neither bound covers: the anchor itself is in year 9999.
 
