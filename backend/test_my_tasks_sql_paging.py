@@ -6,7 +6,9 @@ the driver actually hands them over — the test engine is created with
 ``connect_args={"factory": CountingConnection}``, a ``sqlite3.Connection``
 subclass whose cursor adds ``len()`` of every ``fetchall``/``fetchmany``/
 ``fetchone`` to the statement that produced it. ``before_cursor_execute`` counts
-statements as an independent cross-check.
+statements as an independent cross-check, and the measurement tests assert the two
+agree (``len(recorder.statements) == recorder.sa_statements``) so a proxy that
+silently stopped counting cannot report a fetch count of zero as a win.
 
 Measured with that instrument on the fetch-everything implementation, 300 tasks
 assigned to one identity:
@@ -476,6 +478,15 @@ def test_measured_page_fetches_the_page(client, db_session):
     recorder.reset()
     resp = client.get(MEASURED_PATH, params={"limit": 10})
     assert resp.status_code == 200
+    # The cross-check the module docstring promises, and the reason every fetched-row
+    # number below means anything: the cursor proxy records one entry per execute on
+    # this engine, ``before_cursor_execute`` counts the same statements from the other
+    # side, and if the two ever disagree the proxy has stopped seeing the driver --
+    # which would otherwise show up as a suspiciously perfect fetch count of zero.
+    assert len(recorder.statements) == recorder.sa_statements, (
+        f"cursor proxy recorded {len(recorder.statements)} statements, "
+        f"before_cursor_execute recorded {recorder.sa_statements}"
+    )
     task_selects = recorder.task_select_rows()
     fetched = sum(r for _, r in task_selects)
     print(
