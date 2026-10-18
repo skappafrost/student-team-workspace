@@ -1,10 +1,13 @@
 'use client';
 
-import { Icons } from '@/components/icons';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
+import { toast } from 'sonner';
+import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -14,23 +17,58 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { NotificationCard } from '@/components/ui/notification-card';
-import { useNotificationStore } from '../utils/store';
-import { useRouter } from 'next/navigation';
+import { notificationKeys, notificationsQueryOptions } from '../api/queries';
+import { markAllNotificationsAsRead, markNotificationAsRead } from '../api/service';
+import { inboxState } from '../lib/inbox-state';
 
 const MAX_VISIBLE = 5;
 
-const actionRoutes: Record<string, string> = {
-  view: '/dashboard/overview',
-  'view-product': '/dashboard/overview',
-  billing: '/dashboard/overview',
-  open: '/dashboard/kanban',
-  'open-chat': '/dashboard/chat'
-};
-
+/**
+ * The header bell shows the inbox `GET /api/notifications` returns to the
+ * notifications page — the same rows, the same mutations, one source.
+ *
+ * It used to read a store of invented rows and an action id -> route table that
+ * sent `view`, `view-product` and `billing` all to `/dashboard/overview`, so the
+ * badge counted rows nobody received and every button went to the same place.
+ * Backend notifications carry a `link` and no `actions`, so the cards here render
+ * no action row; clicking a notification through to its target is the
+ * notifications page's existing behaviour (`notification-list.tsx`).
+ */
 export function NotificationCenter() {
-  const { notifications, markAsRead, markAllAsRead, unreadCount } = useNotificationStore();
-  const router = useRouter();
-  const count = unreadCount();
+  // Plain useQuery, not useSuspenseQuery: the header renders inside the server
+  // component shell, where the relative '/api/notifications' URL cannot be
+  // parsed — notification-list.tsx documents the same React #419 failure.
+  const {
+    data: notifications = [],
+    isPending,
+    isError,
+    error,
+    refetch
+  } = useQuery(notificationsQueryOptions());
+  const queryClient = useQueryClient();
+
+  const markRead = useMutation({
+    mutationFn: markNotificationAsRead,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to mark as read');
+    }
+  });
+
+  const markAllRead = useMutation({
+    mutationFn: markAllNotificationsAsRead,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to mark all as read');
+    }
+  });
+
+  const count = notifications.filter((n) => n.status === 'unread').length;
+  const state = inboxState({ isPending, isError, count: notifications.length });
   const visibleNotifications = notifications.slice(0, MAX_VISIBLE);
 
   return (
@@ -61,7 +99,8 @@ export function NotificationCenter() {
                 variant='ghost'
                 size='sm'
                 className='text-muted-foreground h-auto px-2 py-1 text-xs'
-                onClick={markAllAsRead}
+                onClick={() => markAllRead.mutate()}
+                disabled={markAllRead.isPending}
               >
                 Mark all as read
               </Button>
@@ -70,7 +109,31 @@ export function NotificationCenter() {
         </div>
         <Separator />
         <ScrollArea className='h-[400px]'>
-          {notifications.length === 0 ? (
+          {state === 'loading' && (
+            <div className='text-muted-foreground text-sm'>Loading notifications…</div>
+          )}
+          {/* A refused fetch must not fall through to "no notifications yet",
+              which is an empty inbox, not a broken one. Same branch, same order,
+              as notification-list.tsx and file-list.tsx. */}
+          {state === 'error' && (
+            <Empty className='py-12'>
+              <EmptyHeader>
+                <EmptyMedia variant='icon' className='size-12 rounded-full'>
+                  <Icons.warning className='size-6' />
+                </EmptyMedia>
+                <EmptyTitle>Failed to load notifications</EmptyTitle>
+                <EmptyDescription>
+                  {error instanceof Error ? error.message : 'Something went wrong.'}
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button variant='outline' size='sm' onClick={() => refetch()}>
+                  Try again
+                </Button>
+              </EmptyContent>
+            </Empty>
+          )}
+          {state === 'empty' && (
             <Empty className='py-12'>
               <EmptyHeader>
                 <EmptyMedia variant='icon'>
@@ -80,7 +143,8 @@ export function NotificationCenter() {
                 <EmptyDescription>We will let you know when something happens.</EmptyDescription>
               </EmptyHeader>
             </Empty>
-          ) : (
+          )}
+          {state === 'list' && (
             <div className='flex flex-col gap-1 p-2'>
               {visibleNotifications.map((notification) => (
                 <NotificationCard
@@ -91,14 +155,7 @@ export function NotificationCenter() {
                   status={notification.status}
                   createdAt={notification.createdAt}
                   actions={notification.actions}
-                  onMarkAsRead={markAsRead}
-                  onAction={(notifId, actionId) => {
-                    const route = actionRoutes[actionId];
-                    if (route) {
-                      markAsRead(notifId);
-                      router.push(route);
-                    }
-                  }}
+                  onMarkAsRead={(id) => markRead.mutate(id)}
                 />
               ))}
             </div>

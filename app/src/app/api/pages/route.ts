@@ -4,39 +4,6 @@ import { WikiPageSummary } from '@/features/wiki/api/types';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
-const MOCK_PAGES: WikiPageSummary[] = [
-  {
-    id: 'page-1',
-    parent_id: null,
-    title: 'Getting Started',
-    slug: 'getting-started'
-  },
-  {
-    id: 'page-2',
-    parent_id: null,
-    title: 'Engineering',
-    slug: 'engineering'
-  },
-  {
-    id: 'page-3',
-    parent_id: 'page-2',
-    title: 'Frontend',
-    slug: 'frontend'
-  },
-  {
-    id: 'page-4',
-    parent_id: 'page-2',
-    title: 'Backend',
-    slug: 'backend'
-  },
-  {
-    id: 'page-5',
-    parent_id: 'page-3',
-    title: 'React Guidelines',
-    slug: 'react-guidelines'
-  }
-];
-
 async function getSessionCookie(): Promise<string | undefined> {
   const cookieStore = await cookies();
   return cookieStore.get('session_token')?.value;
@@ -69,6 +36,14 @@ async function backendRequest(
   });
 }
 
+/**
+ * `GET` is the page list, `POST` one new page.
+ *
+ * A refusal from the backend is forwarded with its own status. `GET` used to
+ * answer three of them — no session, no workspace, and 404 in particular — with a
+ * hand-written page tree, so a workspace that does not exist rendered five pages
+ * that never did while a 500 on the same request reported the failure honestly.
+ */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const search = searchParams.get('search') || '';
@@ -81,12 +56,12 @@ export async function GET(request: Request) {
 
   const sessionCookie = await getSessionCookie();
   if (!sessionCookie) {
-    return NextResponse.json({ pages: MOCK_PAGES });
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
   const workspaceId = await getCurrentWorkspaceId(sessionCookie);
   if (!workspaceId) {
-    return NextResponse.json({ pages: MOCK_PAGES });
+    return NextResponse.json({ error: 'No workspace found' }, { status: 404 });
   }
 
   const res = await backendRequest(
@@ -94,10 +69,6 @@ export async function GET(request: Request) {
     { method: 'GET' },
     sessionCookie
   );
-
-  if (res.status === 404) {
-    return NextResponse.json({ pages: MOCK_PAGES });
-  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => 'Failed to fetch pages');
