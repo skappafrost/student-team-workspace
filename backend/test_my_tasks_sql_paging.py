@@ -164,7 +164,7 @@ def client(db_session):
 
 @pytest.fixture(autouse=True)
 def _recording():
-    """Cross-check the cursor proxy against SQLAlchemy's own statement event."""
+    """Install the statement counter the measurement tests cross-check the proxy against."""
 
     def _before(conn, cur, statement, params, context, executemany):
         recorder.sa_statements += 1
