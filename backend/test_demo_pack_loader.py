@@ -41,7 +41,10 @@ from app import app
 from database import get_db
 
 BACKEND_DIR = Path(__file__).resolve().parent
-LOADER_PATH = BACKEND_DIR.parent / "scripts" / "demo-packs" / "load-pack.py"
+LOADER_DIR = BACKEND_DIR.parent / "scripts" / "demo-packs"
+LOADER_PATH = LOADER_DIR / "load-pack.py"
+README_PATH = LOADER_DIR / "README.md"
+PACK_PATH = LOADER_DIR / "busy-workspace.json"
 DB_URL = "sqlite:///./test_stw_demo_pack.db"
 BASE = "http://testserver"
 PASSWORD = "Loader-Test-1"
@@ -410,3 +413,52 @@ def test_the_limiter_itself_is_untouched_by_the_loader(db_session, clock, monkey
     ).status_code
     assert off != 429
     monkeypatch.delenv("RATELIMIT_ENABLED", raising=False)
+
+
+# ---------------------------------------------------------------------------
+# DOC CONTRACT — scripts/demo-packs/README.md quotes this loader's own numbers
+# ---------------------------------------------------------------------------
+
+
+def test_the_readme_quotes_only_numbers_the_loader_can_print():
+    """The README's ``plan:`` / ``run:`` lines must be numbers this code produces.
+
+    They used to be a transcription of one run, and the transcription was
+    impossible: 402 planned operations with 3 retried ``429``s is 405 sends, never
+    the 404 printed next to a ``waited`` that also contradicted the plan's own ~120 s
+    estimate. The README now quotes the arithmetic instead of a transcript, so pin
+    it to the arithmetic: a pack edit, a limiter-constant change or a doc typo fails
+    here rather than in someone's QA session.
+    """
+    mod = load_loader_module()
+    pack = json.loads(PACK_PATH.read_text(encoding="utf-8"))
+    users = len(pack["users"])
+    plan = mod.describe_plan(pack, users + 1)
+
+    match = re.search(r"(\d+) requests, (\d+) of them writes", plan)
+    assert match, plan
+    planned, write_ops = (int(g) for g in match.groups())
+    # Three kinds of request and nothing else: auth (one login probe + one register
+    # per identity), writes, and the re-reads that verify the counts.
+    read_ops = 4 + len(pack["projects"]) + len(pack["channels"])
+    assert planned == 2 * (users + 1) + write_ops + read_ops, plan
+
+    doc = README_PATH.read_text(encoding="utf-8")
+    quoted_plan = re.findall(r"plan: (\d+) requests, (\d+) of them writes", doc)
+    assert quoted_plan, "the README no longer quotes the plan line this test pins"
+    for got in quoted_plan:
+        assert tuple(int(g) for g in got) == (planned, write_ops), (
+            f"README says {got}, describe_plan says {(planned, write_ops)}"
+        )
+    assert f"**{planned} requests**" in doc, "the prose request count drifted"
+
+    quoted_run = re.findall(
+        r"run: requests=(\d+) rate-limit retries=(\d+) waited=([\d.]+)s", doc
+    )
+    assert quoted_run, "the README no longer quotes a run line"
+    for requests, retries, waited in quoted_run:
+        # The runtime invariant from test_the_loader_states_its_request_count...,
+        # and one Retry-After per retry inside a 60 s window.
+        assert int(requests) == planned + int(retries), (requests, retries, planned)
+        assert 0 < float(waited) <= int(retries) * 60.0, (waited, retries)
+

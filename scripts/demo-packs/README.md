@@ -44,7 +44,7 @@ workspace, invites + accepts all 10 pack users, posts projects/tasks,
 channels/messages, and wiki pages — then re-reads everything via the API:
 
 ```text
-plan: 402 requests, 358 of them writes … against http://127.0.0.1:8001
+plan: 402 requests, 369 of them writes … against http://127.0.0.1:8001
 admin: qa-admin@example.com (id=...)
 workspace: Busy Workspace (demo) (slug=busy-workspace-demo id=...)
 users: registered=10
@@ -52,9 +52,17 @@ projects: 4, tasks posted: 200
 channels: 3, messages posted: 135
 pages: 6
 counts: {"workspace_id": "...", "members": 11, "projects": 4, "tasks": 200, ...}
-run: requests=404 rate-limit retries=3 waited=180.0s
+run: requests=404 rate-limit retries=2 waited=120.0s
 OK: demo pack verified (members=11, projects=4, tasks=200, channels=3, messages=135, pages=6)
 ```
+
+That block is the loader's output **shape** for one run against the shipped pack,
+not a transcript of a measured run: the `plan:` figures are the ones
+`load-pack.py` computes from the pack itself (`backend/test_demo_pack_loader.py`
+pins them back against the README, so they cannot drift), and the `run:` figures
+follow from them — a `429` costs one extra send, so 402 operations + 2 retried
+refusals = 404 requests, and `waited` is the sum of the server's `Retry-After`
+values, so its decimals are whatever the window said on the day.
 
 Expected: `members` 11 (admin + 10), `tasks` 200, `channels` 3, `messages` 135,
 `pages` 6. The loader re-reads every collection and fails (exit 1) if any count does
@@ -70,23 +78,26 @@ write after it is refused until the window moves. Re-running the pack inside the
 same minute also collides with the 10 logins/min per IP bucket.
 
 This is why the loader treats `429` as a schedule instead of a failure: it reads
-the server's `Retry-After`, waits that long, re-sends, and prints what it is doing:
+the server's `Retry-After`, waits that long, re-sends, and prints what it is doing.
+Illustrative again — same run as above, with the two waits the plan predicts spelled
+out instead of collapsed into `…`:
 
 ```text
-plan: 402 requests, 358 of them writes (busiest bucket: tasks 200 from 1 identity
+plan: 402 requests, 369 of them writes (busiest bucket: tasks 200 from 1 identity
       against 120 per 60s); expects to be throttled — login: 1 x 60s window,
       tasks: 1 x 60s window, so ~120s of waiting against http://127.0.0.1:8001
 rate limited: POST http://127.0.0.1:8001/projects/…/tasks -> 429, waiting 60s
       (retry 1, 60s of 600s used)
 ...
-run: requests=404 rate-limit retries=3 waited=180.0s
+run: requests=404 rate-limit retries=2 waited=120.0s
 counts: {"workspace_id": "…", "members": 11, "projects": 4, "tasks": 200, …}
 OK: demo pack verified (members=11, projects=4, tasks=200, channels=3, messages=135, pages=6)
 ```
 
 The `plan:` number is the count of API operations the pack asks for; a retried
 `429` adds one more HTTP send on top of it, which is why `run: requests` can be
-larger than `plan:`. So the honest expectation for one load against a
+larger than `plan:` — and why it can never be larger by *more* than the retry count
+it prints next to it. So the honest expectation for one load against a
 rate-limited server is **~2 minutes**, most of it waiting, not the ~10 seconds of
 work. `--max-retry-wait` (default 600 s) caps the total waiting: a server that
 refuses forever makes the loader give up with a message instead of hanging.

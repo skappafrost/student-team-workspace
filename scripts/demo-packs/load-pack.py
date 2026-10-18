@@ -139,7 +139,7 @@ def describe_plan(pack: dict, identity_count: int) -> str:
     channels = len(pack["channels"])
     pages = len(pack["pages"])
 
-    writes = {
+    buckets = {
         "tasks": (tasks, 1),
         "messages": (messages, identity_count),
         "invites": (users, 1),
@@ -150,7 +150,7 @@ def describe_plan(pack: dict, identity_count: int) -> str:
     # Writes land on one bucket per (identity, route group); the busiest identity
     # in each group is what overflows, and it overflows in whole windows.
     windows = {}
-    for group, (count, identities) in writes.items():
+    for group, (count, identities) in buckets.items():
         busiest = math.ceil(count / max(identities, 1))
         needed = max(0, math.ceil(busiest / WRITE_LIMIT[0]) - 1)
         if needed:
@@ -160,11 +160,19 @@ def describe_plan(pack: dict, identity_count: int) -> str:
     if login_windows:
         windows["login"] = login_windows
 
-    requests = (
-        2 * login_group + 1 + 2 * users + projects + tasks
-        + channels + messages + pages
-        + 4 + projects + channels  # the re-read that verifies the counts
+    # Every request is exactly one of three kinds, so the three tallies below add
+    # up to the total by construction instead of by recollection. ``writes`` is the
+    # limiter's view (``rate_limit._write_group``): the workspace create and every
+    # ``POST /invites/accept`` are writes too, which is why the count is larger than
+    # the number of content rows in the pack. The auth calls are the one login probe
+    # plus one register per identity, and they sit in the app's login/register
+    # buckets, not in a write bucket.
+    auth_requests = 2 * login_group
+    read_requests = 4 + projects + channels  # the re-read that verifies the counts
+    write_requests = (
+        1 + 2 * users + projects + tasks + channels + messages + pages
     )
+    requests = auth_requests + write_requests + read_requests
     wait_groups = ", ".join(
         f"{group}: {n} x {WRITE_LIMIT[1] if group != 'login' else LOGIN_IP_LIMIT[1]}s window"
         for group, n in sorted(windows.items())
@@ -174,7 +182,7 @@ def describe_plan(pack: dict, identity_count: int) -> str:
         for group, n in windows.items()
     )
     return (
-        f"{requests} requests, {sum(writes[g][0] for g in writes)} of them writes"
+        f"{requests} requests, {write_requests} of them writes"
         f" (busiest bucket: tasks {tasks} from 1 identity against "
         f"{WRITE_LIMIT[0]} per {WRITE_LIMIT[1]}s)"
         + (f"; expects to be throttled — {wait_groups}, so ~{estimate}s of waiting"
