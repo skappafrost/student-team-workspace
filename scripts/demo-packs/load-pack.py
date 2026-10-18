@@ -9,17 +9,30 @@ Stdlib only (``urllib``). Flow:
 4. Create projects + ~200 tasks (assignees mapped to the new users).
 5. Create long chat channels + messages (round-robin authors).
 6. Create sample wiki pages (parents first).
-7. Re-read counts via the API, print them, assert users>=10 and tasks~=200.
+7. Re-read counts via the API, print them, and assert every one equals the pack.
+
+The backend rate-limits its own writes (``backend/rate_limit.py``: 120/min per
+identity per route group, 10 logins/min per IP) and one pack load posts 200
+tasks as a single identity, so a load *is* expected to be throttled. A 429 here
+is a schedule, not an error: the request is re-sent after the server's own
+``Retry-After`` until it fits, up to ``--max-retry-wait`` in total. The run
+prints its request plan up front and its request/retry/wait totals at the end.
 
 Usage:
     python load-pack.py --api http://127.0.0.1:8000 --email admin@example.com --password <pw>
+
+To skip the waiting entirely, run the target with ``RATELIMIT_ENABLED=0`` (see
+``scripts/demo-packs/README.md``); the loader itself never asks the server to
+turn its limiter off.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -29,13 +42,29 @@ from typing import NoReturn
 HERE = Path(__file__).resolve().parent
 DEFAULT_PACK = HERE / "busy-workspace.json"
 
-TASK_MIN, TASK_MAX = 195, 205  # "~200" tolerance band
-MIN_MEMBERS = 10
+#: Ceiling on how long one run may spend waiting out rate limits in total.
+DEFAULT_MAX_RETRY_WAIT = 600.0
+#: Set from ``--max-retry-wait`` by ``main()``; see :func:`api`.
+MAX_WAIT = DEFAULT_MAX_RETRY_WAIT
+#: A 429 with no (or an unparseable) Retry-After header is retried after this.
+RETRY_FALLBACK_WAIT = 1.0
+#: Retries per request, so a server that limits forever cannot hang the loader.
+MAX_RETRIES_PER_REQUEST = 40
+
+#: Mirror of ``backend/rate_limit.py`` — used only to describe the plan before
+#: the run starts, never to decide anything. If those constants change there,
+#: the estimate is off but the load is still correct, because the loader follows
+#: the server's Retry-After rather than its own copy of the rules.
+WRITE_LIMIT = (120, 60)
+LOGIN_IP_LIMIT = (10, 60)
+
+STATS: dict = {"requests": 0, "retried": 0, "waited": 0.0}
 
 
-def api(method: str, url: str, token: str | None = None,
-        payload: dict | None = None, timeout: float = 15.0) -> tuple[int, object]:
-    """Single JSON API call. Returns (status_code, parsed body)."""
+def _request(method: str, url: str, token: str | None = None,
+             payload: dict | None = None,
+             timeout: float = 15.0) -> tuple[int, object, float]:
+    """One JSON API call. Returns (status_code, parsed body, retry_after_secs)."""
     data = None
     headers = {"Accept": "application/json"}
     if token:
@@ -44,20 +73,132 @@ def api(method: str, url: str, token: str | None = None,
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    retry_after = 0.0
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", "replace")
-            return resp.status, (json.loads(body) if body else None)
+            return resp.status, (json.loads(body) if body else None), retry_after
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", "replace")
         try:
             parsed: object = json.loads(raw) if raw else None
         except json.JSONDecodeError:
             parsed = {"detail": raw[:500]}
-        return exc.code, parsed
+        header = exc.headers.get("Retry-After") if exc.headers else None
+        try:
+            retry_after = float(header) if header else 0.0
+        except (TypeError, ValueError):
+            retry_after = 0.0
+        return exc.code, parsed, retry_after
+
+
+def api(method: str, url: str, token: str | None = None,
+        payload: dict | None = None, timeout: float = 15.0,
+        max_wait: float | None = None) -> tuple[int, object]:
+    """``_request`` with the server's rate limit waited out instead of obeyed.
+
+    Only 429 is retried, and only until ``max_wait`` seconds of waiting have
+    accumulated across the run: a pack load that is genuinely refused returns the
+    refusal so the caller's existing ``fail()`` path still reports it. Every
+    other status is passed through untouched, so a 401/409/422/500 is still the
+    fatal error it has always been.
+    """
+    budget = MAX_WAIT if max_wait is None else max_wait
+    attempt = 0
+    while True:
+        status, body, retry_after = _request(method, url, token, payload, timeout)
+        STATS["requests"] += 1
+        if status != 429:
+            return status, body
+        attempt += 1
+        wait = retry_after if retry_after > 0 else RETRY_FALLBACK_WAIT
+        if attempt > MAX_RETRIES_PER_REQUEST or STATS["waited"] + wait > budget:
+            print(
+                f"rate limited: {method} {url} refused after {attempt} attempt(s), "
+                f"{STATS['waited']:.0f}s waited of the {budget:.0f}s budget — "
+                f"raise --max-retry-wait or start the server with RATELIMIT_ENABLED=0",
+                file=sys.stderr,
+            )
+            return status, body
+        STATS["retried"] += 1
+        STATS["waited"] += wait
+        print(
+            f"rate limited: {method} {url} -> 429, waiting {wait:.0f}s "
+            f"(retry {attempt}, {STATS['waited']:.0f}s of {budget:.0f}s used)",
+            flush=True,
+        )
+        time.sleep(wait)
+
+
+def describe_plan(pack: dict, identity_count: int) -> str:
+    """What this run is about to do, in the units the limiter thinks in."""
+    tasks = sum(len(p["tasks"]) for p in pack["projects"])
+    messages = sum(len(c["messages"]) for c in pack["channels"])
+    users = len(pack["users"])
+    projects = len(pack["projects"])
+    channels = len(pack["channels"])
+    pages = len(pack["pages"])
+
+    buckets = {
+        "tasks": (tasks, 1),
+        "messages": (messages, identity_count),
+        "invites": (users, 1),
+        "projects": (projects, 1),
+        "channels": (channels, 1),
+        "pages": (pages, 1),
+    }
+    # Writes land on one bucket per (identity, route group); the busiest identity
+    # in each group is what overflows, and it overflows in whole windows.
+    windows = {}
+    for group, (count, identities) in buckets.items():
+        busiest = math.ceil(count / max(identities, 1))
+        needed = max(0, math.ceil(busiest / WRITE_LIMIT[0]) - 1)
+        if needed:
+            windows[group] = needed
+    login_group = users + 1
+    login_windows = max(0, math.ceil(login_group / LOGIN_IP_LIMIT[0]) - 1)
+    if login_windows:
+        windows["login"] = login_windows
+
+    # Every request is exactly one of three kinds, so the three tallies below add
+    # up to the total by construction instead of by recollection. ``writes`` is the
+    # limiter's view (``rate_limit._write_group``): the workspace create and every
+    # ``POST /invites/accept`` are writes too, which is why the count is larger than
+    # the number of content rows in the pack. The auth calls are the one login probe
+    # plus one register per identity, and they sit in the app's login/register
+    # buckets, not in a write bucket.
+    auth_requests = 2 * login_group
+    read_requests = 4 + projects + channels  # the re-read that verifies the counts
+    write_requests = (
+        1 + 2 * users + projects + tasks + channels + messages + pages
+    )
+    requests = auth_requests + write_requests + read_requests
+    wait_groups = ", ".join(
+        f"{group}: {n} x {WRITE_LIMIT[1] if group != 'login' else LOGIN_IP_LIMIT[1]}s window"
+        for group, n in sorted(windows.items())
+    )
+    estimate = sum(
+        n * (LOGIN_IP_LIMIT[1] if group == "login" else WRITE_LIMIT[1])
+        for group, n in windows.items()
+    )
+    return (
+        f"{requests} requests, {write_requests} of them writes"
+        f" (busiest bucket: tasks {tasks} from 1 identity against "
+        f"{WRITE_LIMIT[0]} per {WRITE_LIMIT[1]}s)"
+        + (f"; expects to be throttled — {wait_groups}, so ~{estimate}s of waiting"
+           if windows else "; expected to fit inside one limiter window")
+    )
+
+
+def print_stats(prefix: str = "summary") -> None:
+    print(
+        f"{prefix}: requests={STATS['requests']} rate-limit retries={STATS['retried']} "
+        f"waited={STATS['waited']:.1f}s"
+    )
 
 
 def fail(msg: str) -> NoReturn:
+    print_stats("aborted")
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(1)
 
@@ -114,10 +255,20 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--slug-suffix", default=None,
                         help="Optional workspace slug suffix (auto-added on 409)")
+    parser.add_argument("--max-retry-wait", type=float, default=DEFAULT_MAX_RETRY_WAIT,
+                        help="Total seconds this run may spend waiting out HTTP 429 "
+                             "(default %(default)s). The pack load is rate-limited by "
+                             "design; raise this if the estimate printed at start is "
+                             "higher than the budget.")
     args = parser.parse_args()
+
+    global MAX_WAIT
+    MAX_WAIT = args.max_retry_wait
+    STATS.update({"requests": 0, "retried": 0, "waited": 0.0})
 
     base = args.api.rstrip("/")
     pack = json.loads(Path(args.pack).read_text(encoding="utf-8"))
+    print(f"plan: {describe_plan(pack, len(pack['users']) + 1)} against {base}")
 
     admin_token, admin_user = login_or_register(base, args.email, args.password, args.timeout)
     print(f"admin: {admin_user['email']} (id={admin_user['id']})")
@@ -239,17 +390,26 @@ def main() -> None:
         "pages": page_total,
     }
     print("counts: " + json.dumps(counts))
+    print_stats("run")
 
-    ok = True
-    if counts["members"] < MIN_MEMBERS:
-        print(f"ASSERT FAIL: members={counts['members']} < {MIN_MEMBERS}", file=sys.stderr)
-        ok = False
-    if not (TASK_MIN <= counts["tasks"] <= TASK_MAX):
-        print(f"ASSERT FAIL: tasks={counts['tasks']} not in [{TASK_MIN},{TASK_MAX}]", file=sys.stderr)
-        ok = False
-    if not ok:
+    # Every row the loader posted must be back. The old check was a tolerance
+    # band around the shipped pack (tasks 195..205, members >= 10), which a
+    # smaller pack cannot satisfy and which let a short load pass unnoticed —
+    # rate-limited writes used to be exactly that.
+    expected = {
+        "members": len(pack["users"]) + 1,  # the pack users plus the admin
+        "projects": len(pack["projects"]),
+        "tasks": sum(len(p["tasks"]) for p in pack["projects"]),
+        "channels": len(pack["channels"]),
+        "messages": sum(len(c["messages"]) for c in pack["channels"]),
+        "pages": count_pages_tree(pack["pages"]),
+    }
+    missing = {k: (counts[k], v) for k, v in expected.items() if counts[k] != v}
+    if missing:
+        for key, (got, want) in missing.items():
+            print(f"ASSERT FAIL: {key}={got} want {want}", file=sys.stderr)
         raise SystemExit(1)
-    print("OK: demo pack verified (users>=10, tasks~=200)")
+    print("OK: demo pack verified (" + ", ".join(f"{k}={v}" for k, v in expected.items()) + ")")
 
 
 if __name__ == "__main__":

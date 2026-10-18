@@ -57,8 +57,9 @@ async def list_my_tasks(
 ):
     """All tasks assigned to the current user across every workspace they belong to.
 
-    Pagination: ``limit`` (1..1000, default = cap), ``offset`` (default 0) applied
-    after the due-bucket filter (the buckets are computed in Python).
+    Pagination: ``limit`` (1..1000, default = cap), ``offset`` (default 0). The
+    order (due date first, undated last), the ``due`` bucket and the page slice all
+    run in the database, so one page costs one page of rows.
     """
     rows = (
         db.query(models.Task, models.Project, models.Workspace)
@@ -78,21 +79,35 @@ async def list_my_tasks(
     today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
     week_end = today_end + datetime.timedelta(days=7)
 
+    # The due buckets are nothing but comparisons against the three constants just
+    # computed, so they belong in the WHERE clause: as Python filters they could
+    # only run after the whole table had been read. A NULL ``due_at`` fails every
+    # range comparison in SQL too, which is what kept undated tasks out of the four
+    # dated buckets here before. An unrecognised ``due`` value narrows nothing,
+    # exactly as the chain of ``if due == ...`` it replaced did.
+    if due == "overdue":
+        rows = rows.filter(models.Task.due_at < now)
+    elif due == "today":
+        rows = rows.filter(models.Task.due_at >= now, models.Task.due_at <= today_end)
+    elif due == "week":
+        rows = rows.filter(models.Task.due_at > today_end, models.Task.due_at <= week_end)
+    elif due == "later":
+        rows = rows.filter(models.Task.due_at > week_end)
+    elif due == "none":
+        rows = rows.filter(models.Task.due_at.is_(None))
+
+    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
+    # NULLS LAST is the old sort's ``(due_at is None, due_at)`` key spelled in SQL.
+    # Slicing in the database is safe rather than merely faster: the join is 1:1
+    # per task (task -> project -> workspace are all many-to-one, and the
+    # membership row is unique on (workspace_id, user_id)), so the row count of the
+    # query equals the length of the list the Python slice used to take — and each
+    # remaining row is still worth its page position, so the due-date
+    # normalisation below only ever runs over ``limit`` rows.
+    rows = rows.order_by(models.Task.due_at.asc().nulls_last()).offset(_offset).limit(_limit)
+
     results = []
     for task, project, workspace in rows.all():
-        due_at = task.due_at
-        if due_at is not None and due_at.tzinfo is None:
-            due_at = due_at.replace(tzinfo=datetime.UTC)
-        if due == "overdue" and not (due_at and due_at < now):
-            continue
-        if due == "today" and not (due_at and now <= due_at <= today_end):
-            continue
-        if due == "week" and not (due_at and today_end < due_at <= week_end):
-            continue
-        if due == "later" and not (due_at and due_at > week_end):
-            continue
-        if due == "none" and due_at is not None:
-            continue
         out = schemas.MyTaskOut(
             **schemas.TaskOut.model_validate(task).model_dump(),
             project_name=project.name,
@@ -102,12 +117,6 @@ async def list_my_tasks(
             out.due_at = out.due_at.replace(tzinfo=datetime.UTC)
         results.append(out)
 
-    results.sort(key=lambda t: (t.due_at is None, t.due_at or datetime.datetime.max.replace(tzinfo=datetime.UTC)))
-    _limit, _offset = pagination_lib.parse_list_params(limit, offset)
-    if _offset:
-        results = results[_offset:]
-    if _limit is not None:
-        results = results[:_limit]
     return results
 
 

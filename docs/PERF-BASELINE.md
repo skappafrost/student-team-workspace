@@ -39,8 +39,15 @@ Board column source. Constant query count = the TA5-1 indexes hold.
 
 ### 2. Cross-workspace board list — `GET /users/me/tasks`
 
-Aggregated across all workspaces the user belongs to. Single query — the
-per-row Python bucketing (`due` filter) is in-memory after a joined SELECT.
+Aggregated across all workspaces the user belongs to. Single query, and the
+latency row below is **pre-fix**: the `due` bucket filter, the sort and the
+`limit`/`offset` slice used to run in Python after a joined SELECT that read
+every assigned row. A DBAPI cursor proxy measured 300 rows fetched to return 10
+at `?limit=10` over 300 tasks (30.0x over-fetch); pushing the order, the bucket
+and the page into SQL, the same request fetches 10 rows and the fetched count no
+longer moves with the table (30-task and 300-task datasets both fetch 10). See
+`backend/test_my_tasks_sql_paging.py` for the instrument and the controls that
+pin the returned rows.
 
 | rows | p50 ms | p95 ms | queries |
 |------|--------|--------|---------|
@@ -147,11 +154,11 @@ TA5-1).
 These are observations from the baseline, not regressions, and each would
 exceed the "additive <= 100 lines" budget for this task:
 
-1. **`GET /users/me/tasks` Python bucketing.** All assigned tasks are loaded
-   and the `due` bucket (overdue/today/week/later/none) is filtered in Python
-   rather than in SQL. At 300 tasks this is a single 25 ms query that returns
-   every row even when only the "today" bucket is requested. Candidate:
-   push the date predicates into the query when `due` is set.
+1. **`GET /users/me/tasks` Python bucketing.** Fixed since the baseline was
+   taken: the `due` bucket (overdue/today/week/later/none), the due-date order
+   and the `limit`/`offset` slice are SQL predicates now, so a page reads a page
+   instead of the caller's whole task list (see section 2 above and
+   `backend/test_my_tasks_sql_paging.py`).
 2. **No `LIMIT` on unbounded list endpoints.** `GET /notifications`,
    `GET /channels/{id}/messages` and `GET /workspaces/{id}/files` return
    every matching row with no cap. Linear latency growth (8 ms → 17 ms from
