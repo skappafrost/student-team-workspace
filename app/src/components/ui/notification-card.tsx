@@ -118,7 +118,13 @@ export const NotificationCard: FC<NotificationCardProps> = ({
           {isUnread && onMarkAsRead && (
             <button
               type='button'
-              onClick={() => onMarkAsRead(id)}
+              onClick={(e) => {
+                // A row in the bell is clickable when it carries a `link`; this
+                // click belongs to the tick alone, the way the mark-as-read button
+                // in `notification-list.tsx` stops propagation for the same reason.
+                e.stopPropagation();
+                onMarkAsRead(id);
+              }}
               className={cn(
                 'rounded-lg p-1.5 transition-colors',
                 'text-muted-foreground hover:bg-accent hover:text-foreground'
