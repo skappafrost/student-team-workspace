@@ -113,6 +113,17 @@ To consume a type: `components['schemas']['<Name>']` from `@/types/api`.
 Env overrides for the script: `STW_VENV_PYTHON` (Python with uvicorn+fastapi installed),
 `GEN_API_PORT` (default `8123`). See `scripts/gen-api.mjs` header for details.
 
+The generated file is checked, not just promised: the `frontend-e2e` CI job runs
+`bun run gen:api` and fails on any diff against the committed `src/types/api.d.ts`
+(`.github/workflows/ci.yml`, "Generated API types still match the backend"). It is
+in that job rather than the static-gate `frontend` job because the check needs the
+backend's OpenAPI schema, and `frontend` has no Python. A backend change to a
+docstring, a route or a response model therefore cannot land without the typed
+client going red — which is the gate this file shipped without from the day it was
+added, and why it silently fell behind by nineteen routes (33 paths when it was
+last generated, 52 now — the same 52 `docs/API.md` states and
+`backend/test_docs_contract.py` enforces).
+
 ## Folder structure
 
 ```plaintext
