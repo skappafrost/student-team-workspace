@@ -21,6 +21,26 @@ from services import log_activity
 
 router = APIRouter()
 
+#: Widest range the list endpoint expands: five years, i.e. ~1,830 daily
+#: occurrences. The calendar page requests one month at a time, so this is a wide
+#: margin over real use — and a range beyond it is refused instead of walked.
+MAX_EXPANSION_RANGE = timedelta(days=366 * 5)
+
+#: Iterations one event's expansion may spend, separate from ``cap``: ``cap``
+#: bounds the rows returned, this bounds the work done to find them, because an
+#: iteration outside the range appends nothing. The walk starts at the first
+#: candidate occurrence rather than at the event's anchor (see ``_walk_seed``), so
+#: a request costs one step per occurrence in its own window — a calendar month is
+#: ~31 steps and the widest range the endpoint admits ~1,830, whatever the event's
+#: age. This bound is therefore a backstop no legitimate request reaches; it is
+#: what keeps a hand-built or future call from walking the calendar again, the way
+#: the unbounded code spent 2,912,442 steps on a single one-day year-9999 window.
+MAX_EXPANSION_STEPS = 20_000
+
+#: The periods a walk can skip arithmetically, because they land on a whole
+#: number of days. Monthly steps by calendar month and is handled separately.
+FIXED_PERIODS = {"daily": timedelta(days=1), "weekly": timedelta(weeks=1)}
+
 
 def _can_modify_event(
     event: models.Event, membership: models.WorkspaceMembership, current_user: dict
@@ -101,6 +121,120 @@ def _add_months(dt: datetime, months: int) -> datetime:
     return dt.replace(year=year, month=month, day=day)
 
 
+def _next_occurrence(current: datetime, recurrence: str) -> datetime | None:
+    """Advance one recurrence period, or end the walk at the calendar limit.
+
+    ``datetime.max`` is 9999-12-31, so stepping past it raises ``OverflowError``
+    (daily/weekly ``timedelta`` arithmetic) or ``ValueError`` (the ``replace`` in
+    ``_add_months``) — an uncaught 500 for any event whose own ``start_at`` sits
+    at the end of the supported range. Returning ``None`` removes that instead of
+    catching it: past the last representable date there is no occurrence to emit.
+    """
+    if recurrence == "daily":
+        delta = timedelta(days=1)
+    elif recurrence == "weekly":
+        delta = timedelta(weeks=1)
+    else:
+        # Monthly — and any legacy value in the free-text column — steps by month.
+        if current.year == datetime.max.year and current.month == 12:
+            return None
+        return _add_months(current, 1)
+    if current > datetime.max - delta:
+        return None
+    return current + delta
+
+
+def _occurrence_end(start_at: datetime, duration: timedelta | None) -> datetime | None:
+    """The end of one occurrence, clamped to the last representable datetime.
+
+    ``end_at`` is never validated against ``start_at``, so an event that runs up
+    to the calendar limit (a daily one created with ``end_at`` in 9999) has a
+    ``duration`` that carries ``start_at + duration`` past ``datetime.max`` one
+    step in. Clamping cannot change which rows are kept: a range end is never
+    past the limit either, so the real value and the clamp both overlap.
+    """
+    if not duration:
+        return None
+    if duration > datetime.max - start_at:
+        return datetime.max
+    return start_at + duration
+
+
+def _earliest_relevant_start(range_start: datetime, duration: timedelta | None) -> datetime:
+    """The first occurrence start that can still reach into the range.
+
+    An occurrence is kept when it ends at or after ``range_start``, or when it has
+    no duration and starts there, so anything beginning before
+    ``range_start - duration`` is out of the answer for that reason alone. The
+    shift is clamped at both ends of the calendar, because both directions are
+    reachable: a duration long enough to leave it backwards overlaps every window,
+    so nothing may be skipped, and ``end_at`` is never validated against
+    ``start_at``, so a negative duration shifts the threshold forwards past every
+    window there is.
+    """
+    if not duration:
+        return range_start
+    if duration > timedelta():
+        return datetime.min if duration > range_start - datetime.min else range_start - duration
+    if -duration > datetime.max - range_start:
+        return datetime.max
+    return range_start - duration
+
+
+def _monthly_at(start: datetime, months: int) -> datetime:
+    """The occurrence ``months`` steps into a monthly walk, computed in one step.
+
+    ``_add_months`` clamps the day-of-month whenever it lands on a shorter month
+    and never restores it, so a Jan 31 anchor fires on the 28th from February
+    onwards: the date at step ``months`` depends on every month crossed on the way,
+    not just on the target month. The closed form has to reproduce that, or a
+    seeded walk would answer a far window with dates the same event answers a near
+    one differently.
+    """
+    if months <= 0:
+        return start
+    day = start.day
+    # The fold only ever lowers the day, and 28 — a non-leap February, the shortest
+    # month there is — is its floor: past one, later steps cannot change it. Any 33
+    # consecutive years span a non-leap February (any two do, really), so 400 months
+    # reaches the floor with room to spare and the sweep need not cover the rest.
+    probe = start.replace(day=1)
+    for offset in range(1, min(months, 400) + 1):
+        step = _add_months(probe, offset)
+        day = min(day, calendar.monthrange(step.year, step.month)[1])
+    return _add_months(start.replace(day=day), months)
+
+
+def _walk_seed(
+    start: datetime, range_start: datetime, duration: timedelta | None, recurrence: str
+) -> datetime:
+    """Where the walk begins: the last period that could still reach the range.
+
+    Stepping from the event's own anchor ties the answer to the event's age,
+    because the walk is bounded by how far it can go: a daily one reaches roughly
+    55 years past the anchor and stops, so a legitimate one-day window beyond that
+    depth used to come back empty. Seeding at the first candidate costs one step
+    per occurrence inside the requested window wherever the calendar puts it, and
+    every period before the seed provably ends before the range.
+
+    Daily/weekly skip whole periods, which floors to at most one step short of the
+    candidate; monthly steps by calendar month, whose day-of-month clamps, so it
+    backs off a further month. Both leave the decision to the loop's own filter,
+    which is what keeps the rows exact rather than merely early.
+    """
+    threshold = _earliest_relevant_start(range_start, duration)
+    period = FIXED_PERIODS.get(recurrence)
+    if period is not None:
+        # The skip is arithmetic driven by caller-supplied bounds, so it is
+        # clamped to the calendar rather than assumed to fit inside it.
+        reachable = (datetime.max - start) // period
+        whole = min(max((threshold - start) // period, 0), reachable)
+        return start + whole * period
+    months = (threshold.year - start.year) * 12 + threshold.month - start.month - 1
+    reachable = (datetime.max.year - start.year) * 12 + datetime.max.month - start.month
+    return _monthly_at(start, min(max(months, 0), reachable))
+
+
 def _expand_occurrences(
     event: models.Event,
     range_start: datetime | None,
@@ -110,6 +244,15 @@ def _expand_occurrences(
     """Expand a recurring event into concrete occurrences intersecting the range.
 
     RRULE-lite: daily / weekly / monthly steps from the base start_at.
+
+    The walk is seeded at the first occurrence that can still reach the range
+    (``_walk_seed``), not at the anchor, so which rows come back does not depend on
+    how old the event is. Two bounds stop it: ``cap`` on the rows appended and
+    ``MAX_EXPANSION_STEPS`` on the iterations taken — an iteration that falls
+    outside the range appends nothing, so ``cap`` alone does not bound the work, and
+    after the seed only the backstop can end a walk early. Neither one bounds the
+    *arithmetic*, which is why both date computations clamp (see
+    ``_next_occurrence`` and ``_occurrence_end``).
 
     The event's timestamps and the range bounds are both normalized to naive
     UTC before stepping, because the two come from different sources with
@@ -126,17 +269,16 @@ def _expand_occurrences(
 
     duration = (end - start) if end else None
 
-    def step(dt: datetime) -> datetime:
-        if event.recurrence == "daily":
-            return dt + timedelta(days=1)
-        if event.recurrence == "weekly":
-            return dt + timedelta(weeks=1)
-        return _add_months(dt, 1)
-
     out: list[schemas.EventOut] = []
-    start_at = start
-    while start_at <= re_ and len(out) < cap:
-        occ_end = start_at + duration if duration else None
+    start_at: datetime | None = _walk_seed(start, rs, duration, event.recurrence)
+    steps = 0
+    while (
+        start_at is not None
+        and start_at <= re_
+        and len(out) < cap
+        and steps < MAX_EXPANSION_STEPS
+    ):
+        occ_end = _occurrence_end(start_at, duration)
         if (
             (occ_end is None or occ_end >= rs)
             and start_at >= rs
@@ -153,7 +295,8 @@ def _expand_occurrences(
                     }
                 )
             )
-        start_at = step(start_at)
+        start_at = _next_occurrence(start_at, event.recurrence)
+        steps += 1
     return out
 
 
@@ -187,6 +330,14 @@ async def list_workspace_events(
             end_dt = datetime.fromisoformat(end).replace(tzinfo=None)
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid end date format") from None
+
+    # Rejected here, before any expansion: `fromisoformat` happily accepts year
+    # 9999, and walking such a range is bounded only by how long the request takes.
+    if start_dt and end_dt and end_dt - start_dt > MAX_EXPANSION_RANGE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Date range too large: at most {MAX_EXPANSION_RANGE.days} days",
+        )
 
     base_query = db.query(models.Event).filter(models.Event.workspace_id == workspace_id)
 
