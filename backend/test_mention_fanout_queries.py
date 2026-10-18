@@ -16,10 +16,12 @@ members, on the per-member implementation:
 — one read of ``users`` per member on top of a flat 2/9, growing the whole
 request by exactly one statement per member. Eager-loading the same
 relationship batches the roster into one ``users ... WHERE id IN (...)`` read:
-both headcounts come back at 2 reads / 12 statements, and the roster read doubles
-as the author lookup the fan-out already needed (the author is a member), so the
-mentioning message costs one statement more than the same message without an
-``@``.
+both headcounts come back at ``(users reads, request statements)`` == ``(2, 12)``
+for the mentioning POST and ``(2, 9)`` for the same message with no ``@``, and
+those two tuples are what the measurement tests assert. So the mention adds
+*three* statements, not one — and no read at all, because the batched roster read
+is also the author lookup the fan-out needs (the author is a member), which is
+why 2 reads stays 2 instead of going to 3.
 
 The controls pin the *resolution*, not the count: which mentions resolve, to
 whom, with which notification type, over a dataset built out of the awkward
@@ -239,10 +241,13 @@ def test_control_dm_and_thread_fanout_are_untouched(client, db_session):
 def test_measured_users_reads_do_not_grow_with_membership(client, db_session):
     """One mentioning POST, 5 vs 25 members, plus the same message with no mention.
 
-    The plain-message leg is the baseline: two reads of ``users`` that have
-    nothing to do with the roster (the author for the notification title, the
-    author eager-load behind the response). The mentioning leg must add exactly
-    one more read, whatever the headcount.
+    The plain-message leg is the baseline — ``(2, 9)``, the two reads being the
+    author for the notification title and the author eager-load behind the response,
+    neither of them the roster. The mentioning leg is ``(2, 12)`` at either headcount:
+    three statements more than the baseline, and **no** extra read, because the one
+    batched roster ``IN (...)`` read is also the author lookup the fan-out already
+    needed. The tuples are pinned exactly rather than as a ceiling, so a change to
+    this POST's statement set has to be deliberate.
     """
     observed = {}
     for n in (5, 25):
@@ -267,18 +272,16 @@ def test_measured_users_reads_do_not_grow_with_membership(client, db_session):
         f"{observed[25]['mentioned']} at 25: one SELECT per member is back"
     )
     for n in (5, 25):
-        users_reads, _total = observed[n]["mentioned"]
-        baseline, _ = observed[n]["plain"]
-        # The author is a workspace member too, so one batched roster read can
-        # serve both; the ceiling is the baseline plus the one roster statement.
-        assert users_reads <= baseline + 1, (
-            f"the roster must be one read of users at {n} members, got {users_reads} "
-            f"against a {baseline}-read baseline for the same message without a mention"
-        )
+        assert observed[n]["mentioned"] == (2, 12), observed[n]
+        assert observed[n]["plain"] == (2, 9), observed[n]
 
 
 def test_measured_a_message_without_a_mention_never_reads_the_roster(client, db_session):
-    """The early return is the cheapest part of this path, and it must stay."""
+    """The early return is the cheapest part of this path, and it must stay.
+
+    ``(2, 9)`` at both headcounts: the two ``users`` reads are the author lookups,
+    never the roster — which is the baseline the mentioning leg is measured against.
+    """
     observed = {}
     for n in (5, 25):
         chan, _ = seed(db_session, [f"Member Number {i:02d}" for i in range(n)])
@@ -289,4 +292,4 @@ def test_measured_a_message_without_a_mention_never_reads_the_roster(client, db_
             f"MEASURE after(members={n}, POST without a mention): "
             f"users_selects={st.reading('users')} request_statements={st.total}"
         )
-    assert observed[5] == observed[25], observed
+    assert observed[5] == observed[25] == (2, 9), observed

@@ -18,9 +18,10 @@ assigned to one identity:
 
 and the recorded SQL carried neither ``ORDER BY`` nor ``LIMIT``. Fetched rows
 tracked the table, not the page. After pushing the order, the due bucket and the
-page slice into the query, the same instrument reports 1 statement and 10 rows
-for each of those requests, and the 30-row and 300-row datasets fetch the same
-number of rows.
+page slice into the query, the same instrument reports one statement per request
+whose fetched-row count equals the page the endpoint returned — the measurement
+tests assert ``fetched == len(body)`` for a non-empty page, never an upper bound —
+and the 30-row and 300-row datasets fetch the same number of rows.
 
 The controls pin the results first: the endpoint has to keep returning exactly
 what "fetch all, sort in Python, slice in Python" returned — same rows, same
@@ -257,6 +258,32 @@ def seed_bulk(db, user_id: str, n: int, slug: str) -> None:
     db.commit()
 
 
+def seed_row_in_todays_bucket(db, user_id: str) -> None:
+    """One task due in the middle of whatever part of today is left.
+
+    ``seed_bulk`` starts its dues at the seed instant and steps forward an hour, so
+    for a run after ~22:00 UTC the ``today`` bucket is empty — and a leg that returns
+    nothing cannot tell "fetched one page" from "fetched the table and threw it away".
+    The midpoint of the remaining window is after ``now`` and at or before
+    ``today_end`` at any start hour, which keeps that leg measuring a non-empty bucket.
+    """
+    proj = _workspace(db, user_id, f"paging-today-{uuid.uuid4().hex[:6]}")
+    now = datetime.datetime.now(datetime.UTC)
+    today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    due = (now + (today_end - now) / 2).replace(tzinfo=None)
+    db.add(
+        Task(
+            project_id=proj,
+            assignee_id=user_id,
+            title="due-in-todays-window",
+            status="todo",
+            position=0.0,
+            due_at=due,
+        )
+    )
+    db.commit()
+
+
 def new_uid(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
@@ -484,23 +511,34 @@ def test_measured_rows_do_not_grow_with_the_table(client, db_session):
 
 
 def test_measured_due_bucket_and_deep_offset_stay_one_page(client, db_session):
+    """The bucket leg and the deep-offset leg each fetch the page and nothing more.
+
+    ``fetched == len(body)`` rather than ``fetched <= 10``: an inequality is also true
+    of a query that fetched 10 rows and returned 8 of them, and it is vacuously true of
+    one that fetched nothing, which is what a run near 23:00 UTC used to get out of the
+    ``due=today`` leg while the write-up printed "300 -> 8". Both legs now assert a
+    non-empty page as well.
+    """
     uid = new_uid("p-due")
     _new_user(db_session, uid)
     seed_bulk(db_session, uid, 300, f"paging-due-{uuid.uuid4().hex[:6]}")
+    seed_row_in_todays_bucket(db_session, uid)
     as_user(client, uid)
 
     for params, expected_rows in (({"limit": 10, "due": "today"}, None), ({"limit": 10, "offset": 290}, 10)):
         recorder.reset()
         resp = client.get(MEASURED_PATH, params=params)
+        body = resp.json()
         fetched = sum(r for _, r in recorder.task_select_rows())
         print(
             f"MEASURE after(GET {MEASURED_PATH}?{params}): statements={recorder.sa_statements} "
-            f"rows_fetched={fetched} returned={len(resp.json())}"
+            f"rows_fetched={fetched} returned={len(body)}"
         )
         assert resp.status_code == 200
-        assert fetched <= 10, f"{params} fetched {fetched} rows for a 10-row page"
+        assert len(body) > 0, f"{params} answered with an empty page, so the fetch count proves nothing"
+        assert fetched == len(body), f"{params} fetched {fetched} rows for a {len(body)}-row page"
         if expected_rows is not None:
-            assert len(resp.json()) == expected_rows
+            assert len(body) == expected_rows
 
 
 def test_measured_sql_carries_the_order_and_the_slice(client, db_session):
