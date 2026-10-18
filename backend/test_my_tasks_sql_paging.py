@@ -104,7 +104,14 @@ class _CountingCursor(sqlite3.Cursor):
         return rows
 
     def fetchmany(self, size=None, **kwargs):
-        rows = super().fetchmany(size if size is not None else -1, **kwargs)
+        # ``fetchmany()`` with no argument is what a streamed result calls, and it
+        # means "the next arraysize rows". Forwarding the None as -1 does not: this
+        # interpreter's sqlite3 raises ``ValueError: Cannot convert negative int``,
+        # so the proxy would break the very path it is there to measure.
+        if size is None:
+            rows = super().fetchmany(**kwargs)
+        else:
+            rows = super().fetchmany(size, **kwargs)
         recorder.add_rows(len(rows))
         return rows
 

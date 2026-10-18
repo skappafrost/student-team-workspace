@@ -1,4 +1,4 @@
-"""C3: the @mention fan-out must read the workspace's users in one SELECT.
+"""The @mention fan-out must read the workspace's users in one SELECT.
 
 ``_resolve_mentions`` needs every member's display name, so it loaded the
 workspace's membership rows and then touched ``membership.user`` on each one —
@@ -44,7 +44,7 @@ from database import get_db
 from models import Channel, ChannelMember, User, Workspace, WorkspaceMember
 
 DB_URL = "sqlite:///./test_stw_mention_fanout.db"
-OWNER = "c3-owner"
+OWNER = "mention-fanout-owner"
 
 TRICKY = [
     "Alice",          # the shortest of three names sharing a prefix
@@ -123,12 +123,18 @@ def seed(db, member_names: list[str], extra_users: list[str] = ()) -> tuple[str,
         db.add(User(id=OWNER, email=f"{OWNER}@example.com", display_name="Owner Zero"))
     ids: dict = {}
     for i, name in enumerate(member_names):
-        uid = f"c3-m-{i}-{tag}"
+        uid = f"roster-member-{i}-{tag}"
         db.add(User(id=uid, email=f"{uid}@example.com", display_name=name))
         ids[name] = uid
     for i, name in enumerate(extra_users):
-        db.add(User(id=f"c3-x-{i}-{tag}", email=f"c3-x-{i}-{tag}@example.com", display_name=name))
-    ws = Workspace(name=f"C3 {tag}", slug=f"c3-{tag}")
+        db.add(
+            User(
+                id=f"roster-outsider-{i}-{tag}",
+                email=f"roster-outsider-{i}-{tag}@example.com",
+                display_name=name,
+            )
+        )
+    ws = Workspace(name=f"Roster {tag}", slug=f"roster-{tag}")
     db.add(ws)
     db.flush()
     db.add(WorkspaceMember(workspace_id=ws.id, user_id=OWNER, role="owner"))

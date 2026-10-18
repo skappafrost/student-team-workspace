@@ -181,7 +181,10 @@ class LoaderRun:
         )
         try:
             body = resp.json()
-        except Exception:
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # The two ways a body can fail to be JSON, and nothing else: the blanket
+            # ``except Exception`` this replaces would also have swallowed a broken
+            # transport or a 500 raised inside the test client.
             body = None
         header = resp.headers.get("retry-after")
         try:
@@ -330,13 +333,14 @@ def test_a_non_429_refusal_is_still_fatal_and_never_retried(
     mod = load_loader_module()
     run = LoaderRun(mod, clock, monkeypatch)
     original = run._request
-    poisoned: list[int] = []
+    refusal_sent = False
 
     def _request(method, url, token=None, payload=None, timeout=15.0):
+        nonlocal refusal_sent
         # The refusal is simulated *instead of* sent, so the row is never written
         # and the count below really does say "the loader stopped here".
-        if url.endswith("/tasks") and method == "POST" and not poisoned:
-            poisoned.append(201)
+        if url.endswith("/tasks") and method == "POST" and not refusal_sent:
+            refusal_sent = True
             run.calls.append({"method": method, "path": url, "status": 403, "group": "tasks",
                               "retry_after": 0.0, "payload": ""})
             return 403, {"detail": "simulated refusal"}, 0.0
@@ -378,7 +382,7 @@ def test_a_server_that_limits_forever_gives_up_instead_of_hanging(
     assert "raise --max-retry-wait or start the server with RATELIMIT_ENABLED=0" in captured.err
 
 
-def test_the_limiter_itself_is_untouched_by_the_loader(db_session, clock, monkeypatch, tmp_path):
+def test_the_limiter_itself_is_untouched_by_the_loader(db_session, clock, monkeypatch):
     """The fix is loader-side: the app still denies at the same point for everyone else.
 
     ``ENVIRONMENT=dev`` must not switch the limiter off either — only
