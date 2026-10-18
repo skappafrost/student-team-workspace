@@ -335,19 +335,13 @@ class TestCrossWorkspaceLeakage:
 
         make_user(db_session, "userA")
         as_user(client, "userA")
-        # userA is not a member of wsB; accepting the invite would LEAK wsB
-        # membership to an unrelated account. The invite token is secret, but
-        # the guard must still reject a membership-less accepter... here the
-        # accept DOES create membership (by design). We assert the invariant
-        # that A still cannot read wsB *before* accepting, and that accepting
-        # an invite meant for another email is the only path in.
+        # A holds the token but is not the address it names, so A gets no way
+        # into wsB. Before acceptance was bound to the invitee this answered 201
+        # and handed A a membership nobody offered it — the invariant that A
+        # still cannot read wsB is now what the 403 protects.
         r = client.post("/invites/accept", json={"token": invite["token"]})
-        assert r.status_code in (201, 409)
-        if r.status_code == 201:
-            # If accepted, A must now be able to read wsB (invite is the
-            # explicit consent flow) — and NOT by bypassing membership.
-            as_user(client, "userA")
-            assert client.get(f"/workspaces/{two_workspaces['ws_b']['id']}").status_code == 200
+        assert r.status_code == 403, r.text
+        assert client.get(f"/workspaces/{two_workspaces['ws_b']['id']}").status_code == 403
 
     def test_cannot_delete_other_workspace(self, client, two_workspaces):
         as_user(client, "userA")
