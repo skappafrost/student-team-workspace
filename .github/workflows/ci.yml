@@ -179,6 +179,28 @@ jobs:
         uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      # `app/src/types/api.d.ts` is generated, not maintained — and nothing ever
+      # checked that it still matched the backend, so it had not moved since the
+      # typegen pilot landed while the API grew `/auth/refresh`, presence,
+      # `/notifications/mark-all-read`, `/healthz` and `/users/me/tasks` around it.
+      # `bun run gen:api` is the same command a human runs: it starts its own
+      # throwaway uvicorn against a temp SQLite file (never `stw.db`, never
+      # Postgres) using the venv built above, so no shared backend is involved and
+      # it cannot collide with the port `playwright.config.ts` uses later. Its
+      # output is byte-stable across runs, which is what makes the diff a gate
+      # rather than a flake. It lives in this job and not `frontend` because
+      # `frontend` has no Python: the guard needs the backend's own schema, so it
+      # belongs where a backend already exists.
+      - name: Generated API types still match the backend
+        env:
+          STW_VENV_PYTHON: ${{ github.workspace }}/backend/.venv/bin/python
+          ENVIRONMENT: dev
+        run: |
+          bun run gen:api
+          if ! git diff --exit-code -- src/types/api.d.ts; then
+            echo "::error::app/src/types/api.d.ts does not match a fresh generation from this branch's backend. Run \`cd app && bun run gen:api\` and commit the result — do not hand-edit it."
+            exit 1
+          fi
       # Chromium only. It is the engine whose subprotocol behaviour the RFC 6455
       # handshake bug turned on, and installing three engines doubles the job.
       - name: Install Chromium

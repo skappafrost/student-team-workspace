@@ -8,17 +8,6 @@ async function getSessionCookie(): Promise<string | undefined> {
   return cookieStore.get('session_token')?.value;
 }
 
-async function getCurrentWorkspaceId(sessionCookie: string): Promise<string | null> {
-  const res = await fetch(`${BACKEND_URL}/workspaces`, {
-    headers: { Cookie: `session_token=${sessionCookie}` },
-    cache: 'no-store'
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as Array<{ id: string }>;
-  if (!Array.isArray(data) || data.length === 0) return null;
-  return data[0].id;
-}
-
 async function backendRequest(
   path: string,
   init: RequestInit,
@@ -40,10 +29,13 @@ export async function GET(request: Request) {
   if (!sessionCookie) {
     return NextResponse.json({ tasks: [] });
   }
-  const workspaceId = await getCurrentWorkspaceId(sessionCookie);
-  if (!workspaceId) {
-    return NextResponse.json({ tasks: [] });
-  }
+  // No workspace is resolved here on purpose. The proxied path is
+  // `/projects/{projectId}/tasks`, which the backend authorizes from the
+  // project's own workspace (`routers/tasks.py:list_project_tasks` runs
+  // `_require_member(project.workspace_id, …)`) — the id this handler used to
+  // look up was never sent anywhere, so it guarded nothing while making GET the
+  // only verb in this file that claimed a workspace was required. POST, PATCH
+  // and DELETE have always gone straight through.
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get('project_id');
   if (!projectId) {

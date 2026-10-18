@@ -51,7 +51,28 @@ async def list_workspaces(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List workspaces the current user is a member of."""
+    """List workspaces the current user is a member of, oldest first.
+
+    The order is part of the contract, not a courtesy: every BFF handler takes
+    ``[0]`` of this list as "the current workspace", so without an explicit sort
+    that choice is whatever the plan yielded — rowid/insert order on SQLite,
+    nothing at all on PostgreSQL. Two queries used to stack here (memberships,
+    then ``id.in_(workspace_ids)``) and neither constrained the result order,
+    because the order of an ``IN`` list does not propagate to rows.
+
+    ``created_at`` is the key because it is the only stable, meaningful one the
+    row has: it is set by the database at insert, never rewritten (``updated_at``
+    is, and a rename would silently move which workspace a member opens), and
+    "the workspace you created first" is the one you were already looking at, so
+    creating another cannot hijack ``[0]``. It is not unique — two workspaces
+    created in the same second tie on SQLite, and ``func.now()`` is a
+    transaction timestamp on PostgreSQL, so every batch of inserts ties — hence
+    the ``id`` tiebreak. ``id`` is a random UUID string, which makes the tie
+    order arbitrary but fixed, and it is the primary key, which makes it total:
+    no two rows can tie twice. Same two-key shape as
+    ``routers/messages.py:list_channel_messages``, and the reason
+    ``test_workspace_api.py`` pins both keys instead of one.
+    """
     memberships = (
         db.query(models.WorkspaceMembership)
         .filter(models.WorkspaceMembership.user_id == current_user["id"])
@@ -60,7 +81,12 @@ async def list_workspaces(
     workspace_ids = [m.workspace_id for m in memberships]
     if not workspace_ids:
         return []
-    workspaces = db.query(models.Workspace).filter(models.Workspace.id.in_(workspace_ids)).all()
+    workspaces = (
+        db.query(models.Workspace)
+        .filter(models.Workspace.id.in_(workspace_ids))
+        .order_by(models.Workspace.created_at.asc(), models.Workspace.id.asc())
+        .all()
+    )
     return workspaces
 
 
