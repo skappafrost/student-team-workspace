@@ -45,10 +45,13 @@ def _resolve_mentions(db: Session, workspace_id: str, content: str) -> list[str]
     # every mentioning message. ``before_cursor_execute`` counted 7 reads of
     # ``users`` (17 statements) for a mention in a 5-member workspace and 27 (37
     # statements) in a 25-member one; ``selectinload`` folds the roster into a
-    # single ``users ... WHERE id IN (...)`` read, so both cases come back at 2
-    # reads / 12 statements — the roster read doubles as the author lookup the
-    # fan-out also needs, because the author is a member. Same batching as the
-    # page tree in ``routers/pages.py``.
+    # single ``users ... WHERE id IN (...)`` read, so both headcounts come back at
+    # ``(users reads, request statements)`` == ``(2, 12)`` against the ``(2, 9)`` the
+    # same message costs with no ``@`` — three statements for the mention and not one
+    # extra read, because the roster read doubles as the author lookup the fan-out
+    # also needs (the author is a member). ``test_mention_fanout_queries.py`` asserts
+    # both tuples, so those numbers cannot rot quietly. Same batching as the page tree
+    # in ``routers/pages.py``.
     members = (
         db.query(models.WorkspaceMember)
         .filter(models.WorkspaceMember.workspace_id == workspace_id)

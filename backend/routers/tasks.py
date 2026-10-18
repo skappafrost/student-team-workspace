@@ -97,7 +97,13 @@ async def list_my_tasks(
         rows = rows.filter(models.Task.due_at.is_(None))
 
     _limit, _offset = pagination_lib.parse_list_params(limit, offset)
-    # NULLS LAST is the old sort's ``(due_at is None, due_at)`` key spelled in SQL.
+    # NULLS LAST is the old sort's ``(due_at is None, due_at)`` key spelled in SQL --
+    # and as non-total as that key was: rows sharing a ``due_at``, or sharing a NULL,
+    # have no order between them, so which of them lands on a page is the database's
+    # to decide. The ``(due_at, id)`` tie-break that would settle it is a behaviour
+    # change needing its own ruling; ``routers/messages.py::list_channel_messages``
+    # (``created_at, id`` for the chat window) is the precedent for adding one
+    # deliberately rather than as a side effect.
     # Slicing in the database is safe rather than merely faster: the join is 1:1
     # per task (task -> project -> workspace are all many-to-one, and the
     # membership row is unique on (workspace_id, user_id)), so the row count of the

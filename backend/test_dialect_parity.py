@@ -23,6 +23,12 @@ locks the remaining divergence classes down:
 5. Recurring-event expansion -- the naive/aware normalization fix in
    routers/events.py; without it, every recurring list-with-range request
    returns 500 on Postgres (this suite reproduces it directly).
+6. SQL-side range filters, ``ORDER BY ... NULLS LAST`` and ``LIMIT``/``OFFSET`` --
+   ``GET /users/me/tasks`` now buckets ``?due=`` and slices the page inside the
+   query instead of in Python, so the comparison runs against a ``timestamptz``
+   column on Postgres and against the driver's fixed text form on SQLite. Every
+   other suite touching that endpoint builds a hardcoded SQLite engine, which is
+   why the cases live here.
 
 Rules (task contract):
 
@@ -331,6 +337,146 @@ def test_unique_constraint_nulls_parity(db_session):
             db_session.flush()
         finally:
             db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# my-tasks due buckets / ordering / paging (the SQL pushed into routers/tasks.py)
+# ---------------------------------------------------------------------------
+
+
+def _my_tasks_board(client, db_session, slug):
+    """Owner-run workspace + board, i.e. rows ``GET /users/me/tasks`` can see."""
+    ws = _make_workspace(client, db_session, name=f"mt-{slug}", slug=slug)
+    resp = client.post(f"/workspaces/{ws['id']}/projects", json={"name": f"Board {slug}"})
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def _seed_my_tasks(client, db_session, slug):
+    """Seed seven of the caller's own tasks and return the ``(title, due_at)`` used.
+
+    Five dated rows, one per non-NULL bucket, with **distinct** due dates, plus two
+    undated ones. Distinct dues make the ``ORDER BY due_at`` prefix a total order, so
+    every page is a fixed list of titles on either engine; the two NULL rows are only
+    ever asserted as a group, because which of them lands first is the database's
+    business and was never specified.
+    """
+    board = _my_tasks_board(client, db_session, slug)
+    now = datetime.datetime.now(datetime.UTC)
+    today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    # The midpoint of the window still left today: strictly later than ``now`` and
+    # never past ``today_end``, whatever hour the suite starts at. Seeding "an hour
+    # from now" instead would put the row in tomorrow's bucket for any run after
+    # 23:00 UTC, and the ``today`` leg would then assert nothing.
+    rows = [
+        ("overdue-old", now - datetime.timedelta(days=3)),
+        ("overdue-recent", now - datetime.timedelta(hours=5)),
+        ("due-today", now + (today_end - now) / 2),
+        ("due-week", now + datetime.timedelta(days=3)),
+        ("due-later", now + datetime.timedelta(days=30)),
+        ("undated-a", None),
+        ("undated-b", None),
+    ]
+    for title, due in rows:
+        payload = {"title": title, "assignee_id": "owner"}
+        if due is not None:
+            payload["due_at"] = due.isoformat()
+        resp = client.post(f"/projects/{board}/tasks", json=payload)
+        assert resp.status_code == 201, resp.text
+    return rows
+
+
+DATED_IN_ORDER = ["overdue-old", "overdue-recent", "due-today", "due-week", "due-later"]
+
+
+def test_my_tasks_due_bucket_parity(client, db_session):
+    """``?due=`` must put the same rows in the same bucket on both engines.
+
+    The buckets are SQL range comparisons against aware-UTC constants since the
+    over-fetch fix, so on Postgres they run against a ``timestamptz`` column -- where
+    a session-timezone shift or a naive/aware bind slip moves the boundary -- and on
+    SQLite against the driver's ``%Y-%m-%d %H:%M:%S.%f`` text form, where the
+    comparison is only chronological because that format is fixed-width. Neither
+    failure shows up in the endpoint's own suites: all three of them build a
+    hardcoded SQLite engine, so on the Postgres job nothing sent ``due=`` through the
+    new SQL at all.
+    """
+    rows = _seed_my_tasks(client, db_session, "parity-mytasks-buckets")
+
+    def bucket(due):
+        resp = client.get("/users/me/tasks", params={"due": due})
+        assert resp.status_code == 200, resp.text
+        return [t["title"] for t in resp.json()]
+
+    # Both legs must agree that exactly the two past-dated rows are overdue, in
+    # ascending-due order, and that the row seeded inside today's window is the only
+    # one today. A boundary that moved on one engine answers with a different list.
+    assert bucket("overdue") == ["overdue-old", "overdue-recent"]
+    assert bucket("today") == ["due-today"]
+    assert bucket("week") == ["due-week"]
+    assert bucket("later") == ["due-later"]
+    # The two undated rows tie on NULL, so only their membership is asserted.
+    assert sorted(bucket("none")) == ["undated-a", "undated-b"]
+
+    # The five buckets partition the seven rows: a range that overlapped, or a NULL
+    # that started satisfying a comparison, would show up as a repeat or a gap.
+    distributed = [
+        title for due in ("overdue", "today", "week", "later", "none") for title in bucket(due)
+    ]
+    assert len(distributed) == 7, distributed
+    assert sorted(distributed) == sorted(title for title, _ in rows), (
+        "the buckets no longer cover exactly the rows the caller owns"
+    )
+
+
+def test_my_tasks_page_and_undated_tail_parity(client, db_session):
+    """``ORDER BY due_at ASC NULLS LAST`` + ``LIMIT``/``OFFSET`` page the same rows.
+
+    SQLite grew ``NULLS LAST`` in 3.30 and Postgres has always had it, but the clause
+    is only half of the contract: the other half is that undated rows land after every
+    dated one and that slicing in the database neither drops nor repeats a row. The
+    page arithmetic is asserted on both engines from one seed, so the leg that stops
+    honouring either clause fails here instead of shipping.
+    """
+    rows = _seed_my_tasks(client, db_session, "parity-mytasks-pages")
+
+    def page(**params):
+        resp = client.get("/users/me/tasks", params=params)
+        assert resp.status_code == 200, resp.text
+        return [t["title"] for t in resp.json()]
+
+    whole = page()
+    assert whole[:5] == DATED_IN_ORDER, whole
+    assert sorted(whole[5:]) == ["undated-a", "undated-b"], whole
+
+    # Pages over the dated prefix: fully determined by the sort key.
+    assert page(limit=2, offset=0) == DATED_IN_ORDER[0:2]
+    assert page(limit=2, offset=2) == DATED_IN_ORDER[2:4]
+    assert page(limit=1, offset=4) == ["due-later"]
+    # Every page boundary past the dated rows cuts through the NULL group, whose
+    # internal order no engine promises -- so assert coverage, not order: OFFSET must
+    # neither skip a row nor serve it twice.
+    sliced = [page(limit=2, offset=offset) for offset in (0, 2, 4, 6)]
+    assert [len(p) for p in sliced] == [2, 2, 2, 1], sliced
+    assert sorted(title for p in sliced for title in p) == sorted(whole), sliced
+
+    # An OFFSET past the end is an empty page, not a wrap-around to the first rows.
+    assert page(limit=2, offset=20) == []
+
+    # The instants the buckets compared are the instants that were stored: on
+    # Postgres this is the timestamptz/session-timezone round trip, on SQLite it is
+    # the fixed-width text form, and both must reproduce the seeded instant.
+    returned = client.get("/users/me/tasks").json()
+    by_title = {t["title"]: t["due_at"] for t in returned}
+    for title, due in rows:
+        if due is None:
+            assert by_title[title] is None, title
+            continue
+        assert datetime.datetime.fromisoformat(by_title[title]) == due, (
+            title,
+            by_title[title],
+            due,
+        )
 
 
 # ---------------------------------------------------------------------------
