@@ -1,5 +1,6 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getFiles, uploadFile, updateFile, deleteFile } from './service';
+import { toast } from 'sonner';
+import { downloadFile, getFiles, uploadFile, updateFile, deleteFile } from './service';
 import type { FileLinkFilter } from './service';
 
 export const filesKeys = {
@@ -30,6 +31,9 @@ export function useUploadFile() {
     mutationFn: uploadFile,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: filesKeys.all });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload file');
     }
   });
 }
@@ -41,6 +45,9 @@ export function useUpdateFile() {
       updateFile(id, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: filesKeys.all });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update file');
     }
   });
 }
@@ -51,6 +58,18 @@ export function useDeleteFile() {
     mutationFn: deleteFile,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: filesKeys.all });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete file');
+    }
+  });
+}
+
+export function useDownloadFile() {
+  return useMutation({
+    mutationFn: downloadFile,
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to download file');
     }
   });
 }

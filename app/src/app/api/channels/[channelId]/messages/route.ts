@@ -33,10 +33,18 @@ export async function GET(
     return NextResponse.json({ messages: [] });
   }
   const { channelId } = await params;
-  const q = new URL(request.url).searchParams.get('q');
-  const qs = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+  // Allow-listed passthrough (same shape as api/workspace/audit-log/route.ts):
+  // the paging params must reach the backend, and forwarding only `q` is what
+  // made every client request silently ask for the default window.
+  const incoming = new URL(request.url).searchParams;
+  const qs = new URLSearchParams();
+  for (const key of ['q', 'limit', 'offset', 'before']) {
+    const value = incoming.get(key);
+    if (value) qs.set(key, value);
+  }
+  const suffix = qs.size > 0 ? `?${qs.toString()}` : '';
   const res = await backendRequest(
-    `/channels/${encodeURIComponent(channelId)}/messages${qs}`,
+    `/channels/${encodeURIComponent(channelId)}/messages${suffix}`,
     { method: 'GET' },
     sessionCookie
   );

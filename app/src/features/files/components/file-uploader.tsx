@@ -59,11 +59,20 @@ export function FileUploader() {
     }
   };
 
-  const onSubmit = async () => {
+  const onSubmit = () => {
     if (!selectedFile) return;
-    await upload.mutateAsync({ file: selectedFile });
-    setSelectedFile(null);
-    setOpen(false);
+    // Per-call `onSuccess` instead of `await mutateAsync`: the awaited form left
+    // the rejection unhandled on a failed upload, so the dialog stayed open with
+    // the file still picked and nothing said why. `onError` on the mutation toasts.
+    upload.mutate(
+      { file: selectedFile },
+      {
+        onSuccess: () => {
+          setSelectedFile(null);
+          setOpen(false);
+        }
+      }
+    );
   };
 
   const onClose = (value: boolean) => {

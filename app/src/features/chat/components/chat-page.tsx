@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import PageContainer from '@/components/layout/page-container';
 import { Button } from '@/components/ui/button';
+import { Icons } from '@/components/icons';
+import { LoadingButton } from '@/components/ui/loading-button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -14,6 +16,7 @@ import {
   getChannels,
   getDMs,
   getMessages,
+  MESSAGES_PAGE_SIZE,
   sendMessage,
   createChannel,
   createDM,
@@ -102,14 +105,58 @@ export default function ChatPage() {
     }
   });
 
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+
+  // Memoized: it is a dependency of `loadEarlier` and an argument to
+  // getQueryData/setQueryData. A fresh array per render would re-create the
+  // callback on every keystroke in the search box.
+  const messagesQueryKey = useMemo(
+    () => [...channelKeys.messages(selectedChannel?.id ?? null), searchQuery],
+    [selectedChannel?.id, searchQuery]
+  );
+
   const messagesQuery = useQuery<Message[]>({
-    queryKey: [...channelKeys.messages(selectedChannel?.id ?? null), searchQuery],
+    queryKey: messagesQueryKey,
     queryFn: async () => {
       if (!selectedChannel) return [];
-      return getMessages(selectedChannel.id, searchQuery);
+      const page = await getMessages(selectedChannel.id, {
+        q: searchQuery,
+        limit: MESSAGES_PAGE_SIZE
+      });
+      // Set from the page just fetched, never from the cached array: live frames
+      // append to the cache, so its length grows past the page size and a
+      // recomputed flag would flip at random.
+      setHasMoreHistory(page.length === MESSAGES_PAGE_SIZE);
+      return page;
     },
     enabled: !!selectedChannel
   });
+
+  const loadEarlier = useCallback(async () => {
+    if (!selectedChannel) return;
+    const current = queryClient.getQueryData<Message[]>(messagesQueryKey) ?? [];
+    const oldest = current[0];
+    if (!oldest) return;
+    setLoadingEarlier(true);
+    try {
+      const earlier = await getMessages(selectedChannel.id, {
+        q: searchQuery,
+        limit: MESSAGES_PAGE_SIZE,
+        before: oldest.id
+      });
+      setHasMoreHistory(earlier.length === MESSAGES_PAGE_SIZE);
+      // Prepend in ascending order: the list is chronological and the older rows
+      // belong at the top. Kept as the same plain array the websocket lane and
+      // the send path already write, so neither has to learn a new cache shape.
+      queryClient.setQueryData<Message[]>(messagesQueryKey, (rows = []) => [...earlier, ...rows]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load earlier messages');
+      setHasMoreHistory(false);
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }, [queryClient, messagesQueryKey, searchQuery, selectedChannel]);
 
   const createChannelMutation = useMutation({
     mutationFn: createChannel,
@@ -415,12 +462,30 @@ export default function ChatPage() {
                   <Skeleton className='h-16 w-2/3' />
                 </div>
               ) : (
-                <MessageList
-                  messages={messagesQuery.data ?? []}
-                  currentUserId={currentUserId}
-                  onReply={setReplyingTo}
-                  onToggleReaction={handleToggleReaction}
-                />
+                <>
+                  {hasMoreHistory ? (
+                    // Rendered only when a full page came back, so it is absent
+                    // for every seeded-data spec and cannot repaint the tracked
+                    // qa-evidence screenshots.
+                    <div className='flex justify-center py-1'>
+                      <LoadingButton
+                        variant='outline'
+                        size='sm'
+                        loading={loadingEarlier}
+                        onClick={() => void loadEarlier()}
+                      >
+                        <Icons.chevronUp className='mr-1.5 h-4 w-4' />
+                        Load earlier
+                      </LoadingButton>
+                    </div>
+                  ) : null}
+                  <MessageList
+                    messages={messagesQuery.data ?? []}
+                    currentUserId={currentUserId}
+                    onReply={setReplyingTo}
+                    onToggleReaction={handleToggleReaction}
+                  />
+                </>
               )}
 
               <div aria-live='polite' className='text-muted-foreground h-4 px-1 text-xs'>

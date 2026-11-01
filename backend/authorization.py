@@ -1,8 +1,9 @@
 """Role model and RBAC checks shared by all routers."""
 
 from enum import StrEnum
+from typing import Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Path
 from sqlalchemy.orm import Session
 
 import models
@@ -12,17 +13,69 @@ from dependencies import get_current_user
 
 class Role(StrEnum):
     OWNER = "owner"
+    CO_OWNER = "co-owner"
     ADMIN = "admin"
     MEMBER = "member"
     GUEST = "guest"
 
 
 ROLE_HIERARCHY = {
-    Role.OWNER: 4,
+    Role.OWNER: 5,
+    Role.CO_OWNER: 4,
     Role.ADMIN: 3,
     Role.MEMBER: 2,
     Role.GUEST: 1,
 }
+
+# Roles that may be handed out by another user. `owner` is excluded on purpose:
+# it is reachable only through POST /workspaces/{id}/transfer-ownership (SEC-01),
+# and `co-owner` is deliberately *listed* even though it is not a legal owner —
+# an owner may appoint one, and the strict ceiling below stops it being
+# self-replicating (D-3c).
+ASSIGNABLE_ROLES = (Role.CO_OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST)
+
+
+def role_in_workspace(workspace_id: str, user_id: str, db: Session) -> Role:
+    """The caller's role *inside* the workspace.
+
+    ``current_user["role"]`` is the global token role, which
+    ``get_current_user`` always reports as ``member`` — comparing a grant
+    against it would let any workspace admin mint owners.
+    """
+    membership = _require_member(workspace_id, user_id, db)
+    try:
+        return Role(membership.role)
+    except ValueError:
+        return Role.GUEST
+
+
+def require_assignable_role(caller_role: Role, requested: Role) -> None:
+    """Refuse a role grant the caller has no standing to make (SEC-01, D-3c).
+
+    Two independent ceilings, both strict:
+
+    * `owner` is not an assignable role at all — ownership moves through
+      `POST /workspaces/{id}/transfer-ownership` and nowhere else;
+    * a caller may only hand out a role ranked **strictly below** its own, so no
+      role can be self-replicating: an `admin` cannot mint another `admin`, and
+      a `co-owner` cannot mint another `co-owner`.
+    """
+    if requested not in ASSIGNABLE_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Cannot grant '{requested.value}': ownership moves only through "
+                "transfer-ownership"
+            ),
+        )
+    if ROLE_HIERARCHY[requested] >= ROLE_HIERARCHY[caller_role]:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Cannot grant '{requested.value}': a role may only be assigned "
+                "to someone below your own role"
+            ),
+        )
 
 
 def _require_member(workspace_id: str, user_id: str, db: Session) -> models.WorkspaceMembership:
@@ -55,18 +108,21 @@ def _require_min_role(current_user: dict, required_role: Role) -> None:
 
 
 def require_role(required_role: Role):
-    """Dependency factory that requires a minimum workspace role."""
+    """Dependency factory that requires a minimum role in the request's workspace.
+
+    `workspace_id` is a **path parameter and nothing else**. Declared as a plain
+    optional argument it became a query parameter on any route whose path lacks
+    the segment, which is the cross-tenant shape T001/T002 already fixed once
+    (ARC-05): a new route in that shape would silently let the caller name the
+    workspace the guard checks. A route that forgets the segment now fails with
+    a missing-path-parameter 422 instead of reading the client's value.
+    """
 
     def _check_role(
+        workspace_id: Annotated[str, Path()],
         current_user: dict = Depends(get_current_user),
-        workspace_id: str = None,
         db: Session = Depends(get_db),
     ) -> dict:
-        # If workspace_id is not provided, check global role (from token)
-        if workspace_id is None:
-            _require_min_role(current_user, required_role)
-            return current_user
-
         # First check if workspace exists
         workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
         if not workspace:
@@ -91,8 +147,30 @@ def require_role(required_role: Role):
     return _check_role
 
 
-def require_permission(permission: str):
-    """Dependency factory that requires a specific permission."""
+def require_global_role(required_role: Role):
+    """Dependency factory for platform-level actions, i.e. routes with no workspace in the path.
+
+    It compares against the role claim in the token, which `get_current_user`
+    always issues as ``member`` — so in practice this means "any authenticated
+    user", never "a platform admin". There is no platform-admin concept in the
+    role model; anything that needs one must say so explicitly, not by leaving
+    `workspace_id` out of the path.
+    """
+
+    def _check_global_role(current_user: dict = Depends(get_current_user)) -> dict:
+        _require_min_role(current_user, required_role)
+        return current_user
+
+    return _check_global_role
+
+
+def require_permission(permission: str, *, platform_level: bool = False):
+    """Dependency factory that requires a specific permission.
+
+    `platform_level=True` is for the routes that act on no workspace (today only
+    `POST /workspaces`); every other permission resolves the caller's role inside
+    the workspace named by the path (ARC-05).
+    """
     # Map permissions to required roles
     PERMISSION_ROLES = {
         # Workspace permissions
@@ -114,4 +192,4 @@ def require_permission(permission: str):
     }
 
     required_role = PERMISSION_ROLES.get(permission, Role.OWNER)
-    return require_role(required_role)
+    return require_global_role(required_role) if platform_level else require_role(required_role)

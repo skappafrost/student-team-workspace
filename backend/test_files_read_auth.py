@@ -184,3 +184,103 @@ def test_traversal_key_is_rejected(db_session, client, upload_dir):
     for key in ("..%2f..%2fsecret.txt", "..\\..\\secret.txt", "..%5c..%5csecret.txt"):
         resp = client.get(f"/uploads/{key}")
         assert resp.status_code in (403, 404), (key, resp.status_code)
+
+
+# ---------------------------------------------------------------------------
+# Private-channel scoping: a file linked into a DM belongs to that DM
+#
+# These live here and not in test_file_rbac_edges.py because that file remounts
+# /uploads as StaticFiles — a byte assertion placed there is answered by the
+# mount, so it stays green while the route-level gate is still missing.
+# ---------------------------------------------------------------------------
+
+def _add_member(client, db_session, workspace_id, user_id, role="member", inviter="owner"):
+    """Join ``user_id`` to ``workspace_id`` through the real invite flow.
+
+    ``inviter`` is re-authenticated explicitly: accepting an invite leaves the
+    client signed in as the new user, so a second call would otherwise try to
+    invite as a plain member and fail on the admin gate instead of on the
+    behaviour under test.
+    """
+    as_user(client, inviter)
+    invite = client.post(
+        f"/workspaces/{workspace_id}/invites",
+        json={"email": f"{user_id}@example.com", "role": role},
+    )
+    assert invite.status_code == 201, invite.text
+    make_user(db_session, user_id, email=f"{user_id}@example.com")
+    clear_auth(client)
+    as_user(client, user_id)
+    accept = client.post("/invites/accept", json={"token": invite.json()["token"]})
+    assert accept.status_code == 201, accept.text
+
+
+def _attach_file_to_dm(client, workspace_id, peer="m2"):
+    """Open a DM as the current user, post in it, and attach a file to that message."""
+    dm = client.post(f"/workspaces/{workspace_id}/dms", json={"user_id": peer})
+    assert dm.status_code == 201, dm.text
+    msg = client.post(f"/channels/{dm.json()['id']}/messages", json={"content": "dm note"})
+    assert msg.status_code == 201, msg.text
+    resp = client.post(
+        f"/workspaces/{workspace_id}/files",
+        files={"file": ("dm-secret.pdf", io.BytesIO(b"DM-SECRET"), "application/pdf")},
+        data={"message_id": msg.json()["id"]},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_dm_non_participant_cannot_download_linked_file(db_session, client, upload_dir):
+    """A workspace member who is not in the DM must not get the bytes.
+
+    Before the channel predicate was applied here, this returned 200 with the
+    file's real contents: the upload path stores only a workspace membership
+    check, while the message read path had always enforced DM participation.
+    """
+    ws = create_workspace(client, db_session, "owner")
+    _add_member(client, db_session, ws["id"], "m2")
+    _add_member(client, db_session, ws["id"], "m3")
+
+    as_user(client, "owner")
+    file_data = _attach_file_to_dm(client, ws["id"])
+
+    as_user(client, "m3")
+    denied = client.get(file_data["url"])
+    assert denied.status_code == 403, denied.text
+
+    # The participants keep their access — this is a scope change, not a lockout.
+    for actor in ("owner", "m2"):
+        as_user(client, actor)
+        ok = client.get(file_data["url"])
+        assert ok.status_code == 200, (actor, ok.text)
+        assert ok.content == b"DM-SECRET"
+
+
+def test_channel_gate_precedes_the_missing_bytes_check(db_session, client, upload_dir):
+    """A non-participant gets 403 even when the bytes are gone.
+
+    If the on-disk check ran first, 404 would answer instead and the status code
+    would tell an outsider whether a given key exists on the server.
+    """
+    ws = create_workspace(client, db_session, "owner")
+    _add_member(client, db_session, ws["id"], "m2")
+    _add_member(client, db_session, ws["id"], "m3")
+
+    as_user(client, "owner")
+    file_data = _attach_file_to_dm(client, ws["id"])
+    (upload_dir / file_data["url"].split("/uploads/")[1]).unlink()
+
+    as_user(client, "m3")
+    assert client.get(file_data["url"]).status_code == 403
+
+
+def test_unlinked_workspace_file_is_still_readable_by_members(db_session, client, upload_dir):
+    """The channel join must not hide files that are linked to no message."""
+    ws = create_workspace(client, db_session, "owner")
+    data = upload_file(client, ws["id"], "shared.pdf", b"shared")
+    _add_member(client, db_session, ws["id"], "m2")
+
+    as_user(client, "m2")
+    resp = client.get(data["url"])
+    assert resp.status_code == 200, resp.text
+    assert resp.content == b"shared"

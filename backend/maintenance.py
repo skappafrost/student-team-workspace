@@ -45,6 +45,17 @@ def _is_postgres_url(url: str) -> bool:
     return url.startswith(POSTGRES_PREFIXES)
 
 
+def _refuse_postgres_without_apply() -> int:
+    """Print the standing refusal for a PostgreSQL run without `--apply`."""
+    print(
+        "Refusing to run purge-orphans against a PostgreSQL database without "
+        "--apply (row-deleting paths are disabled by default). "
+        "Re-run with --apply to confirm.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -267,6 +278,18 @@ def _print_report(report: Report) -> None:
 
 
 def cmd_purge_orphans(args: argparse.Namespace) -> int:
+    # The refusal must not require a working driver. Building the engine first
+    # loads the dialect's DBAPI, so a PostgreSQL URL raised before the guard
+    # could answer: the CLI whose whole purpose is "refuse without --apply"
+    # crashed instead of explaining itself.
+    #
+    # With SQLAlchemy 2.1 a bare `postgresql://` URL resolves to the psycopg
+    # (v3) dialect, while this project ships psycopg2 (see requirements.txt), so
+    # the crash was reachable on any machine without psycopg installed — which
+    # is every CI runner.
+    if args.db_url and _is_postgres_url(args.db_url) and not args.apply:
+        return _refuse_postgres_without_apply()
+
     # Build a LOCAL engine when --db-url is given. Never rebind the global
     # database engine here: this function also runs in-process (tests, REPL)
     # and rebinding would strand later code on the wrong database.
@@ -276,13 +299,10 @@ def cmd_purge_orphans(args: argparse.Namespace) -> int:
 
     effective_url = str(eng.url)
     if _is_postgres_url(effective_url) and not args.apply:
-        print(
-            "Refusing to run purge-orphans against a PostgreSQL database without "
-            "--apply (row-deleting paths are disabled by default). "
-            "Re-run with --apply to confirm.",
-            file=sys.stderr,
-        )
-        return 2
+        # Covers the no --db-url case, where the ambient engine is already
+        # PostgreSQL. The --db-url case was answered above without loading a
+        # driver.
+        return _refuse_postgres_without_apply()
 
     upload_dir = Path(args.upload_dir) if args.upload_dir else app_module.UPLOAD_DIR
     if not upload_dir.is_dir():

@@ -74,9 +74,10 @@ class RoleUser:
 
 @pytest.fixture
 def role_users(client, db_session):
-    """Create a workspace with 4 users: owner, admin, member, guest.
+    """Create a workspace with one user per role: owner, co-owner, admin, member, guest.
 
-    Returns a dict mapping Role -> RoleUser for each role.
+    Returns a dict mapping Role -> RoleUser for each role. `co-owner` is created
+    by the owner, the only caller the ceiling lets mint one (D-3c).
     """
     # Create workspace as owner
     owner = RoleUser(client, "owner-user", Role.OWNER)
@@ -111,6 +112,19 @@ def role_users(client, db_session):
     member.client.post("/invites/accept", json={"token": token})
     member.clear_auth()
 
+    # Create co-owner user via invite (only an owner may grant it)
+    co_owner = RoleUser(client, "co-owner-user", Role.CO_OWNER, ws_id)
+    invite_resp = owner.client.post(
+        f"/workspaces/{ws_id}/invites",
+        json={"email": _unique_email("co-owner"), "role": Role.CO_OWNER.value},
+    )
+    assert invite_resp.status_code == 201
+    token = invite_resp.json()["token"]
+    owner.clear_auth()
+    make_user(db_session, "co-owner-user")
+    co_owner.client.post("/invites/accept", json={"token": token})
+    co_owner.clear_auth()
+
     # Create guest user via invite
     guest = RoleUser(client, "guest-user", Role.GUEST, ws_id)
     invite_resp = owner.client.post(
@@ -126,6 +140,7 @@ def role_users(client, db_session):
 
     return {
         Role.OWNER: RoleUser(client, "owner-user", Role.OWNER, ws_id),
+        Role.CO_OWNER: RoleUser(client, "co-owner-user", Role.CO_OWNER, ws_id),
         Role.ADMIN: RoleUser(client, "admin-user", Role.ADMIN, ws_id),
         Role.MEMBER: RoleUser(client, "member-user", Role.MEMBER, ws_id),
         Role.GUEST: RoleUser(client, "guest-user", Role.GUEST, ws_id),
@@ -151,23 +166,23 @@ EXPECTED_ACCESS = {
     # POST /workspaces is a GLOBAL action (workspace.create = MEMBER role from
     # the token, which real JWTs always satisfy). A user who is a "guest" in one
     # workspace is still a platform member and may create their own workspace.
-    ("POST", "/workspaces"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
-    ("GET", "/workspaces"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
-    ("GET", "/workspaces/{ws_id}"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
-    ("PATCH", "/workspaces/{ws_id}"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
+    ("POST", "/workspaces"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
+    ("GET", "/workspaces"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
+    ("GET", "/workspaces/{ws_id}"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
+    ("PATCH", "/workspaces/{ws_id}"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
     ("DELETE", "/workspaces/{ws_id}"): {"allowed": [Role.OWNER], "public": False},
 
     # Invite endpoints
-    ("POST", "/workspaces/{ws_id}/invites"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
-    ("GET", "/workspaces/{ws_id}/invites"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
-    ("PATCH", "/workspaces/{ws_id}/invites/{invite_id}"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
-    ("DELETE", "/workspaces/{ws_id}/invites/{invite_id}"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
-    ("POST", "/invites/accept"): {"allowed": [Role.OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
+    ("POST", "/workspaces/{ws_id}/invites"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
+    ("GET", "/workspaces/{ws_id}/invites"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
+    ("PATCH", "/workspaces/{ws_id}/invites/{invite_id}"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
+    ("DELETE", "/workspaces/{ws_id}/invites/{invite_id}"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
+    ("POST", "/invites/accept"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN, Role.MEMBER, Role.GUEST], "public": False},
 
     # Member management endpoints
-    ("GET", "/workspaces/{ws_id}/members"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
-    ("PATCH", "/workspaces/{ws_id}/members/{user_id}"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
-    ("DELETE", "/workspaces/{ws_id}/members/{user_id}"): {"allowed": [Role.OWNER, Role.ADMIN], "public": False},
+    ("GET", "/workspaces/{ws_id}/members"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
+    ("PATCH", "/workspaces/{ws_id}/members/{user_id}"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
+    ("DELETE", "/workspaces/{ws_id}/members/{user_id}"): {"allowed": [Role.OWNER, Role.CO_OWNER, Role.ADMIN], "public": False},
     ("POST", "/workspaces/{ws_id}/transfer-ownership"): {"allowed": [Role.OWNER], "public": False},
 }
 
@@ -213,6 +228,24 @@ def _create_test_member(client: TestClient, ws_id: str, role: Role = Role.MEMBER
     accept_resp = accept_client.post("/invites/accept", json={"token": token})
     assert accept_resp.status_code == 201, f"Failed to accept invite: {accept_resp.text}"
     return user_id
+
+
+# The role each caller is entitled to hand out under the strict ceiling: always
+# one rank below itself. Literal rather than derived from ROLE_HIERARCHY, so the
+# matrix cannot agree with the code by recomputing the same rule (TST-04).
+GRANTABLE_ROLE = {
+    Role.OWNER: Role.CO_OWNER,
+    Role.CO_OWNER: Role.ADMIN,
+    Role.ADMIN: Role.MEMBER,
+    Role.MEMBER: Role.GUEST,
+    Role.GUEST: Role.GUEST,
+}
+
+# Endpoints whose body carries a role, i.e. the two the ceiling applies to.
+ROLE_WRITE_ENDPOINTS = {
+    ("PATCH", "/workspaces/{ws_id}/members/{user_id}"),
+    ("PATCH", "/workspaces/{ws_id}/invites/{invite_id}"),
+}
 
 
 def _transfer_ownership_payload(user_id: str) -> dict:
@@ -367,7 +400,10 @@ class TestRoleMatrix:
             invite_id = _create_test_invite(owner.client, ws_id)
         elif needs_target_user:
             # transfer-ownership needs a non-owner target member
-            target_role = Role.ADMIN if method == "POST" and "transfer-ownership" in path else Role.MEMBER
+            # A MEMBER target, not ADMIN: transferring demotes the old owner to admin
+            # (workspaces.py:257), and the next iteration then re-runs this setup as
+            # that demoted admin — an admin granting admin is refused (D-3c).
+            target_role = Role.MEMBER
             user_id = _create_test_member(owner.client, ws_id, target_role)
             # For transfer-ownership payload, fill in the real user_id
             if method == "POST" and "transfer-ownership" in path:
@@ -382,13 +418,22 @@ class TestRoleMatrix:
             if "{invite_id}" in path:
                 current_invite_id = _create_test_invite(owner.client, ws_id)
             elif needs_target_user:
-                # Re-create target member for each role to keep tests isolated
-                target_role = Role.ADMIN if method == "POST" and "transfer-ownership" in path else Role.MEMBER
+                # Re-create target member for each role to keep tests isolated.
+                # A MEMBER target, not ADMIN: transferring demotes the old owner
+                # to admin (workspaces.py:257), and the next iteration re-runs
+                # this setup as that demoted admin — an admin granting admin is
+                # refused by the ceiling (D-3c).
+                target_role = Role.MEMBER
                 current_user_id = _create_test_member(owner.client, ws_id, target_role)
                 if method == "POST" and "transfer-ownership" in path:
                     payload_factory = partial(_transfer_ownership_payload, current_user_id)
 
             payload = payload_factory() if payload_factory else None
+            if (method, path) in ROLE_WRITE_ENDPOINTS:
+                # Each caller attempts a grant that is legal *for it*; a role at
+                # or above its own rank is covered by the ceiling matrix in
+                # test_authorization_edges.py, not by this runner.
+                payload = {"role": GRANTABLE_ROLE[role].value}
 
             # Special handling for invite accept - need a valid token
             if path == "/invites/accept":
@@ -823,7 +868,9 @@ def _t002_endpoints() -> list:
          "payload": lambda w: None},
         {"id": "update_invite", "method": "PATCH", "path": "/workspaces/{ws_id}/invites/{invite_id}",
          "min_role": Role.ADMIN, "ok_status": 200,
-         "payload": lambda w: {"role": Role.ADMIN.value}},
+         # MEMBER, not ADMIN: an admin may not hand out a peer role (D-3c), and
+         # this row must stay legal for every actor that clears the ADMIN floor.
+         "payload": lambda w: {"role": Role.MEMBER.value}},
         {"id": "cancel_invite", "method": "DELETE", "path": "/workspaces/{ws_id}/invites/{invite_id}",
          "min_role": Role.ADMIN, "ok_status": 204,
          "payload": lambda w: None},

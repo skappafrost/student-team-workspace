@@ -36,6 +36,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import models
@@ -117,14 +118,34 @@ def set_presence(
     """Upsert a member's presence row; refresh ``last_seen`` to now."""
     if status not in PRESENCE_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid presence status: {status}")
-    row = get_presence(db, user_id, workspace_id)
-    if row is None:
-        row = models.PresenceState(user_id=user_id, workspace_id=workspace_id)
-        db.add(row)
-    row.status = status
-    row.status_message = status_message
-    row.last_seen = _utcnow()
-    if commit:
+
+    def _stamp(row: models.PresenceState) -> models.PresenceState:
+        row.status = status
+        row.status_message = status_message
+        row.last_seen = _utcnow()
+        return row
+
+    def _upsert() -> models.PresenceState:
+        row = get_presence(db, user_id, workspace_id)
+        if row is None:
+            row = _stamp(models.PresenceState(user_id=user_id, workspace_id=workspace_id))
+            db.add(row)
+        else:
+            _stamp(row)
+        return row
+
+    row = _upsert()
+    if not commit:
+        return row
+    try:
+        db.commit()
+    except IntegrityError:
+        # The read in `_upsert` and this INSERT are separate statements, so a second
+        # frame for the same member can create the row in between (COR-18). Presence
+        # is a heartbeat: the answer is the row that won, updated, not a 409 the
+        # client cannot act on.
+        db.rollback()
+        row = _upsert()
         db.commit()
     return row
 

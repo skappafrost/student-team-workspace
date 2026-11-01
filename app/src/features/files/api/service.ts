@@ -75,13 +75,27 @@ export async function deleteFile(id: string): Promise<void> {
   }
 }
 
+/** The app-relative URL for a file's bytes.
+ *
+ * `file.url` is `/uploads/{storage_key}` as emitted by the backend, which is a
+ * path on the *backend's* origin; the browser resolves it against the Next origin,
+ * where it is served by the BFF proxy at `api/uploads/[key]`. Prefixing `/api`
+ * keeps the backend's value authoritative (its shape is pinned by the file tests)
+ * while pointing the browser at a route that exists.
+ */
+export const fileAssetUrl = (file: FileRecord): string => `/api${file.url}`;
+
 export async function downloadFile(file: FileRecord): Promise<void> {
-  const res = await fetch(file.url, {
+  const res = await fetch(fileAssetUrl(file), {
     credentials: 'include'
   });
 
   if (!res.ok) {
-    throw new Error(`Download failed: ${res.status}`);
+    // Surface the server's reason: after the private-channel rule, a 403 here
+    // means "this file belongs to a channel you are not in", and "Download
+    // failed: 403" would hide that from the one person who can act on it.
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || data.detail || `Download failed: ${res.status}`);
   }
 
   const blob = await res.blob();

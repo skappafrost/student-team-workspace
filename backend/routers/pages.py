@@ -23,8 +23,30 @@ def _validate_parent_id(
     parent = _get_page_or_404(db, parent_id)
     if parent.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Parent page not found in workspace")
-    if page_id is not None and parent.id == page_id:
+    if page_id is None:
+        return
+    if parent.id == page_id:
         raise HTTPException(status_code=400, detail="Page cannot be its own parent")
+
+    # A page may not become its own descendant. `PageTreeItem.children` is
+    # self-referential, so a cycle is not untidy data but a permanently broken
+    # read: serializing the page list recurses until the serializer gives up, and
+    # every page in the workspace then answers 500 until somebody edits the rows by
+    # hand. Rejecting only the direct self-parent left A -> B -> A passing through.
+    #
+    # The walk terminates on its own visited set, so a cycle that is already in the
+    # data stops the search instead of hanging it — corrupt neighbours must not
+    # turn into a refusal to move an unrelated page.
+    cursor = parent
+    visited = {parent.id}
+    while cursor.parent_id is not None:
+        if cursor.parent_id == page_id:
+            raise HTTPException(status_code=400, detail="Page cannot be its own ancestor")
+        ancestor = db.query(models.Page).filter(models.Page.id == cursor.parent_id).first()
+        if ancestor is None or ancestor.id in visited:
+            break
+        visited.add(ancestor.id)
+        cursor = ancestor
 
 
 def _snapshot_version(
@@ -112,6 +134,25 @@ async def create_page(
     return page
 
 
+def _flat_page_items(rows: list[models.Page]) -> list[dict]:
+    """Project pages for the three flat list shapes, with nesting dropped.
+
+    `flat`, `search` and `recent` all return a page *list*, not a tree, yet they
+    serialize `PageTreeItem` — whose `children` field makes the projection
+    recursive over the ORM rows. That is what turned a parent cycle into a 500 no
+    request could clear. Returning the scalar columns with `children: []` keeps the
+    documented response shape and cannot recurse, whichever rows the workspace
+    already holds.
+
+    The wiki client rebuilds its tree from `parent_id` (`page-tree.tsx`) and never
+    reads a server-supplied `children`, so no consumer loses anything here.
+    """
+    return [
+        {**schemas.PageOut.model_validate(page).model_dump(mode="json"), "children": []}
+        for page in rows
+    ]
+
+
 @router.get("/workspaces/{workspace_id}/pages", response_model=list[schemas.PageTreeItem])
 async def list_workspace_pages(
     workspace_id: str,
@@ -149,30 +190,30 @@ async def list_workspace_pages(
                 models.Page.content.ilike(like_term, escape=LIKE_ESCAPE),
             )
         ).order_by(models.Page.updated_at.desc())
-        return query.all()
+        # `.limit()` was missing here while this function's own docstring promised
+        # "limit: maximum number of recent/search results to return", so a one-word
+        # search streamed every matching page body in the workspace.
+        return _flat_page_items(query.limit(limit).all())
 
     if recent:
-        return query.order_by(models.Page.updated_at.desc()).limit(limit).all()
+        return _flat_page_items(query.order_by(models.Page.updated_at.desc()).limit(limit).all())
 
-    # Tree + flat views both serialize ``PageTreeItem.children`` for every
-    # returned page, so eager-load one level of children per parent
-    # (additive perf fix, TA6-2). Without this the response_model
-    # serialization touches ``page.children`` on every row, issuing one
-    # SELECT per row (N+1): the bench harness measured 304 statements for
-    # 300 tree pages and 105 for 100 flat pages (see docs/PERF-BASELINE.md).
-    # ``selectinload`` batches all children of the loaded pages into one
-    # extra SELECT per parent level, so the statement count is constant in
-    # the number of pages. Response shape (nested children arrays) is
-    # unchanged.
-    query = (
-        query.order_by(models.Page.created_at.asc())
-        .options(selectinload(models.Page.children))
-    )
+    query = query.order_by(models.Page.created_at.asc())
 
     if flat:
-        return query.all()
+        # A flat list needs no children eager-load — the projection drops them.
+        return _flat_page_items(query.all())
 
-    pages = query.all()
+    # The tree view is the one shape that nests, so it serializes
+    # ``PageTreeItem.children`` for every root page and must eager-load one level
+    # of children per parent (additive perf fix, TA6-2). Without this the
+    # response_model touches ``page.children`` on every row, issuing one
+    # SELECT per row (N+1): the bench harness measured 304 statements for
+    # 300 tree pages (see docs/PERF-BASELINE.md). ``selectinload`` batches all
+    # children of the loaded pages into one extra SELECT per parent level, so the
+    # statement count is constant in the number of pages. Response shape
+    # (nested children arrays) is unchanged.
+    pages = query.options(selectinload(models.Page.children)).all()
 
     # Build tree: only root pages with nested children loaded lazily; build recursively
     root_pages = [p for p in pages if p.parent_id is None]

@@ -161,18 +161,40 @@ def test_router_invalid_role_branch_is_400_not_500(setup, db_session):
     assert _role_of(db_session, ws_id, "member1") == Role.MEMBER.value
 
 
-def test_promote_member_to_admin_persists(setup, client, db_session):
-    """The happy path the coverage gap was hiding: a real persisted promotion."""
+def test_admin_cannot_mint_a_peer_admin(setup, client, db_session):
+    """D-3c policy reversal: an admin may no longer hand out `admin`.
+
+    This test used to be `test_promote_member_to_admin_persists` and asserted the
+    opposite — 200 plus a persisted promotion — because peer-granting was what
+    the ceiling happened to allow. It is rewritten deliberately, not as a side
+    effect of touching the file: the rule is now "assign a role strictly below
+    your own", so `admin -> admin` and `co-owner -> co-owner` are refused, and
+    every caller's assignable set is enumerated in the ceiling matrix in
+    test_authorization_edges.py.
+    """
     ws_id = setup["workspace_id"]
     as_user(client, "admin1")
     resp = client.patch(
         f"/workspaces/{ws_id}/members/member1", json={"role": Role.ADMIN.value}
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["role"] == Role.ADMIN.value
-    # Persisted, not just returned.
+    assert resp.status_code == 403, resp.text
+    assert "below your own role" in resp.json()["detail"]
     db_session.expire_all()
-    assert _role_of(db_session, ws_id, "member1") == Role.ADMIN.value
+    assert _role_of(db_session, ws_id, "member1") == Role.MEMBER.value
+
+
+def test_admin_can_still_assign_roles_below_its_own_rank(setup, client, db_session):
+    """The reversal removes peer-granting, not the admin's ordinary duty to assign."""
+    ws_id = setup["workspace_id"]
+    for role in (Role.MEMBER, Role.GUEST):
+        as_user(client, "admin1")
+        resp = client.patch(
+            f"/workspaces/{ws_id}/members/member1", json={"role": role.value}
+        )
+        assert resp.status_code == 200, f"{role.value}: {resp.text}"
+        clear_auth(client)
+        db_session.expire_all()
+        assert _role_of(db_session, ws_id, "member1") == role.value
 
 
 def test_demote_self_admin_to_member_blocked_by_owner_protection(setup, client):
@@ -202,6 +224,88 @@ def test_owner_self_patch_guard_is_unreachable(setup, client):
     # The FIRST guard (role == owner) wins; the detail proves which one fired.
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Cannot change owner's role"
+
+
+# ---------------------------------------------------------------------------
+# SEC-01 — the role-assignment ceiling
+# ---------------------------------------------------------------------------
+
+
+def test_admin_cannot_grant_owner_to_self(setup, client, db_session):
+    """`owner` is not an assignable role: an admin promoting itself is refused.
+
+    Break this test by deleting `AssignableRole` from MemberRoleUpdate (or by
+    putting "owner" back into the Literal) and the PATCH starts answering 200.
+    """
+    ws_id = setup["workspace_id"]
+    as_user(client, "admin1")
+    resp = client.patch(f"/workspaces/{ws_id}/members/admin1", json={"role": "owner"})
+    assert resp.status_code == 422, resp.text
+    db_session.expire_all()
+    assert _role_of(db_session, ws_id, "admin1") == Role.ADMIN.value
+
+
+def test_admin_cannot_grant_owner_to_another_member(setup, client, db_session):
+    """The ceiling is not just self-service: minting an owner for someone else is refused too."""
+    ws_id = setup["workspace_id"]
+    as_user(client, "admin1")
+    resp = client.patch(f"/workspaces/{ws_id}/members/member1", json={"role": "owner"})
+    assert resp.status_code == 422, resp.text
+    db_session.expire_all()
+    assert _role_of(db_session, ws_id, "member1") == Role.MEMBER.value
+
+
+def test_handler_refuses_an_owner_grant_that_bypasses_the_schema(setup, db_session):
+    """The rank check lives in the router, not only in pydantic.
+
+    A caller that skips `MemberRoleUpdate` (the same direct-call shape the
+    invalid-role test above uses) must still be refused: `owner` outranks the
+    admin caller, so nothing may grant it from this endpoint.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from routers.members import update_member_role
+
+    ws_id = setup["workspace_id"]
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            update_member_role(
+                workspace_id=ws_id,
+                user_id="member1",
+                payload=SimpleNamespace(role=Role.OWNER.value),
+                current_user={"id": "admin1"},
+                db=db_session,
+            )
+        )
+    assert exc.value.status_code == 403
+    assert "owner" in exc.value.detail
+    db_session.expire_all()
+    assert _role_of(db_session, ws_id, "member1") == Role.MEMBER.value
+
+
+def test_owner_can_still_grant_admin_member_and_guest(setup, client, db_session):
+    """Positive control: the ceiling stops escalation, it does not freeze roles.
+
+    If the guard were inverted to "refuse everything", this is the test that
+    notices — an owner assigning each assignable role must get 200 every time.
+    """
+    ws_id = setup["workspace_id"]
+    make_user(db_session, "guest1", email="guest1@example.com")
+    db_session.add(
+        WorkspaceMembership(workspace_id=ws_id, user_id="guest1", role=Role.MEMBER.value)
+    )
+    db_session.commit()
+
+    for target, role in (("member1", Role.ADMIN), ("guest1", Role.GUEST)):
+        as_user(client, "owner")
+        resp = client.patch(
+            f"/workspaces/{ws_id}/members/{target}", json={"role": role.value}
+        )
+        assert resp.status_code == 200, f"{target} -> {role.value}: {resp.text}"
+        clear_auth(client)
+        db_session.expire_all()
+        assert _role_of(db_session, ws_id, target) == role.value
 
 
 # ---------------------------------------------------------------------------

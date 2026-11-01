@@ -63,18 +63,6 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
-    label: 'Knowledge',
-    items: [
-      {
-        title: 'Knowledge',
-        url: '/dashboard/knowledge',
-        icon: 'sparkles',
-        isActive: false,
-        items: []
-      }
-    ]
-  },
-  {
     label: 'Wiki',
     items: [
       {

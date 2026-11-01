@@ -1,4 +1,10 @@
-"""bcrypt must not run on the loop that carries every open socket.
+"""Blocking work must not run on the loop that carries every open socket.
+
+Each test here pins one call site to a thread by asserting where it executed, and
+each was added for a different reason — bcrypt first, then the SMTP round-trip and
+the upload's file I/O — so the file is about the loop, not about any one of them.
+The bcrypt measurements below are the ones that established the shape of the
+problem and they are the reason the assertion is positional rather than timed.
 
 Measured with `bench/loop_blocking_probe.py` on `main` before this PR — SQLite,
 in-process ASGI transport, 12 concurrent `POST /auth/register`:
@@ -33,6 +39,7 @@ The numbers and the reason are in `routers/presence.py:_set_and_publish`.
 """
 
 import asyncio
+import io
 import threading
 
 import bcrypt
@@ -102,3 +109,67 @@ def test_delete_account_verifies_off_the_event_loop(client, monkeypatch):
     gone = client.request("DELETE", "/users/me", json={"password": PASSWORD})
     assert gone.status_code == 200, gone.text
     _assert_off_loop(spy, "bcrypt.checkpw")
+
+
+def _workspace_owner(client, email):
+    """A registered user who owns one workspace, authenticated on `client`."""
+    user_id = _register(client, email).json()["user"]["id"]
+    as_user(client, user_id)
+    ws = client.post(
+        "/workspaces", json={"name": "Loop", "slug": "loop", "description": "x"}
+    )
+    assert ws.status_code == 201, ws.text
+    return ws.json()
+
+
+def test_invite_sends_mail_off_the_event_loop(client, monkeypatch):
+    """`smtplib.SMTP(..., timeout=10)` inside `async def` is a 10 s loop stall.
+
+    The stub path (no SMTP_HOST) is what runs here, and the assertion is still the
+    right one: the invariant is *where* the send happens, not how long it takes.
+    With `SMTP_HOST` set — which is what `email_sender` documents as the real
+    configuration — the same call is a blocking network round-trip of up to the
+    timeout, during which every chat and presence socket in the process is served
+    nothing at all. The invite is committed first, so a mail failure cannot lose
+    the invite and a retry is the caller's business.
+    """
+    import routers.invites as invites_module
+
+    ws = _workspace_owner(client, "offloop-invite@example.com")
+    spy = _spy_on(monkeypatch, invites_module, "send_invite_email")
+
+    resp = client.post(
+        f"/workspaces/{ws['id']}/invites",
+        json={"email": "someone@example.com", "role": "member"},
+    )
+    assert resp.status_code == 201, resp.text
+    _assert_off_loop(spy, "send_invite_email")
+
+
+def test_upload_reads_and_writes_off_the_event_loop(client, monkeypatch, tmp_path):
+    """Both halves of an upload are blocking file I/O on the loop.
+
+    `_stream_upload` reads the spooled request body in chunks and
+    `_write_upload_bytes` puts the buffer on disk; at the default 25 MB cap either
+    one is long enough to trip `_loop_stall_watchdog`, and the upload handler is
+    `async def`.
+    """
+    import app as app_module
+    import routers.files as files_module
+
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    monkeypatch.setattr(app_module, "UPLOAD_DIR", upload_dir)
+
+    ws = _workspace_owner(client, "offloop-upload@example.com")
+    read_spy = _spy_on(monkeypatch, files_module, "_stream_upload")
+    write_spy = _spy_on(monkeypatch, files_module, "_write_upload_bytes")
+
+    resp = client.post(
+        f"/workspaces/{ws['id']}/files",
+        files={"file": ("probe.pdf", io.BytesIO(b"%PDF-1.4 probe"), "application/pdf")},
+    )
+    assert resp.status_code == 201, resp.text
+    _assert_off_loop(read_spy, "_stream_upload")
+    _assert_off_loop(write_spy, "_write_upload_bytes")
+

@@ -257,3 +257,78 @@ def test_task_delete_rbac_denied_for_member(client, db_session):
     as_user(client, "member-user")
     resp = client.delete(f"/tasks/{task['id']}")
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# SEC-14 — assignee_id must name a member of this workspace
+# ---------------------------------------------------------------------------
+
+
+def test_create_task_rejects_assignee_from_another_workspace(client, db_session):
+    """A real user who is not in the project's workspace cannot be assigned.
+
+    Before the fix the id was written straight through, the FK accepted any
+    existing user, and the `task-assigned` notification told an outsider the
+    private project's name.
+    """
+    ws = create_workspace(client, "owner")
+    other = create_workspace(client, "stranger", name="Other", slug="other-sec14")
+    as_user(client, "owner")
+    proj = client.post(f"/workspaces/{ws['id']}/projects", json={"name": "Secret P"}).json()
+
+    as_user(client, "owner")
+    resp = client.post(
+        f"/projects/{proj['id']}/tasks",
+        json={"title": "T1", "assignee_id": "stranger"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert other["id"] != ws["id"]  # the outsider really is from a different workspace
+
+    listing = client.get(f"/projects/{proj['id']}/tasks")
+    assert listing.status_code == 200
+    assert listing.json() == [], "the rejected task was created anyway"
+
+
+def test_create_task_rejects_nonexistent_assignee(client, db_session):
+    """An id that names no user is a bad payload, not a dangling FK."""
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    proj = client.post(f"/workspaces/{ws['id']}/projects", json={"name": "P1"}).json()
+
+    resp = client.post(
+        f"/projects/{proj['id']}/tasks",
+        json={"title": "T1", "assignee_id": "nobody-here-at-all"},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_update_task_rejects_foreign_assignee(client, db_session):
+    """PATCH enforces the same rule, and leaves the task untouched."""
+    ws = create_workspace(client, "owner")
+    create_workspace(client, "outsider", name="Other2", slug="other2-sec14")
+    as_user(client, "owner")
+    proj = client.post(f"/workspaces/{ws['id']}/projects", json={"name": "P1"}).json()
+    task = client.post(f"/projects/{proj['id']}/tasks", json={"title": "T1"}).json()
+    assert task["assignee_id"] is None
+
+    as_user(client, "owner")
+    resp = client.patch(f"/tasks/{task['id']}", json={"assignee_id": "outsider"})
+    assert resp.status_code == 422, resp.text
+
+    refreshed = client.get(f"/projects/{proj['id']}/tasks").json()
+    assert [t["assignee_id"] for t in refreshed] == [None]
+
+
+def test_assignee_who_is_a_workspace_member_is_accepted(client, db_session):
+    """Positive control: the rule is membership, not 'nobody may be assigned'."""
+    ws = create_workspace(client, "owner")
+    add_member(client, db_session, ws["id"], "mate@example.com", Role.MEMBER.value, "mate-user")
+    as_user(client, "owner")
+    proj = client.post(f"/workspaces/{ws['id']}/projects", json={"name": "P1"}).json()
+
+    resp = client.post(
+        f"/projects/{proj['id']}/tasks",
+        json={"title": "T1", "assignee_id": "mate-user"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["assignee_id"] == "mate-user"

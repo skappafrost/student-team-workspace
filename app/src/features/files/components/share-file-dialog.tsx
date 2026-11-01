@@ -24,6 +24,7 @@ import { Icons } from '@/components/icons';
 import { channelsQueryOptions, channelKeys } from '@/features/chat/api/queries';
 import { sendMessage } from '@/features/chat/api/service';
 import { useUpdateFile } from '../api/queries';
+import { fileAssetUrl } from '../api/service';
 import { FileRecord } from '../api/types';
 
 // Source: shadcn/ui Dialog + Select; chat feature's channel query.
@@ -42,7 +43,10 @@ export function ShareFileDialog({ file }: { file: FileRecord }) {
     setError(null);
     try {
       const message = await sendMessage(channelId, {
-        content: `Shared a file: [${file.name}](${file.url}) (${formatBytes(file.size)})`
+        // `fileAssetUrl`, not `file.url`: the raw backend path was pasted into the
+        // message, so the link every teammate clicked resolved against the app
+        // origin and 404'd.
+        content: `Shared a file: [${file.name}](${fileAssetUrl(file)}) (${formatBytes(file.size)})`
       });
       await updateFile.mutateAsync({ id: file.id, payload: { message_id: message.id } });
       void queryClient.invalidateQueries({ queryKey: channelKeys.messages(channelId) });

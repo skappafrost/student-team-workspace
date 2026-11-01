@@ -27,11 +27,20 @@ import {
 } from '@/components/ui/table';
 import { useWorkspaceMembers } from '../hooks/use-workspace-members';
 import AccountCard from '@/features/account/components/account-card';
-import { WorkspaceRole, WorkspaceMember, WorkspaceInvite } from '../types';
+import {
+  ASSIGNABLE_WORKSPACE_ROLES,
+  WorkspaceRole,
+  WorkspaceMember,
+  WorkspaceInvite
+} from '../types';
 import { toast } from 'sonner';
 import { Icons } from '@/components/icons';
 
-const ROLES: WorkspaceRole[] = ['owner', 'admin', 'member', 'guest'];
+// `owner` is not offered anywhere: the API refuses to assign it, and ownership
+// moves through the transfer-ownership action (SEC-01). Everything else a
+// caller picks here is still rank-checked server-side — assigning a role at or
+// above your own is a 403 (D-3c).
+const ROLES = ASSIGNABLE_WORKSPACE_ROLES;
 
 function RoleSelect({
   value,
@@ -52,7 +61,10 @@ function RoleSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {ROLES.map((role) => (
+        {/* `owner` stays out of the assignable list (SEC-01, D-3c), but a row
+            that already *is* the owner must still render its own value, so the
+            current value is prepended when it is not assignable. */}
+        {(ROLES.includes(value) ? ROLES : [value, ...ROLES]).map((role) => (
           <SelectItem key={role} value={role} className='capitalize'>
             {role}
           </SelectItem>

@@ -16,6 +16,31 @@ from services import log_activity, notify
 router = APIRouter()
 
 
+def _validate_assignee(db: Session, workspace_id: str, assignee_id: str | None) -> None:
+    """An assignee must be an existing member of the workspace owning the task.
+
+    Without this, `assignee_id` reached the FK unvalidated: a made-up id died
+    in a SQLite/Postgres FOREIGN KEY violation (500), and a real user from
+    another workspace was silently granted membership of a private project's
+    work through the `task-assigned` notification (SEC-14).
+    """
+    if assignee_id is None:
+        return
+    membership = (
+        db.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == assignee_id,
+        )
+        .first()
+    )
+    if membership is None:
+        raise HTTPException(
+            status_code=422,
+            detail="assignee_id must be a member of this workspace",
+        )
+
+
 @router.get("/users/me/tasks", response_model=list[schemas.MyTaskOut])
 async def list_my_tasks(
     due: str | None = Query(
@@ -96,6 +121,7 @@ async def create_task(
     """Create a new task inside a project. Any workspace member can create."""
     project = _get_project_or_404(db, project_id)
     _require_member(project.workspace_id, current_user["id"], db)
+    _validate_assignee(db, project.workspace_id, payload.assignee_id)
 
     task = models.Task(
         project_id=project_id,
@@ -179,6 +205,7 @@ async def update_task(
     if payload.description is not None:
         task.description = payload.description
     if payload.assignee_id is not None:
+        _validate_assignee(db, project.workspace_id, payload.assignee_id)
         if payload.assignee_id != task.assignee_id and payload.assignee_id != current_user["id"]:
             notify(
                 db,

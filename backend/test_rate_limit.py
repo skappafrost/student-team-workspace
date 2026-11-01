@@ -736,6 +736,10 @@ def test_fallback_notification_crud(client, db_session, monkeypatch):
     as_user(client, uid)
     target = _uid("rl-fb-target")
     make_user(db_session, target, email=f"{target}@example.com")
+    # The feed owner creates the rows: `POST /notifications` accepts a self-directed
+    # `user_id` only, and this test is about the limiter's bucket, not about
+    # authorization.
+    as_user(client, target)
     _tiny_fallback(monkeypatch)
     i = iter(range(100))
 

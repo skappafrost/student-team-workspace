@@ -81,9 +81,10 @@ _PATH_CELL = re.compile(rf"`(?:({'|'.join(_METHODS)}) )?(/[^`?]*)[^`]*`")
 
 
 #: Backend paths that appear in the guide without existing as a route, and are
-#: meant to: the BFF table documents this handler as proxying to a route the
-#: backend never shipped, so a reader can see the gap instead of hitting it.
-STALE_ROWS_OK = {"/notifications/mark-all-read"}
+#: meant to. Empty: every documented path is a real route. When a documented gap
+#: is closed (e.g. /notifications/mark-all-read, which used to sit here), add
+#: the route, document it, and drop it from this set.
+STALE_ROWS_OK: set[str] = set()
 
 
 def _documented_rows(doc_text: str) -> set[tuple[str, str]]:

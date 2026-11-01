@@ -8,7 +8,7 @@ import pagination as pagination_lib
 import schemas
 from authorization import Role, _require_member, require_permission
 from database import get_db
-from dependencies import _get_workspace_or_404, get_current_user
+from dependencies import _get_workspace_or_404, commit_unique, get_current_user
 from query_utils import LIKE_ESCAPE, contains_pattern
 
 router = APIRouter()
@@ -17,7 +17,7 @@ router = APIRouter()
 @router.post("/workspaces", response_model=schemas.WorkspaceDetailOut, status_code=201)
 async def create_workspace(
     payload: schemas.WorkspaceCreate,
-    current_user: dict = Depends(require_permission("workspace.create")),
+    current_user: dict = Depends(require_permission("workspace.create", platform_level=True)),
     db: Session = Depends(get_db),
 ):
     """Create a new workspace and set the creator as owner."""
@@ -30,16 +30,16 @@ async def create_workspace(
         slug=payload.slug,
         description=payload.description,
     )
-    db.add(workspace)
-    db.flush()  # get workspace.id
+    with commit_unique(db, "Workspace slug already exists"):
+        db.add(workspace)
+        db.flush()  # get workspace.id
 
-    membership = models.WorkspaceMembership(
-        workspace_id=workspace.id,
-        user_id=current_user["id"],
-        role=Role.OWNER.value,
-    )
-    db.add(membership)
-    db.commit()
+        membership = models.WorkspaceMembership(
+            workspace_id=workspace.id,
+            user_id=current_user["id"],
+            role=Role.OWNER.value,
+        )
+        db.add(membership)
     db.refresh(workspace)
     db.refresh(membership)
     workspace.memberships = [membership]
@@ -186,19 +186,20 @@ async def update_workspace(
     workspace = _get_workspace_or_404(db, workspace_id)
     # RBAC enforced by require_permission dependency
 
-    if payload.name is not None:
-        workspace.name = payload.name
-    if payload.slug is not None:
-        if (
-            payload.slug != workspace.slug
-            and db.query(models.Workspace).filter(models.Workspace.slug == payload.slug).first()
-        ):
-            raise HTTPException(status_code=409, detail="Workspace slug already exists")
-        workspace.slug = payload.slug
-    if payload.description is not None:
-        workspace.description = payload.description
-
-    db.commit()
+    with commit_unique(db, "Workspace slug already exists"):
+        if payload.name is not None:
+            workspace.name = payload.name
+        if payload.slug is not None:
+            if (
+                payload.slug != workspace.slug
+                and db.query(models.Workspace)
+                .filter(models.Workspace.slug == payload.slug)
+                .first()
+            ):
+                raise HTTPException(status_code=409, detail="Workspace slug already exists")
+            workspace.slug = payload.slug
+        if payload.description is not None:
+            workspace.description = payload.description
     db.refresh(workspace)
     return workspace
 
