@@ -21,8 +21,10 @@ from dependencies import (
     _get_channel_or_404,
     _get_workspace_or_404,
     _ws_resolve_user,
+    commit_unique,
     get_current_user,
 )
+from services import log_activity
 from ws import (
     WS_FORBIDDEN,
     WS_NOT_FOUND,
@@ -75,10 +77,26 @@ def _is_private_channel_member(channel: models.Channel, user_id: str, db: Sessio
 def _require_channel_manager(
     channel: models.Channel, current_user: dict, db: Session
 ) -> models.WorkspaceMember:
-    """Admins/owners or the channel creator may manage a channel."""
+    """Admins/owners or the channel creator may manage a channel.
+
+    A direct message is the exception, and it is the whole point of the
+    exception: the read gate (`_is_private_channel_member`) has never had an
+    admin bypass, so the exposure came from this manager path alone — an admin
+    enrolled *itself* into someone's 1:1 DM and then read it, and the peers
+    could not remove it because removal is manager-gated too (SEC-07). Private
+    *team* channels keep the documented admin power; those changes are now
+    written to the workspace activity feed.
+    """
     membership = _require_member(channel.workspace_id, current_user["id"], db)
     if channel.created_by == current_user["id"]:
         return membership
+    if channel.type == "dm":
+        if _is_private_channel_member(channel, current_user["id"], db):
+            return membership
+        raise HTTPException(
+            status_code=403,
+            detail="Only the participants of a direct message can manage it",
+        )
     user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
     if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.ADMIN]:
         raise HTTPException(
@@ -86,6 +104,27 @@ def _require_channel_manager(
             detail="Only admins or the channel creator can manage this channel",
         )
     return membership
+
+
+def _log_channel_membership_change(
+    db: Session,
+    channel: models.Channel,
+    actor_id: str,
+    verb: str,
+    target_user_id: str,
+) -> None:
+    """Record a management action taken by role rather than by having created the channel."""
+    if channel.created_by == actor_id:
+        return
+    log_activity(
+        db,
+        workspace_id=channel.workspace_id,
+        actor_id=actor_id,
+        verb=verb,
+        target_type="channel_member",
+        target_id=channel.id,
+        target_label=target_user_id,
+    )
 
 
 def _channel_member_out(cm: models.ChannelMember) -> dict:
@@ -547,8 +586,11 @@ async def add_channel_member(
         raise HTTPException(status_code=409, detail="User is already a member of this channel")
 
     cm = models.ChannelMember(channel_id=channel.id, user_id=payload.user_id)
-    db.add(cm)
-    db.commit()
+    with commit_unique(db, "User is already a member of this channel"):
+        db.add(cm)
+        _log_channel_membership_change(
+            db, channel, current_user["id"], "added channel member", payload.user_id
+        )
     db.refresh(cm)
     cm.user = target
     return _channel_member_out(cm)
@@ -583,5 +625,8 @@ async def remove_channel_member(
         raise HTTPException(status_code=404, detail="User is not a member of this channel")
 
     db.delete(cm)
+    _log_channel_membership_change(
+        db, channel, current_user["id"], "removed channel member", user_id
+    )
     db.commit()
     return None

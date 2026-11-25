@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session, selectinload
 import models
 import pagination as pagination_lib
 import schemas
-from authorization import Role, require_permission
+from authorization import (
+    Role,
+    require_assignable_role,
+    require_permission,
+    role_in_workspace,
+)
 from database import get_db
 from dependencies import _get_workspace_or_404
 
@@ -51,7 +56,11 @@ async def update_member_role(
     current_user: dict = Depends(require_permission("member.update_role")),
     db: Session = Depends(get_db),
 ):
-    """Update a member's role. Requires admin or higher role. Cannot change owner role."""
+    """Update a member's role. Requires admin or higher role. Cannot change owner role.
+
+    The caller may only hand out a role it holds or one below it, and `owner` is
+    never assignable here — it moves through `transfer-ownership` (SEC-01).
+    """
     # RBAC enforced by require_permission dependency
     _get_workspace_or_404(db, workspace_id)
 
@@ -79,6 +88,10 @@ async def update_member_role(
         new_role = Role(payload.role)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid role") from None
+
+    require_assignable_role(
+        role_in_workspace(workspace_id, current_user["id"], db), new_role
+    )
 
     membership.role = new_role.value
     db.commit()

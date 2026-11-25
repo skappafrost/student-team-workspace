@@ -2,7 +2,7 @@
 
 Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagger) and `/redoc`. This file is the curated teammate guide — read this first, use `/docs` for schema details.
 
-> **Accuracy:** every row below was regenerated from the live route table + `routers/` source (19/09/2026; 51 HTTP paths + 2 WebSocket routes). `backend/test_docs_contract.py` fails the build if a route appears in the app without a row here, if a row outlives its route, or if that count stops matching — so regenerate rather than hand-editing individual rows.
+> **Accuracy:** every row below was regenerated from the live route table + `routers/` source (19/09/2026; 52 HTTP paths + 2 WebSocket routes). `backend/test_docs_contract.py` fails the build if a route appears in the app without a row here, if a row outlives its route, or if that count stops matching — so regenerate rather than hand-editing individual rows.
 
 ## Auth model
 
@@ -17,7 +17,7 @@ Backend: FastAPI on `http://localhost:8000`. Interactive docs at `/docs` (Swagge
 
 - **Workspace scoping**: almost every resource lives under `/workspaces/{workspace_id}/...`. Membership is checked per request (`403` if you're not a member, `404` if the thing doesn't exist). **The guest role is not one uniform rule** — guests pass a plain membership check, so most reads work, but these gates are stricter: creating a channel (`403`, `routers/channels.py:create_channel`), joining a channel socket (`4403`, `routers/channels.py:channel_websocket`), reading uploaded file bytes (`403`, `routers/files.py:_resolve_read_file`), and **presence, where guests are refused on read as well as write** (`403`, `routers/presence.py:_require_member_role`). Anything guarded by `require_permission` needs `member` or above.
 - **Citing code from this doc**: use `file:symbol`, not `file:NNN`. Line numbers drift — the presence guest gate moved from `:116` to `:137` without anyone touching the prose that pointed at it.
-- **Roles**: `owner > admin > member > guest`. Role changes: `PATCH /workspaces/{id}/members/{user_id}`. Ownership transfer: `POST /workspaces/{id}/transfer-ownership` (owner only).
+- **Roles**: `owner > co-owner > admin > member > guest`. Role changes: `PATCH /workspaces/{id}/members/{user_id}` accepts the assignable roles `co-owner|admin|member|guest`, and only one **strictly below** the caller's own role in that workspace — no caller can mint a peer or anything above it, so an `admin` cannot create another `admin` and a `co-owner` cannot create another `co-owner` (D-3c). Ownership transfer: `POST /workspaces/{id}/transfer-ownership` (owner only) — the only way anyone becomes `owner`; a `co-owner` is not the legal owner and cannot transfer, cannot delete the workspace, and cannot grant `co-owner`. Invites (`POST /workspaces/{id}/invites`) carry an assignable role under the same rule and are redeemed by whoever presents the token (`POST /invites/accept`), not bound to the addressed address; see `SEC-02` in the remediation plan for the open policy question there.
 - **Error envelope**: FastAPI default — `{"detail": "human-readable message"}` with the right status code (400 validation, 401 unauthenticated, 403 forbidden, 404 missing, 409 conflict, 422 bad payload, 429 rate-limited with `Retry-After`). Validation errors use `{"detail": [{"loc": [...], "msg": ..., "type": ...}]}`.
 - **Rate limiting**: login 10/min per IP + 5/min per email; register 5/hour; upload 20/hour; AI 30/hour; all other write routes 120/min per identity (sliding window; `429` + `Retry-After`). Set `RATELIMIT_ENABLED=0` to disable.
 - **IDs**: UUID strings. **Timestamps: ISO-8601, naive UTC, with no `Z` and no offset** — e.g. `"2026-08-28T09:00:00"`. This is deliberate and cross-engine: `dependencies._utcnow()` stores naive UTC, and `test_dialect_parity.py:216` pins that serialization stays naive on SQLite and PostgreSQL alike. It applies to every timestamp field in the API, presence's `last_seen` included. The trap when consuming it: `new Date("2026-08-28T09:00:00")` in JavaScript parses as **local** time, so append `Z` (or parse with an explicit UTC assumption) at the boundary — otherwise every non-UTC client silently shifts every timestamp.
@@ -69,11 +69,11 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 | Method | Path | Notes |
 |---|---|---|
 | GET, POST | `/workspaces/{id}/channels` | POST validates `type` against `general/project/private` (422 otherwise; TA3-2) |
-| PATCH | `/channels/{id}` | Manager (admin or creator) only |
-| GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`) |
+| PATCH | `/channels/{id}` | Manager (admin or creator) only. A `type="dm"` channel is managed only by its two participants — no workspace role opens it |
+| GET, POST | `/channels/{id}/members` | Private channels only; manager only to add (`201`). When the actor is a manager by role rather than the channel creator, the change is written to the workspace activity feed. DMs: participants only |
 | DELETE | `/channels/{id}/members/{user_id}` | Manager only |
-| GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`); POST `201` broadcasts over WS + creates notifications |
-| PATCH, DELETE | `/messages/{id}` | Author only |
+| GET, POST | `/channels/{id}/messages` | GET `?q=` substring filter (literal `%`/`_`), `?limit=`, `?offset=`, `?before=<message_id>` — the window is taken from the **newest** end and returned ascending, so `offset` walks backwards and `before` pages older; POST `201` broadcasts over WS + creates notifications |
+| PATCH, DELETE | `/messages/{id}` | The author always may. Otherwise the caller needs workspace rank `admin`+ **and** access to the channel: a DM or a private channel they are not a member of answers `403`, so rank no longer reaches messages it cannot read. Rank-based moderation is written to the workspace activity feed. |
 | POST | `/messages/{id}/reactions` | Body `{emoji}`; returns `[ReactionSummary]` |
 | GET, POST | `/workspaces/{id}/dms` | Direct messages; body `{user_id}` |
 
@@ -90,8 +90,8 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/pages` | GET: `?flat=true` tree-vs-flat, `?search=` substring filter (literal `%`/`_`, TA3-2), `?recent=true`, `?limit=` (default 10, max 100) |
-| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | POST/GET `201`; PATCH/DELETE admin+ or page creator; slug unique per workspace |
+| GET, POST | `/workspaces/{id}/pages` | GET: `?flat=true` tree-vs-flat, `?search=` substring filter (literal `%`/`_`, TA3-2), `?recent=true`, `?limit=` (default 10, max 100) — the cap applies to `search` and `recent` as stated. `flat`/`search`/`recent` return a flat list with `children: []`; only tree mode nests. |
+| GET, PATCH, DELETE | `/workspaces/{id}/pages/{page_id}` | POST/GET `201`; PATCH/DELETE admin+ or page creator; slug unique per workspace. `parent_id` must be in the workspace, is not the page itself, and must not be one of the page's own descendants (`400 Page cannot be its own ancestor`) — a cycle made every page list in the workspace answer `500`. |
 | GET | `/workspaces/{id}/pages/{page_id}/backlinks` | Pages linking to this one |
 | GET | `/workspaces/{id}/pages/{page_id}/history` | Versions, newest first |
 | POST | `/workspaces/{id}/pages/{page_id}/restore/{version}` | Restore a version |
@@ -100,9 +100,9 @@ The BFF resolves "current workspace" as the first entry of `GET /workspaces` —
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/workspaces/{id}/files` | GET: `?project_id= ?task_id= ?message_id= ?limit= ?offset=`; POST is multipart upload |
-| GET, PATCH, DELETE | `/files/{id}` | File content served from `/uploads/...` |
-| GET | `/uploads/{storage_key}` | Serves the bytes themselves, authenticated: same policy as `GET /files/{id}` — anonymous `401`, non-member `403`, guest `403`, revoked session `401`, unknown key `404`. Replaced the old unauthenticated `StaticFiles` mount, so any LAN peer with a URL can no longer read another workspace's files. |
+| GET, POST | `/workspaces/{id}/files` | GET: `?project_id= ?task_id= ?message_id= ?limit= ?offset=`; POST is multipart upload. A file linked to a message in a **private** channel (including DMs) is omitted from the list for callers who are not members of that channel. |
+| GET, PATCH, DELETE | `/files/{id}` | GET returns metadata only; content is served from `/uploads/...`. GET answers `403` when the file is linked into a private channel the caller is not a member of. PATCH/DELETE are still gated on uploader-or-admin, which is a separate question from read scope. |
+| GET | `/uploads/{storage_key}` | Serves the bytes themselves, authenticated: same policy as `GET /files/{id}` — anonymous `401`, non-member `403`, guest `403`, revoked session `401`, unknown key `404`, and `403` for a file linked into a private channel the caller is not in. The channel check runs **before** the on-disk lookup, so the status code is not an oracle for whether a key exists. Replaced the old unauthenticated `StaticFiles` mount, so any LAN peer with a URL can no longer read another workspace's files. |
 
 #### Storage quota (TA2-3)
 
@@ -116,8 +116,9 @@ Each workspace has a storage quota enforced at upload time on `POST /workspaces/
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `/notifications` | GET: `?unread_only=true`, `?limit= ?offset=` |
+| GET, POST | `/notifications` | GET: `?unread_only=true`, `?limit= ?offset=`. POST accepts a `user_id` equal to the caller only (`403` otherwise, `404` if the id does not exist); fan-out to other users is server-side (`services.notify`), not client-callable. The BFF exposes GET only. |
 | GET, PATCH, DELETE | `/notifications/{id}` | PATCH `{read: bool}` |
+| POST | `/notifications/mark-all-read` | Marks every unread row of the **caller** as read; returns `{"ok": true}`; idempotent |
 
 ### Presence
 
@@ -155,7 +156,7 @@ All collection (list) endpoints share one contract — the helper lives in `back
 - Query params: `?limit=` (1..1000) and `?offset=` (>= 0). Omitted `limit` uses the endpoint's default, which for every paginated list equals the 1000 cap — i.e. the full collection (the BFF clients rely on that); omitted `offset` is 0.
 - Hard cap: `limit` above **1000** is rejected with `422` (validation), never silently truncated. Two endpoints keep stricter caps they shipped with: `GET /workspaces/{id}/activity` (default/max 100) and `GET /workspaces/{id}/audit-log` (default 100, max 500).
 - Responses stay **bare JSON arrays** (shape frozen — no `{items,total}` envelopes); pages are read with `limit`/`offset` windows over the same ordering each endpoint already uses.
-- Ordering is explicit and stable on every paginated list (creation/join time or position), so windows are disjoint and deterministic.
+- Ordering is explicit and stable on every paginated list (creation/join time or position), so windows are disjoint and deterministic. Where two rows can share a timestamp — SQLite's `CURRENT_TIMESTAMP` is second-granular — the tie-break is a second ordered column, so it is **stable** across queries rather than chronological between the tied rows; `messages` avoids relying on that by stamping new rows with a naive-UTC microsecond default (`models._utcnow_naive`), which is the same naive-UTC convention the line above states.
 - Endpoints without a collection shape (`/ai/search`, `/users/me/export`, tree-mode `/pages` without `recent`/`search`) are not paginated.
 - **Exempt, deliberately: `GET /workspaces/{id}/presence`.** The roster is bounded by workspace membership and the client needs the whole set to render "who is online", so paging it would force the BFF to loop for zero benefit — and ordering it (`ORDER BY last_seen`) over a live-changing value makes rows duplicate or skip between windows. It returns every member in one **unordered** bare array; sort client-side.
 
@@ -413,7 +414,7 @@ The Next.js app never calls the backend directly from the browser. `app/src/app/
 | `GET /api/pages/{pageId}/backlinks` | `/workspaces/{id}/pages/{id}/backlinks` |
 | `GET, POST /api/files` + `/api/files/{fileId}` | `/workspaces/{id}/files` + `/files/{id}` |
 | `GET, PATCH /api/notifications` | `/notifications` |
-| `POST /api/notifications` (`{action: "mark-all-read"}`) | proxies to `POST /notifications/mark-all-read` — **no such backend route exists** (backend has only `POST /notifications` and `GET/PATCH/DELETE /notifications/{id}`); currently fails with 405. Known gap, candidate for a future harden PR. |
+| `POST /api/notifications` (`{action: "mark-all-read"}`) | proxies to `POST /notifications/mark-all-read`; the backend route now exists (added in the `mark-all-read` harden change) — marks every unread row of the caller as read |
 | `GET /api/ai/search` | `GET /ai/search` (`q`, `scope` forwarded) |
 | `POST /api/ai/summarize` | `POST /ai/summarize` |
 | `GET /api/activity` | `GET /workspaces/{first}/activity` |

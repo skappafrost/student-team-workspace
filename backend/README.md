@@ -77,6 +77,15 @@ alembic upgrade head
 
 On a fresh SQLite file, tables are also auto-created at startup, but running `alembic upgrade head` is the canonical way to ensure the schema matches the codebase.
 
+**One exception to that, and it bites quietly.** A database whose tables came from `create_all` (the startup path above, and every test database) has no `alembic_version` row, so `alembic upgrade head` treats it as brand-new and dies on the first `CREATE TABLE` with "table already exists". That reads as a broken migration; it is an unstamped database. Check and repair:
+
+```bash
+python manage.py db-status   # prints applied revisions, or says the stamp is missing
+python manage.py stamp       # record `head` without touching the schema
+```
+
+Stamp asserts a fact, so it refuses when the fact is false: an empty database gets `nothing to stamp: the database has no tables`, and you want `alembic upgrade head` there instead. Use `python manage.py stamp --db-url <url>` for a database other than `DATABASE_URL` — the flag is authoritative for this command, which matters because `alembic/env.py` reads `DATABASE_URL` before `alembic.ini`.
+
 ---
 
 ## 5. Start the development server
@@ -158,6 +167,8 @@ cd backend && .venv/Scripts/ruff check .
 | `alembic heads` | Show current migration heads |
 | `alembic history` | Show full migration history |
 | `alembic upgrade head` | Apply all pending migrations |
+| `python manage.py db-status` | Show alembic heads, applied revisions and per-table row counts |
+| `python manage.py stamp [revision]` | Record the revision an existing (unstamped) database is at, without changing its schema |
 | `alembic downgrade -1` | Roll back one migration |
 | `alembic revision --autogenerate -m "description"` | Generate a new migration |
 | `uvicorn app:app --reload` | Start dev server with hot reload |

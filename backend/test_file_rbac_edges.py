@@ -372,3 +372,92 @@ def test_anonymous_cannot_upload(setup, client):
         files={"file": ("x.pdf", io.BytesIO(b"x"), "application/pdf")},
     )
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Private-channel scoping of the list and metadata reads
+#
+# No byte fetches here: this fixture replaces /uploads with a StaticFiles mount,
+# so a status assertion on that path would be answered by the mount and could
+# pass while the route-level gate was still absent. The bytes live in
+# test_files_read_auth.py.
+# ---------------------------------------------------------------------------
+
+
+def _join_member(db_session, workspace_id, user_id):
+    make_user(db_session, user_id, email=f"{user_id}@example.com")
+    db_session.add(
+        WorkspaceMembership(workspace_id=workspace_id, user_id=user_id, role=Role.MEMBER.value)
+    )
+    db_session.commit()
+
+
+def _link_file_to_message(client, workspace_id, channel_id):
+    msg = client.post(f"/channels/{channel_id}/messages", json={"content": "note"})
+    assert msg.status_code == 201, msg.text
+    resp = client.post(
+        f"/workspaces/{workspace_id}/files",
+        files={"file": ("linked.pdf", io.BytesIO(b"x"), "application/pdf")},
+        data={"message_id": msg.json()["id"]},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_dm_linked_file_hidden_from_non_participant(setup, client, db_session):
+    """A member outside the DM sees neither the row in the list nor its metadata."""
+    ws_id = setup["workspace_id"]
+    _join_member(db_session, ws_id, "member2")
+
+    as_user(client, "owner")
+    dm = client.post(f"/workspaces/{ws_id}/dms", json={"user_id": "member1"})
+    assert dm.status_code == 201, dm.text
+    data = _link_file_to_message(client, ws_id, dm.json()["id"])
+
+    as_user(client, "member2")
+    listed = client.get(f"/workspaces/{ws_id}/files")
+    assert listed.status_code == 200, listed.text
+    assert data["id"] not in [f["id"] for f in listed.json()]
+    assert client.get(f"/files/{data['id']}").status_code == 403
+
+    # A participant keeps both.
+    as_user(client, "owner")
+    assert data["id"] in [f["id"] for f in client.get(f"/workspaces/{ws_id}/files").json()]
+    assert client.get(f"/files/{data['id']}").status_code == 200
+
+
+def test_private_channel_linked_file_hidden_from_non_member(setup, client, db_session):
+    """The rule is channel membership, not DMs only, and admin rank does not help."""
+    ws_id = setup["workspace_id"]
+    _join_member(db_session, ws_id, "member2")
+
+    as_user(client, "owner")
+    ch = client.post(
+        f"/workspaces/{ws_id}/channels",
+        json={"name": "secrets", "type": "private"},
+    )
+    assert ch.status_code == 201, ch.text
+    data = _link_file_to_message(client, ws_id, ch.json()["id"])
+
+    as_user(client, "member2")
+    assert data["id"] not in [f["id"] for f in client.get(f"/workspaces/{ws_id}/files").json()]
+
+
+def test_public_channel_linked_file_stays_visible_to_members(setup, client, db_session):
+    """The channel join must not hide files that any member may read."""
+    ws_id = setup["workspace_id"]
+    _join_member(db_session, ws_id, "member2")
+
+    as_user(client, "owner")
+    ch = client.post(
+        f"/workspaces/{ws_id}/channels",
+        json={"name": "general", "type": "general"},
+    )
+    assert ch.status_code == 201, ch.text
+    data = _link_file_to_message(client, ws_id, ch.json()["id"])
+
+    as_user(client, "member2")
+    listed = client.get(f"/workspaces/{ws_id}/files")
+    assert data["id"] in [f["id"] for f in listed.json()]
+    assert client.get(f"/files/{data['id']}").status_code == 200
+

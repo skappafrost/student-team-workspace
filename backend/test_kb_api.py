@@ -302,3 +302,97 @@ def test_recent_pages(client):
     assert len(data) == 2
     assert data[0]["id"] == page1["id"]
     assert data[1]["id"] == page2["id"]
+
+
+# ---------------------------------------------------------------------------
+# Search honours `limit`, and parent cycles are refused
+# ---------------------------------------------------------------------------
+
+
+def _mkpage(client, ws_id, title, slug, **extra):
+    resp = client.post(
+        f"/workspaces/{ws_id}/pages",
+        json={"title": title, "slug": slug, "content": "needle content", **extra},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_search_honours_limit(client):
+    """`?search=` used to return every match, ignoring the param its own
+    docstring and `docs/API.md` describe as the cap for search results."""
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    for i in range(4):
+        _mkpage(client, ws["id"], f"needle {i}", f"needle-{i}")
+
+    resp = client.get(f"/workspaces/{ws['id']}/pages?search=needle&limit=2")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()) == 2
+
+    resp = client.get(f"/workspaces/{ws['id']}/pages?search=needle")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()) == 4
+
+
+def test_page_cannot_become_its_own_ancestor(client):
+    """A -> B -> C, then re-parenting A under C, closed a cycle.
+
+    Only the direct self-parent was rejected, so the three-step version passed
+    validation and then made the page list answer 500 for the whole workspace on
+    every subsequent read.
+    """
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    a = _mkpage(client, ws["id"], "A", "a")
+    b = _mkpage(client, ws["id"], "B", "b", parent_id=a["id"])
+    c = _mkpage(client, ws["id"], "C", "c", parent_id=b["id"])
+
+    resp = client.patch(
+        f"/workspaces/{ws['id']}/pages/{a['id']}", json={"parent_id": c["id"]}
+    )
+    assert resp.status_code == 400, resp.text
+    assert "ancestor" in resp.text
+
+
+def test_reparenting_to_a_sibling_is_still_allowed(client):
+    """Positive control: the ancestor walk must not forbid ordinary re-parenting."""
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    root = _mkpage(client, ws["id"], "Root", "root")
+    a = _mkpage(client, ws["id"], "A", "a", parent_id=root["id"])
+    b = _mkpage(client, ws["id"], "B", "b", parent_id=root["id"])
+
+    resp = client.patch(
+        f"/workspaces/{ws['id']}/pages/{a['id']}", json={"parent_id": b["id"]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["parent_id"] == b["id"]
+
+
+def test_lists_survive_a_cycle_already_in_the_data(client, db_session):
+    """Rows written before the ancestor check existed must not break every read.
+
+    A deployed database can already hold A -> B -> A. Serializing `PageTreeItem`
+    over those rows recursed until the serializer gave up, so the workspace's page
+    list was permanently 500 with no request able to clear it.
+    """
+    import models
+
+    ws = create_workspace(client, "owner")
+    as_user(client, "owner")
+    a = _mkpage(client, ws["id"], "A", "a")
+    b = _mkpage(client, ws["id"], "B", "b", parent_id=a["id"])
+
+    page_a = db_session.get(models.Page, a["id"])
+    page_a.parent_id = b["id"]
+    db_session.commit()
+
+    for params in ("?flat=true", "?search=needle", "?recent=true"):
+        resp = client.get(f"/workspaces/{ws['id']}/pages{params}")
+        assert resp.status_code == 200, (params, resp.text[:200])
+
+    # Tree mode keeps nesting its children, so the flat projection is scoped.
+    tree = client.get(f"/workspaces/{ws['id']}/pages")
+    assert tree.status_code == 200, tree.text
+

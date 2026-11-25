@@ -125,7 +125,12 @@ logger = logging.getLogger("stw")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Was `["*"]`, with `allow_credentials=True` alongside it — a combination
+    # browsers reject, and one that made `CORS_ORIGINS` (present in .env.example,
+    # docker-compose.yml and config.cors_origin_list()) a key with no effect.
+    # `_parse_cors_origins` is the settings-backed list, already imported for this
+    # purpose and previously unused.
+    allow_origins=_parse_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

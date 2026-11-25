@@ -9,6 +9,7 @@ The bypass itself is gated behind ``STW_TEST_AUTH=1`` + ``ENVIRONMENT`` in
 ``test_auth_bypass_flag.py``. This file intentionally does NOT enable it.
 """
 
+import logging
 import os
 
 import pytest
@@ -203,3 +204,35 @@ def workspace_factory(client, db_session):
         return resp.json()
 
     return _factory
+
+
+def run_alembic(action, *args):
+    """Run one alembic command, then restore the logging it clobbered.
+
+    ``command.upgrade()`` executes ``alembic/env.py``, and that module calls
+    ``fileConfig(alembic.ini)`` on import. The ini declares a root logger with a
+    single console handler, so applying it *replaces the root logger's handler
+    list* — where pytest's logging plugin keeps its capture handler — and marks
+    every already-existing ``stw.*`` logger disabled. Measured: the next
+    ``caplog``-asserting test in the session (collection order puts this file
+    before ``test_ws.py``) reported ``records=[]`` for a log line that had
+    demonstrably been emitted, and any later log assertion would pass on nothing.
+
+    Restored here rather than fixed in ``env.py``: a developer running
+    ``alembic upgrade head`` in a terminal does want the ini's console logging.
+    """
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    disabled = {
+        name: logger.disabled
+        for name, logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+    }
+    try:
+        action(*args)
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if isinstance(logger, logging.Logger) and name in disabled:
+                logger.disabled = disabled[name]

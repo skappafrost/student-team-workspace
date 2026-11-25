@@ -16,7 +16,6 @@ const vi: Record<string, string> = {
   Deadlines: 'Hạn chót',
   Calendar: 'Lịch',
   Chat: 'Trò chuyện',
-  Knowledge: 'Tri thức',
   Wiki: 'Wiki',
   Files: 'Tệp',
   Settings: 'Cài đặt',

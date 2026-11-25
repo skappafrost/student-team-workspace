@@ -4,6 +4,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 
 import models
@@ -11,7 +12,12 @@ import pagination as pagination_lib
 import schemas
 from authorization import ROLE_HIERARCHY, Role, _require_member
 from database import get_db
-from dependencies import _get_channel_or_404, _get_message_or_404, get_current_user
+from dependencies import (
+    _get_channel_or_404,
+    _get_message_or_404,
+    commit_unique,
+    get_current_user,
+)
 from query_utils import LIKE_ESCAPE, contains_pattern
 from routers.channels import _is_private_channel_member
 from services import log_activity, notify
@@ -152,18 +158,38 @@ def _notify_message_fanout(
 async def list_channel_messages(
     channel_id: str,
     q: str | None = None,
+    before: str | None = None,
     limit: int | None = pagination_lib.limit_query(
-        "Maximum number of messages to return (default = the 1000 cap)."
+        "Maximum number of messages to return, counting back from the newest "
+        "(default = the 1000 cap, i.e. the whole channel)."
     ),
-    offset: int | None = pagination_lib.offset_query(),
+    offset: int | None = pagination_lib.offset_query(
+        "Skip this many messages starting from the newest."
+    ),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List messages in a channel, optionally filtered by a case-insensitive
-    content substring (`q`). Requires workspace membership and channel access.
+    """List the newest messages in a channel, optionally filtered by a
+    case-insensitive content substring (`q`). Requires workspace membership and
+    channel access.
 
-    Pagination: ``limit`` (1..1000; default = the 1000 cap, i.e. the whole
-    collection), ``offset`` (default 0).
+    Pagination: ``limit`` (1..1000; default = the cap, i.e. the whole collection),
+    ``offset`` (default 0) walking **backwards from the newest**, and ``before``
+    (a message id) for a window strictly older than that message. The response is
+    still a bare JSON array in ascending `created_at` order, as `pagination.py`
+    and `docs/API.md` require.
+
+    Why the window is anchored at the newest end: the old query ordered
+    `created_at ASC` and then applied `offset/limit`, so the default page was the
+    **oldest** 1000 messages in the channel. In a busy channel the newest messages
+    were simply absent from the very first response, and no `offset` value could
+    reach them by paging forward.
+
+    `id` is part of the ordering, not decoration: SQLite's `CURRENT_TIMESTAMP` is
+    second-granular, so messages created in the same second had no defined order
+    and could shuffle between pages. UUIDs are not chronological, which is fine
+    for a tie-break as long as the same composite order is used for both the sort
+    and the `before` cut — otherwise a row could appear on two pages or none.
     """
     channel = _get_channel_or_404(db, channel_id)
     _require_member(channel.workspace_id, current_user["id"], db)
@@ -175,15 +201,32 @@ async def list_channel_messages(
         query = query.filter(
             models.Message.content.ilike(contains_pattern(q.strip()), escape=LIKE_ESCAPE)
         )
+
+    if before is not None and before.strip():
+        anchor = _get_message_or_404(db, before.strip())
+        if anchor.channel_id != channel_id:
+            raise HTTPException(status_code=400, detail="`before` is not a message in this channel")
+        query = query.filter(
+            or_(
+                models.Message.created_at < anchor.created_at,
+                and_(
+                    models.Message.created_at == anchor.created_at,
+                    models.Message.id < anchor.id,
+                ),
+            )
+        )
+
     _limit, _offset = pagination_lib.parse_list_params(limit, offset)
     messages = (
-        query.order_by(models.Message.created_at.asc())
+        query.order_by(models.Message.created_at.desc(), models.Message.id.desc())
         .options(selectinload(models.Message.author), selectinload(models.Message.reactions))
         .offset(_offset)
         .limit(_limit)
         .all()
     )
-    return messages
+    # Newest-first window, oldest-first response: the client appends live frames to
+    # the tail and expects the list it renders to be chronological.
+    return list(reversed(messages))
 
 
 @router.post("/channels/{channel_id}/messages", response_model=schemas.MessageOut, status_code=201)
@@ -275,6 +318,50 @@ async def _ws_push_notifications(db: Session, notification_ids: list[str]) -> No
         )
 
 
+def _require_message_moderation(
+    db: Session,
+    message: models.Message,
+    channel: models.Channel,
+    membership,
+    current_user: dict,
+    action: str,
+    activity_verb: str,
+) -> None:
+    """Gate changing someone else's message, following the read gate rather than rank.
+
+    The author always wins. Past that the rule mirrors `_is_private_channel_member`,
+    which has never had an admin bypass: someone who cannot read a DM or a private
+    channel cannot edit or delete messages inside it either. That closes the content
+    half of the asymmetry `d947deb` closed the enrollment half of — an admin used to
+    get `403` on `GET /channels/{dm}/messages` and `200` on `PATCH /messages/{id}`
+    for a message in that same DM.
+
+    Public channels keep the documented admin power, and a DM participant who holds
+    rank may still moderate the other side's message; what is removed is reach
+    without access. When moderation is exercised by rank rather than by authorship
+    it is written to the workspace activity feed, like `_log_channel_membership_change`.
+    """
+    if message.author_id == current_user["id"]:
+        return
+
+    if not _is_private_channel_member(channel, current_user["id"], db):
+        raise HTTPException(status_code=403, detail=f"Not allowed to {action} this message")
+
+    user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
+    if ROLE_HIERARCHY[user_role] < ROLE_HIERARCHY[Role.ADMIN]:
+        raise HTTPException(status_code=403, detail=f"Not allowed to {action} this message")
+
+    log_activity(
+        db,
+        workspace_id=channel.workspace_id,
+        actor_id=current_user["id"],
+        verb=activity_verb,
+        target_type="channel",
+        target_id=channel.id,
+        target_label=f"#{channel.name}",
+    )
+
+
 @router.patch("/messages/{message_id}", response_model=schemas.MessageOut)
 async def update_message(
     message_id: str,
@@ -287,12 +374,9 @@ async def update_message(
     channel = _get_channel_or_404(db, message.channel_id)
     membership = _require_member(channel.workspace_id, current_user["id"], db)
 
-    user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
-    is_admin_plus = ROLE_HIERARCHY[user_role] >= ROLE_HIERARCHY[Role.ADMIN]
-    is_owner = message.author_id == current_user["id"]
-
-    if not (is_owner or is_admin_plus):
-        raise HTTPException(status_code=403, detail="Not allowed to update this message")
+    _require_message_moderation(
+        db, message, channel, membership, current_user, "update", "edited message in"
+    )
 
     if payload.content is not None:
         message.content = payload.content
@@ -346,15 +430,15 @@ async def toggle_reaction(
         )
         .first()
     )
-    if existing is not None:
-        db.delete(existing)
-    else:
-        db.add(
-            models.MessageReaction(
-                message_id=message_id, user_id=current_user["id"], emoji=payload.emoji
+    with commit_unique(db, "Reaction already recorded"):
+        if existing is not None:
+            db.delete(existing)
+        else:
+            db.add(
+                models.MessageReaction(
+                    message_id=message_id, user_id=current_user["id"], emoji=payload.emoji
+                )
             )
-        )
-    db.commit()
 
     message = (
         db.query(models.Message)
@@ -412,12 +496,9 @@ async def delete_message(
     channel = _get_channel_or_404(db, message.channel_id)
     membership = _require_member(channel.workspace_id, current_user["id"], db)
 
-    user_role = Role(membership.role) if membership.role in [r.value for r in Role] else Role.GUEST
-    is_admin_plus = ROLE_HIERARCHY[user_role] >= ROLE_HIERARCHY[Role.ADMIN]
-    is_owner = message.author_id == current_user["id"]
-
-    if not (is_owner or is_admin_plus):
-        raise HTTPException(status_code=403, detail="Not allowed to delete this message")
+    _require_message_moderation(
+        db, message, channel, membership, current_user, "delete", "deleted message in"
+    )
 
     channel_id = message.channel_id
     removed = _message_subtree_ids(db, message_id)

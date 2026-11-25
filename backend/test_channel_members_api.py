@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.websockets import WebSocketDisconnect
 
+import models
 from app import Base, Role, app
 from database import get_db, set_db_url
 from models import User
@@ -503,3 +504,178 @@ def test_public_channel_accessible_to_all_workspace_members(client, db_session):
     as_user(client, "alice", Role.MEMBER.value)
     assert client.get(f"/channels/{channel['id']}/messages").status_code == 200
     assert client.post(f"/channels/{channel['id']}/messages", json={"content": "hi"}).status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# SEC-07 — a workspace admin does not outrank a direct message
+# ---------------------------------------------------------------------------
+
+
+def _dm(client, db_session, ws_id, a="alice", b="bob"):
+    add_workspace_member(client, db_session, ws_id, a, role="member")
+    add_workspace_member(client, db_session, ws_id, b, role="member")
+    as_user(client, a, Role.MEMBER.value)
+    resp = client.post(f"/workspaces/{ws_id}/dms", json={"user_id": b})
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_admin_cannot_enroll_themselves_in_someone_elses_dm(client, db_session):
+    """`_require_channel_manager` used to treat any admin as manager of any channel.
+
+    The read gate (`_is_private_channel_member`) has no admin bypass, so the
+    whole exposure came from the enrollment path: enroll, then read.
+    """
+    ws = create_workspace(client, db_session, "owner")
+    dm = _dm(client, db_session, ws["id"])
+    add_workspace_member(client, db_session, ws["id"], "admin2", role="admin")
+
+    as_user(client, "admin2", Role.ADMIN.value)
+    resp = client.post(f"/channels/{dm['id']}/members", json={"user_id": "admin2"})
+    assert resp.status_code == 403, resp.text
+
+    # Refused means no access, not just no write: the DM's messages stay closed.
+    resp = client.get(f"/channels/{dm['id']}/messages")
+    assert resp.status_code == 403, resp.text
+
+
+def test_admin_cannot_remove_a_participant_from_a_dm(client, db_session):
+    """Neither half of the manager power reaches into a DM."""
+    ws = create_workspace(client, db_session, "owner")
+    dm = _dm(client, db_session, ws["id"])
+    add_workspace_member(client, db_session, ws["id"], "admin2", role="admin")
+
+    as_user(client, "admin2", Role.ADMIN.value)
+    resp = client.delete(f"/channels/{dm['id']}/members/bob")
+    assert resp.status_code == 403, resp.text
+
+    as_user(client, "bob", Role.MEMBER.value)
+    assert client.get(f"/channels/{dm['id']}/messages").status_code == 200
+
+
+def test_dm_participants_still_manage_their_own_dm(client, db_session):
+    """Positive control: the exemption is about admins, not a freeze on DMs."""
+    ws = create_workspace(client, db_session, "owner")
+    dm = _dm(client, db_session, ws["id"])
+
+    as_user(client, "alice", Role.MEMBER.value)
+    resp = client.delete(f"/channels/{dm['id']}/members/bob")
+    assert resp.status_code == 204, resp.text
+
+
+def test_admin_membership_change_on_a_private_channel_is_audited(client, db_session):
+    """Admin power over private *team* channels stays (docs/API.md says so) — but it leaves a trace."""
+    ws = create_workspace(client, db_session, "owner")
+    channel = create_private_channel(client, ws["id"], name="team-private")
+    add_workspace_member(client, db_session, ws["id"], "alice", role="member")
+    add_workspace_member(client, db_session, ws["id"], "admin2", role="admin")
+
+    as_user(client, "admin2", Role.ADMIN.value)
+    resp = client.post(f"/channels/{channel['id']}/members", json={"user_id": "alice"})
+    assert resp.status_code == 201, resp.text
+
+    rows = (
+        db_session.query(models.Activity)
+        .filter(models.Activity.workspace_id == ws["id"])
+        .all()
+    )
+    entries = [a for a in rows if a.actor_id == "admin2" and a.target_id == channel["id"]]
+    assert entries, (
+        "an admin changed channel membership with nothing recorded: "
+        f"{[(a.actor_id, a.verb, a.target_type, a.target_id) for a in rows]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Message moderation follows channel access, not workspace rank
+# ---------------------------------------------------------------------------
+
+
+def create_dm(client, workspace_id, peer, creator="owner"):
+    as_user(client, creator)
+    resp = client.post(f"/workspaces/{workspace_id}/dms", json={"user_id": peer})
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_admin_outsider_cannot_edit_or_delete_a_dm_message(client, db_session):
+    """Rank must not reach into someone else's 1:1 conversation.
+
+    The read gate has never allowed it, so the same caller used to answer `403`
+    on `GET /channels/{dm}/messages` and `200` on `PATCH /messages/{id}` for a
+    message inside that very DM.
+    """
+    ws = create_workspace(client, db_session, "owner")
+    add_workspace_member(client, db_session, ws["id"], "alice", role="member")
+    add_workspace_member(client, db_session, ws["id"], "admin2", role="admin")
+
+    dm = create_dm(client, ws["id"], peer="alice", creator="owner")
+    msg = post_message(client, dm["id"], "private to alice and owner", as_user_id="alice")
+    assert msg.status_code == 201, msg.text
+    message = msg.json()
+
+    as_user(client, "admin2", Role.ADMIN.value)
+    edit = client.patch(f"/messages/{message['id']}", json={"content": "tampered"})
+    delete = client.delete(f"/messages/{message['id']}")
+    assert edit.status_code == 403, edit.text
+    assert delete.status_code == 403, delete.text
+
+    # And the message is actually untouched, not merely refused on the way out.
+    as_user(client, "alice", Role.MEMBER.value)
+    listed = client.get(f"/channels/{dm['id']}/messages").json()
+    assert [m["content"] for m in listed] == ["private to alice and owner"]
+
+
+def test_admin_outsider_cannot_moderate_a_private_team_channel_message(client, db_session):
+    """The same rule covers private team channels: no channel access, no moderation."""
+    ws = create_workspace(client, db_session, "owner")
+    channel = create_private_channel(client, ws["id"], name="team-private")
+    add_workspace_member(client, db_session, ws["id"], "admin2", role="admin")
+
+    msg = post_message(client, channel["id"], "team-private content")
+    assert msg.status_code == 201, msg.text
+
+    as_user(client, "admin2", Role.ADMIN.value)
+    assert client.patch(f"/messages/{msg.json()['id']}", json={"content": "x"}).status_code == 403
+    assert client.delete(f"/messages/{msg.json()['id']}").status_code == 403
+
+
+def test_author_still_edits_own_message_inside_a_dm(client, db_session):
+    """Participants keep control of their own words — this is a scope change, not a lockout."""
+    ws = create_workspace(client, db_session, "owner")
+    add_workspace_member(client, db_session, ws["id"], "alice", role="member")
+    dm = create_dm(client, ws["id"], peer="alice", creator="owner")
+
+    msg = post_message(client, dm["id"], "first draft", as_user_id="alice")
+    message = msg.json()
+
+    as_user(client, "alice", Role.MEMBER.value)
+    edit = client.patch(f"/messages/{message['id']}", json={"content": "second draft"})
+    assert edit.status_code == 200, edit.text
+    assert client.delete(f"/messages/{message['id']}").status_code == 204
+
+
+def test_admin_moderation_in_a_public_channel_still_works_and_is_audited(client, db_session):
+    """Public channels keep the documented admin power, and rank-based edits leave a trace."""
+    ws = create_workspace(client, db_session, "owner")
+    channel = create_public_channel(client, ws["id"])
+    add_workspace_member(client, db_session, ws["id"], "alice", role="member")
+    add_workspace_member(client, db_session, ws["id"], "admin2", role="admin")
+
+    msg = post_message(client, channel["id"], "alice says", as_user_id="alice")
+    message = msg.json()
+
+    as_user(client, "admin2", Role.ADMIN.value)
+    edit = client.patch(f"/messages/{message['id']}", json={"content": "admin says"})
+    assert edit.status_code == 200, edit.text
+    assert client.delete(f"/messages/{message['id']}").status_code == 204
+
+    rows = (
+        db_session.query(models.Activity)
+        .filter(models.Activity.workspace_id == ws["id"])
+        .all()
+    )
+    moderation = [a for a in rows if a.actor_id == "admin2" and a.target_id == channel["id"]]
+    assert [a.verb for a in moderation] == ["edited message in", "deleted message in"], [
+        (a.actor_id, a.verb, a.target_type) for a in rows
+    ]

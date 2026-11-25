@@ -15,9 +15,10 @@ red rather than merely dropping a coverage line.
 """
 
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 
 import authorization
+import models
 from authorization import ROLE_HIERARCHY, Role, require_permission, require_role
 from conftest import as_user, make_user
 from models import Workspace, WorkspaceMembership
@@ -49,10 +50,16 @@ def _mk_workspace(db, owner_id="owner", slug="ws"):
 
 
 def test_role_hierarchy_values_are_ordered():
-    """The hierarchy is the ground truth every router compares against."""
+    """The hierarchy is the ground truth every router compares against.
+
+    `co-owner` sits strictly between owner and admin (D-3c): above every role an
+    admin can hand out, below the one role that can transfer ownership.
+    """
     assert ROLE_HIERARCHY[Role.GUEST] < ROLE_HIERARCHY[Role.MEMBER]
     assert ROLE_HIERARCHY[Role.MEMBER] < ROLE_HIERARCHY[Role.ADMIN]
-    assert ROLE_HIERARCHY[Role.ADMIN] < ROLE_HIERARCHY[Role.OWNER]
+    assert ROLE_HIERARCHY[Role.ADMIN] < ROLE_HIERARCHY[Role.CO_OWNER]
+    assert ROLE_HIERARCHY[Role.CO_OWNER] < ROLE_HIERARCHY[Role.OWNER]
+    assert len(ROLE_HIERARCHY) == len(list(Role))
 
 
 def test_require_min_role_rejects_insufficient_role():
@@ -258,18 +265,22 @@ def test_require_role_workspace_role_falls_back_on_bogus_stored_role(db_session)
     assert "insufficient in this workspace" in exc.value.detail
 
 
-def test_require_role_global_path_uses_token_role(db_session):
-    """No workspace_id -> the token's global role decides (used by workspace.create)."""
+def test_require_global_role_uses_token_role(db_session):
+    """The token's global role decides for platform-level actions (`workspace.create`).
+
+    ARC-05 moved this out of `require_role` — where a missing path parameter
+    silently fell through to it — into a factory a route has to ask for.
+    """
     _mk_user(db_session, "owner")
-    checker = _checker_for(db_session, None, Role.MEMBER)
+    checker = authorization.require_global_role(Role.MEMBER)
     # A token role that satisfies MEMBER.
-    assert _call(checker, db_session, None, {"id": "x", "role": Role.ADMIN.value})
+    assert checker(current_user={"id": "x", "role": Role.ADMIN.value})
 
 
-def test_require_role_global_path_rejects_guest_token_role(db_session):
-    checker = _checker_for(db_session, None, Role.ADMIN)
+def test_require_global_role_rejects_guest_token_role(db_session):
+    checker = authorization.require_global_role(Role.ADMIN)
     with pytest.raises(HTTPException) as exc:
-        _call(checker, db_session, None, {"id": "x", "role": Role.GUEST.value})
+        checker(current_user={"id": "x", "role": Role.GUEST.value})
     assert exc.value.status_code == 403
     assert "insufficient. Requires 'admin'." in exc.value.detail
 
@@ -333,3 +344,233 @@ def test_invalid_bearer_is_401_not_500(client):
     client.headers["Authorization"] = "Bearer not.a.jwt"
     resp = client.get("/workspaces/abc/members")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# ARC-05 — the workspace a guard checks comes from the path, never the client
+# ---------------------------------------------------------------------------
+
+
+def _query_scoped_routes(spec):
+    """OpenAPI operations that take `workspace_id` as a QUERY parameter."""
+    hits = []
+    for path, operations in (spec.get("paths") or {}).items():
+        for method, operation in (operations or {}).items():
+            for param in operation.get("parameters") or []:
+                if param.get("name") == "workspace_id" and param.get("in") == "query":
+                    hits.append(f"{method.upper()} {path}")
+    return sorted(hits)
+
+
+def test_no_route_takes_its_workspace_scope_from_the_query_string():
+    """A guard whose workspace can be named in a URL is a cross-tenant hole waiting to happen.
+
+    `workspace_id: str = None` in the guard makes FastAPI publish a *query*
+    parameter on any route whose path lacks `{workspace_id}` — which is exactly
+    how the T001/T002 class of bug returns silently when someone adds a route.
+    The published OpenAPI is where that shape shows up first, so the assertion
+    is on the contract the app advertises, not on a grep of the source.
+    """
+    from app import app
+
+    assert _query_scoped_routes(app.openapi()) == []
+
+
+def test_creating_a_workspace_is_not_rescoped_by_a_query_string(client, db_session):
+    """?workspace_id=<a workspace I do not belong to> must not change who may create.
+
+    Before the fix the guard read that query value and went looking for a
+    membership row, so a legitimate platform-level action could be turned into
+    a 403 by the caller's own URL.
+    """
+    ws = _mk_workspace(db_session, "someoneelse", slug="arc05-other")
+    make_user(db_session, "creator", email="creator@example.com")
+
+    as_user(client, "creator")
+    resp = client.post(
+        f"/workspaces?workspace_id={ws.id}",
+        json={"name": "Mine", "slug": "arc05-mine"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["id"] != ws.id
+
+
+def test_a_route_without_the_path_parameter_cannot_be_scoped_by_the_caller():
+    """The guard is path-only, so a mis-shaped route fails closed instead of reading a query.
+
+    This is the regression the finding is about: `require_role` used to fall
+    back to a client-supplied `?workspace_id=` whenever the route did not carry
+    the path parameter. A throwaway app pins the new contract — the request is
+    refused outright, and nothing the caller sends can name the workspace.
+    """
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+
+    from app import create_access_token
+
+    router = APIRouter()
+
+    @router.post("/misshaped")
+    async def misshaped(current_user: dict = Depends(require_permission("workspace.delete"))):
+        return {"ok": True}
+
+    probe = FastAPI()
+    probe.include_router(router)
+    client_probe = TestClient(probe, raise_server_exceptions=False)
+    client_probe.headers["Authorization"] = f"Bearer {create_access_token('owner')}"
+
+    resp = client_probe.post("/misshaped?workspace_id=anything")
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert any(
+        p.get("loc") == ["path", "workspace_id"] and p.get("type") == "missing"
+        for p in detail
+    ), f"expected a missing path parameter, got {detail}"
+
+
+# ---------------------------------------------------------------------------
+# D-3c — the assignment ceiling is strict: requested rank < caller rank
+# ---------------------------------------------------------------------------
+
+# (caller role, requested role, expected status). Expected values are literals
+# derived from the policy table, not computed from ROLE_HIERARCHY — a test that
+# recomputed the rule from the same dict would pass whatever the dict said.
+CEILING_MATRIX = [
+    (Role.OWNER, Role.CO_OWNER, 200),
+    (Role.OWNER, Role.ADMIN, 200),
+    (Role.OWNER, Role.MEMBER, 200),
+    (Role.OWNER, Role.GUEST, 200),
+    (Role.CO_OWNER, Role.ADMIN, 200),
+    (Role.CO_OWNER, Role.MEMBER, 200),
+    (Role.CO_OWNER, Role.GUEST, 200),
+    (Role.CO_OWNER, Role.CO_OWNER, 403),
+    (Role.ADMIN, Role.MEMBER, 200),
+    (Role.ADMIN, Role.GUEST, 200),
+    (Role.ADMIN, Role.ADMIN, 403),
+    (Role.ADMIN, Role.CO_OWNER, 403),
+]
+
+
+@pytest.mark.parametrize("caller_role,requested,expected", CEILING_MATRIX)
+def test_ceiling_matrix_on_member_role_patch(
+    client, db_session, caller_role, requested, expected
+):
+    """Nobody may hand out a role equal to or above their own rank."""
+    owner_id = _mk_user(db_session, "ceil-owner").id
+    ws = Workspace(name="Ceiling", slug=f"ceil-{caller_role.value}-{requested.value}")
+    db_session.add(ws)
+    db_session.flush()
+    db_session.add(
+        WorkspaceMembership(workspace_id=ws.id, user_id=owner_id, role=Role.OWNER.value)
+    )
+    caller = _mk_user(db_session, f"caller-{caller_role.value}")
+    db_session.add(
+        WorkspaceMembership(workspace_id=ws.id, user_id=caller.id, role=caller_role.value)
+    )
+    target = _mk_user(db_session, f"target-{caller_role.value}-{requested.value}")
+    db_session.add(
+        WorkspaceMembership(workspace_id=ws.id, user_id=target.id, role=Role.MEMBER.value)
+    )
+    db_session.commit()
+
+    as_user(client, caller.id)
+    resp = client.patch(
+        f"/workspaces/{ws.id}/members/{target.id}", json={"role": requested.value}
+    )
+    assert resp.status_code == expected, resp.text
+    db_session.expire_all()
+    persisted = (
+        db_session.query(WorkspaceMembership)
+        .filter_by(workspace_id=ws.id, user_id=target.id)
+        .first()
+        .role
+    )
+    if expected == 403:
+        assert persisted == Role.MEMBER.value, f"refused grant still persisted: {persisted}"
+    else:
+        assert persisted == requested.value
+
+
+@pytest.mark.parametrize("caller_role,requested,expected", CEILING_MATRIX)
+def test_ceiling_matrix_on_invite_creation(
+    client, db_session, caller_role, requested, expected
+):
+    """The same rule governs the role an invitation carries."""
+    ws = Workspace(name="Invite ceiling", slug=f"inv-ceil-{caller_role.value}-{requested.value}")
+    db_session.add(ws)
+    db_session.flush()
+    owner = _mk_user(db_session, "inv-ceil-owner")
+    db_session.add(
+        WorkspaceMembership(workspace_id=ws.id, user_id=owner.id, role=Role.OWNER.value)
+    )
+    caller = _mk_user(db_session, f"inv-caller-{caller_role.value}")
+    db_session.add(
+        WorkspaceMembership(workspace_id=ws.id, user_id=caller.id, role=caller_role.value)
+    )
+    db_session.commit()
+
+    as_user(client, caller.id)
+    resp = client.post(
+        f"/workspaces/{ws.id}/invites",
+        json={"email": f"inv-{requested.value}@example.com", "role": requested.value},
+    )
+    if expected == 403:
+        assert resp.status_code == 403, resp.text
+        db_session.expire_all()
+        pending = (
+            db_session.query(models.WorkspaceInvite)
+            .filter_by(workspace_id=ws.id)
+            .count()
+        )
+        assert pending == 0, "a refused invite was written anyway"
+    else:
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["role"] == requested.value
+
+
+def test_only_the_owner_can_transfer_ownership(client, db_session):
+    """`co-owner` is not the legal owner: transfer-ownership stays owner-only."""
+    ws = Workspace(name="Transfer", slug="transfer-co-owner")
+    db_session.add(ws)
+    db_session.flush()
+    owner = _mk_user(db_session, "t-owner")
+    co_owner = _mk_user(db_session, "t-co")
+    other = _mk_user(db_session, "t-other")
+    for uid, role in ((owner.id, Role.OWNER), (co_owner.id, Role.CO_OWNER), (other.id, Role.MEMBER)):
+        db_session.add(
+            WorkspaceMembership(workspace_id=ws.id, user_id=uid, role=role.value)
+        )
+    db_session.commit()
+
+    as_user(client, co_owner.id)
+    resp = client.post(
+        f"/workspaces/{ws.id}/transfer-ownership", json={"user_id": other.id}
+    )
+    assert resp.status_code == 403, resp.text
+    db_session.expire_all()
+    assert (
+        db_session.query(WorkspaceMembership)
+        .filter_by(workspace_id=ws.id, user_id=owner.id)
+        .first()
+        .role
+        == Role.OWNER.value
+    )
+
+
+def test_co_owner_cannot_delete_the_workspace(client, db_session):
+    """workspace.delete maps to OWNER; one rank below is refused."""
+    ws = Workspace(name="Delete gate", slug="delete-co-owner")
+    db_session.add(ws)
+    db_session.flush()
+    owner = _mk_user(db_session, "del-owner")
+    co_owner = _mk_user(db_session, "del-co")
+    for uid, role in ((owner.id, Role.OWNER), (co_owner.id, Role.CO_OWNER)):
+        db_session.add(
+            WorkspaceMembership(workspace_id=ws.id, user_id=uid, role=role.value)
+        )
+    db_session.commit()
+
+    as_user(client, co_owner.id)
+    resp = client.delete(f"/workspaces/{ws.id}")
+    assert resp.status_code == 403, resp.text
+    assert db_session.get(Workspace, ws.id) is not None

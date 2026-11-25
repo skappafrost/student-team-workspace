@@ -274,6 +274,54 @@ def test_unread_only_reflects_new_notifications(client, db_session):
     assert unread[0]["read"] is False
 
 
+def test_mark_all_read_marks_every_own_notification(client, db_session):
+    """POST /notifications/mark-all-read flips every unread row of the caller.
+
+    The frontend button (notification-list.tsx) posts here; before this
+    route existed the proxy handler answered 405 and the button was dead.
+    """
+    ws = _setup_workspace(client, db_session)
+    _invite_member(client, db_session, ws["id"], "alice", display_name="Alice")
+    channel = _make_channel(client, ws["id"])
+
+    as_user(client, "owner")
+    assert _post_message(client, channel["id"], "one @Alice").status_code == 201
+    assert _post_message(client, channel["id"], "two @Alice").status_code == 201
+    assert len(_notifications_for(client, "alice", unread_only=True)) == 2
+
+    as_user(client, "alice")
+    resp = client.post("/notifications/mark-all-read")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True}
+
+    assert _notifications_for(client, "alice", unread_only=True) == []
+    # Marking read must not delete anything.
+    assert len(_notifications_for(client, "alice")) == 2
+
+
+def test_mark_all_read_is_scoped_to_the_caller(client, db_session):
+    """One user's mark-all-read must not touch another user's unread rows."""
+    ws = _setup_workspace(client, db_session)
+    _invite_member(client, db_session, ws["id"], "alice", display_name="Alice")
+    channel = _make_channel(client, ws["id"])
+
+    as_user(client, "owner")
+    assert _post_message(client, channel["id"], "hi @Alice").status_code == 201
+    assert len(_notifications_for(client, "alice", unread_only=True)) == 1
+
+    as_user(client, "owner")
+    assert client.post("/notifications/mark-all-read").status_code == 200
+
+    # alice's row is untouched: owner never owned it.
+    assert len(_notifications_for(client, "alice", unread_only=True)) == 1
+
+
+def test_mark_all_read_requires_authentication(client, db_session):
+    """No cookie -> 401, never a silent success."""
+    client.cookies.clear()
+    assert client.post("/notifications/mark-all-read").status_code == 401
+
+
 def test_notification_shape_matches_existing_schema(client, db_session):
     """New notifications must be served through the existing NotificationOut shape."""
     ws = _setup_workspace(client, db_session)

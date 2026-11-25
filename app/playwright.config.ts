@@ -8,6 +8,23 @@ const BACKEND_URL = process.env.STW_BACKEND_URL ?? 'http://localhost:8000';
 // live backend they would only be proving that Next can serve HTML.
 const BACKEND_PY = process.platform === 'win32' ? '.venv\\Scripts\\python.exe' : '.venv/bin/python';
 
+/**
+ * The database the started server must open.
+ *
+ * Set explicitly rather than inherited, because the default is the bug this
+ * removes: with no `DATABASE_URL` the app falls back to `sqlite:///./stw.db`
+ * (`backend/config.py:21`) while CI migrates a *different* file
+ * (`.github/workflows/ci.yml`, "Prepare backend database"), and `backend/app.py:107`
+ * then `create_all`s whatever schema it needs. The migration step looked like a
+ * gate and was not one: a migration that fails outright still left Playwright
+ * green.
+ *
+ * In CI this resolves to the migrated `ci_e2e.db`. On a dev machine it points
+ * e2e at its own file instead of writing fixtures into the developer's `stw.db`;
+ * override with `DATABASE_URL` to test against a real dev database.
+ */
+const E2E_DATABASE_URL = process.env.DATABASE_URL ?? 'sqlite:///./ci_e2e.db';
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
@@ -37,7 +54,7 @@ export default defineConfig({
     {
       command: `${BACKEND_PY} -m uvicorn app:app --port ${new URL(BACKEND_URL).port}`,
       cwd: '../backend',
-      env: { ENVIRONMENT: 'dev' },
+      env: { ENVIRONMENT: 'dev', DATABASE_URL: E2E_DATABASE_URL },
       url: `${BACKEND_URL}/health`,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI
